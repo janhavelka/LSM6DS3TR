@@ -1,0 +1,51 @@
+{
+  "name": "LSM6DS3TR",
+  "version": "1.0.0",
+  "description": "Production-grade LSM6DS3TR-C IMU driver (3D accelerometer + 3D gyroscope).",
+  "keywords": [
+    "lsm6ds3tr",
+    "imu",
+    "accelerometer",
+    "gyroscope",
+    "sensor",
+    "i2c",
+    "esp32",
+    "esp32-s2",
+    "esp32-s3",
+    "arduino",
+    "platformio",
+    "non-blocking"
+  ],
+  "authors": [
+    {
+      "name": "Thymos Solution s.r.o",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz"
+    },
+    {
+      "name": "Jan Havelka",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz",
+      "maintainer": true
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/janhavelka/LSM6DS3TR.git"
+  },
+  "license": "MIT",
+  "homepage": "https://www.thymos.cz",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "headers": [
+    "LSM6DS3TR/LSM6DS3TR.h"
+  ],
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src"
+  }
+}
