@@ -1,23 +1,63 @@
-# LSM6DS3TR-C IMU Driver Library
+# LSM6DS3TR-C Driver Library
 
-Production-grade LSM6DS3TR-C 6-axis IMU I2C driver for ESP32-S2 / ESP32-S3 (Arduino framework, PlatformIO).
+Production-grade LSM6DS3TR-C 6-axis IMU driver for ESP32-S2 / ESP32-S3 using the Arduino framework and PlatformIO.
 
-## Features
+## Overview
 
-- **Injected I2C transport** — no Wire dependency in library code
-- **4-state health tracking** — UNINIT → READY → DEGRADED → OFFLINE
-- **Manual recovery** via `recover()` — application controls retry strategy
-- **Blocking direct-read API** and non-blocking measurement via `tick()`
-- **Burst read** of all 14 sensor bytes in a single I2C transaction
-- **Raw-to-physics conversion** — g, dps, °C
-- **Runtime reconfiguration** of ODR and full-scale
-- **Software reset** with bounded polling
-- **Zero heap allocation** in steady state
-- **No logging** in library code
+This library follows the same managed synchronous pattern used by the stronger I2C libraries in this workspace:
+
+- injected I2C transport, no direct `Wire` dependency in library code
+- explicit `Status` return values on every fallible operation
+- 4-state health tracking: `UNINIT`, `READY`, `DEGRADED`, `OFFLINE`
+- deterministic library behavior with bounded polling only
+- blocking register and sample reads, plus a tick-driven non-blocking measurement path
+- no steady-state heap allocation and no logging inside the library
+
+The implementation is cross-checked against the repository's device documentation:
+
+- [LSM6DS3TR_imu_implementation_manual.md](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/LSM6DS3TR_imu_implementation_manual.md)
+- [docs/datasheet_LSM6DS3TR-C.pdf](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/docs/datasheet_LSM6DS3TR-C.pdf)
+- [docs/application_note.pdf](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/docs/application_note.pdf)
+
+## Managed Feature Coverage
+
+The managed API covers the most practical runtime features of the chip:
+
+- WHO_AM_I probe and chip ID verification
+- accelerometer full-scale: `+/-2g`, `+/-4g`, `+/-8g`, `+/-16g`
+- gyroscope full-scale: `+/-125`, `+/-250`, `+/-500`, `+/-1000`, `+/-2000 dps`
+- accelerometer and gyroscope ODR selection
+- accelerometer and gyroscope power-mode selection
+- gyro sleep enable
+- accelerometer LPF2, slope/high-pass, and low-pass-on-6D controls
+- gyroscope LPF1, HPF enable, and HPF mode controls
+- timestamp enable, high-resolution mode, read, and reset
+- pedometer, significant motion, tilt, and wrist tilt enable
+- step counter read/reset and step timestamp read
+- accelerometer user offsets and offset weight selection
+- FIFO configuration, status readout, and FIFO word reads
+- raw sample reads, converted sample helpers, and tick-driven async measurement
+- direct single-register and block register access for advanced diagnostics
+- source register reads for wake-up, tap, 6D, embedded function, and wrist-tilt status
+
+Advanced interrupt routing, threshold tuning, tap/wake/free-fall configuration, and sensor-hub flows remain available through the raw register APIs and the CLI register commands rather than dedicated managed wrappers.
+
+## Important Runtime Rules
+
+The driver enforces several device constraints from the datasheet and application note:
+
+- accelerometer `1.6 Hz` is allowed only in `LOW_POWER_NORMAL`
+- accelerometer `LOW_POWER_NORMAL` supports only `POWER_DOWN`, `1.6`, `12.5`, `26`, `52`, `104`, and `208 Hz`
+- gyroscope `LOW_POWER_NORMAL` supports only `POWER_DOWN`, `12.5`, `26`, `52`, `104`, and `208 Hz`
+- gyroscope `1.6 Hz` is rejected
+- embedded functions require accelerometer ODR `>= 26 Hz`
+- timestamp requires at least one active sensor
+- FIFO configuration requires BDU enabled
+- async combined measurements require BDU and matching active accel/gyro ODR
 
 ## Installation
 
-### PlatformIO (recommended)
+### PlatformIO
 
 ```ini
 lib_deps =
@@ -26,7 +66,7 @@ lib_deps =
 
 ### Manual
 
-Copy `include/LSM6DS3TR/` and `src/` into your project.
+Copy [include/LSM6DS3TR](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR) and [src](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/src) into your project.
 
 ## Quick Start
 
@@ -34,38 +74,41 @@ Copy `include/LSM6DS3TR/` and `src/` into your project.
 #include <Wire.h>
 #include "LSM6DS3TR/LSM6DS3TR.h"
 
-// --- Transport callbacks (map Wire errors → LSM6DS3TR::Status) ---
 LSM6DS3TR::Status myWrite(uint8_t addr, const uint8_t* data, size_t len,
                           uint32_t timeoutMs, void* user) {
   auto* wire = static_cast<TwoWire*>(user);
   wire->beginTransmission(addr);
   wire->write(data, len);
-  uint8_t err = wire->endTransmission(true);
-  if (err == 0) return LSM6DS3TR::Status::Ok();
-  if (err == 2) return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_ADDR,
-                                                  "NACK on address");
-  return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "Wire error",
-                                   static_cast<int32_t>(err));
+  const uint8_t rc = wire->endTransmission(true);
+  if (rc == 0) return LSM6DS3TR::Status::Ok();
+  if (rc == 2) return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_ADDR, "addr nack", rc);
+  if (rc == 3) return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_DATA, "data nack", rc);
+  if (rc == 4) return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_BUS, "bus error", rc);
+  if (rc == 5) return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_TIMEOUT, "timeout", rc);
+  return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "wire error", rc);
 }
 
-LSM6DS3TR::Status myWriteRead(uint8_t addr, const uint8_t* wData, size_t wLen,
-                               uint8_t* rData, size_t rLen,
-                               uint32_t timeoutMs, void* user) {
+LSM6DS3TR::Status myWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
+                              uint8_t* rx, size_t rxLen, uint32_t timeoutMs, void* user) {
   auto* wire = static_cast<TwoWire*>(user);
   wire->beginTransmission(addr);
-  wire->write(wData, wLen);
-  if (wire->endTransmission(false) != 0)
-    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "Write phase failed");
-  size_t got = wire->requestFrom(addr, rLen);
-  if (got != rLen)
-    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "Short read");
-  for (size_t i = 0; i < rLen; ++i) rData[i] = wire->read();
+  wire->write(tx, txLen);
+  if (wire->endTransmission(false) != 0) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "write phase failed");
+  }
+  if (wire->requestFrom(addr, static_cast<uint8_t>(rxLen)) != rxLen) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "short read");
+  }
+  for (size_t i = 0; i < rxLen; ++i) {
+    rx[i] = static_cast<uint8_t>(wire->read());
+  }
   return LSM6DS3TR::Status::Ok();
 }
 
-uint32_t myNowMs(void*) { return millis(); }
+uint32_t myNowMs(void*) {
+  return millis();
+}
 
-// --- Setup & Loop ---
 LSM6DS3TR::LSM6DS3TR imu;
 
 void setup() {
@@ -73,18 +116,20 @@ void setup() {
   Wire.setClock(400000);
 
   LSM6DS3TR::Config cfg;
-  cfg.i2cWrite     = myWrite;
+  cfg.i2cWrite = myWrite;
   cfg.i2cWriteRead = myWriteRead;
-  cfg.i2cUser      = &Wire;
-  cfg.nowMs        = myNowMs;
-  cfg.i2cAddress   = 0x6A;       // SA0 = GND
+  cfg.i2cUser = &Wire;
+  cfg.nowMs = myNowMs;
+  cfg.i2cAddress = 0x6A;
   cfg.odrXl = LSM6DS3TR::Odr::HZ_104;
-  cfg.odrG  = LSM6DS3TR::Odr::HZ_104;
-  cfg.fsXl  = LSM6DS3TR::AccelFs::G_2;
-  cfg.fsG   = LSM6DS3TR::GyroFs::DPS_250;
+  cfg.odrG = LSM6DS3TR::Odr::HZ_104;
+  cfg.fsXl = LSM6DS3TR::AccelFs::G_2;
+  cfg.fsG = LSM6DS3TR::GyroFs::DPS_250;
 
-  LSM6DS3TR::Status st = imu.begin(cfg);
-  if (!st.ok()) { /* handle error */ }
+  const LSM6DS3TR::Status st = imu.begin(cfg);
+  if (!st.ok()) {
+    // handle error
+  }
 }
 
 void loop() {
@@ -92,185 +137,87 @@ void loop() {
 
   LSM6DS3TR::RawMeasurement raw;
   if (imu.readAllRaw(raw).ok()) {
-    LSM6DS3TR::Axes accel = imu.convertAccel(raw.accel);   // g
-    LSM6DS3TR::Axes gyro  = imu.convertGyro(raw.gyro);     // dps
-    float tempC           = imu.convertTemperature(raw.temperature);
+    const LSM6DS3TR::Axes accel = imu.convertAccel(raw.accel);
+    const LSM6DS3TR::Axes gyro = imu.convertGyro(raw.gyro);
+    const float tempC = imu.convertTemperature(raw.temperature);
+    (void)accel;
+    (void)gyro;
+    (void)tempC;
   }
 }
 ```
 
-## Architecture
+## CLI Example
 
-### Driver State Machine
+The main example is [examples/01_basic_bringup_cli/main.cpp](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/examples/01_basic_bringup_cli/main.cpp). It exposes:
 
-```
-begin() success    any I2C failure    failures >= threshold
-  ─────────────> READY ──────────> DEGRADED ──────────> OFFLINE
-                   ^                  │                    │
-                   └──────────────────┘────────────────────┘
-                       success (recover or normal op)
+- probe, recover, health, version, and I2C bus scan commands
+- raw and scaled sample reads
+- full managed configuration coverage for ODR, full-scale, power modes, filters, timestamp, embedded functions, offsets, and FIFO
+- register read, write, and dump commands for advanced tuning
+- source-register inspection commands
+- async stress and mixed-operation stress commands
+- hardware self-test flow for accelerometer and gyroscope
 
-  end() -> UNINIT (from any state)
-```
+Representative commands:
 
-### Transport Wrapper Layers
-
-```
-Public API (readAllRaw, setAccelOdr, etc.)
-    │
-Register helpers (readRegs, writeRegs)
-    │
-TRACKED wrappers (_i2cWriteReadTracked, _i2cWriteTracked)
-    │  ← _updateHealth() called here ONLY
-RAW wrappers (_i2cWriteReadRaw, _i2cWriteRaw)
-    │
-Transport callbacks (Config::i2cWrite, i2cWriteRead)
-```
-
-## API Reference
-
-### Lifecycle
-
-| Method | Description |
-|--------|-------------|
-| `begin(config)` | Initialize driver, validate config, read WHO_AM_I, configure device |
-| `tick(nowMs)` | Process pending measurement requests |
-| `end()` | Shutdown, power down sensors, reset state |
-
-### Measurement
-
-| Method | Description |
-|--------|-------------|
-| `readAllRaw(out)` | Blocking burst read of temp + gyro + accel (14 bytes) |
-| `readAccelRaw(out)` | Blocking read of accelerometer only (6 bytes) |
-| `readGyroRaw(out)` | Blocking read of gyroscope only (6 bytes) |
-| `readTemperatureRaw(out)` | Blocking read of temperature (2 bytes) |
-| `requestMeasurement()` | Start non-blocking measurement (returns IN_PROGRESS) |
-| `getMeasurement(out)` | Get converted measurement after tick() completes |
-| `convertAccel(raw)` | Raw → g conversion |
-| `convertGyro(raw)` | Raw → dps conversion |
-| `convertTemperature(raw)` | Raw → °C conversion |
-
-### Configuration
-
-| Method | Description |
-|--------|-------------|
-| `setAccelOdr(odr)` | Set accelerometer output data rate |
-| `setGyroOdr(odr)` | Set gyroscope output data rate |
-| `setAccelFs(fs)` | Set accelerometer full-scale |
-| `setGyroFs(fs)` | Set gyroscope full-scale |
-| `softReset()` | Reset device registers, re-apply config |
-
-### Health & Diagnostics
-
-| Method | Description |
-|--------|-------------|
-| `state()` | Current DriverState (UNINIT/READY/DEGRADED/OFFLINE) |
-| `isOnline()` | true if READY or DEGRADED |
-| `probe()` | Raw WHO_AM_I check (no health tracking) |
-| `recover()` | Tracked WHO_AM_I check + config re-apply |
-| `lastError()` | Most recent error Status |
-| `consecutiveFailures()` | Failures since last success |
-| `totalSuccess()` / `totalFailures()` | Lifetime counters |
-
-### Health Monitoring Example
-
-```cpp
-if (imu.state() == LSM6DS3TR::DriverState::OFFLINE) {
-  LSM6DS3TR::Status st = imu.recover();
-  if (st.ok()) {
-    // Back online
-  }
-}
-
-// Query health stats
-Serial.printf("State: %d, Consecutive failures: %u, Total OK: %lu\n",
-              static_cast<int>(imu.state()),
-              imu.consecutiveFailures(),
-              static_cast<unsigned long>(imu.totalSuccess()));
+```text
+probe
+cfg
+odrxl 104
+gpm lpn
+ts 1
+pedo 1
+offset -4 7 12
+fifo_mode cont
+fifo_odr 104
+fifo_read 8
+rreg 0x10
+wreg 0x58 0x8E
+dump 0x10 32
+selftest
 ```
 
-## Sensor Specifications
+## Example Helpers
 
-### Accelerometer
+Files under [examples/common](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/examples/common) are example-only glue, not part of the library API:
 
-| Full-Scale | Sensitivity | ODR Range |
-|------------|-------------|-----------|
-| ±2 g | 0.061 mg/LSB | 1.6 Hz – 6.66 kHz |
-| ±4 g | 0.122 mg/LSB | 12.5 Hz – 6.66 kHz |
-| ±8 g | 0.244 mg/LSB | 12.5 Hz – 6.66 kHz |
-| ±16 g | 0.488 mg/LSB | 12.5 Hz – 6.66 kHz |
+- `BoardConfig.h`
+- `BuildConfig.h`
+- `Log.h`
+- `I2cTransport.h`
+- `TransportAdapter.h`
+- `BusDiag.h`
+- `CliShell.h`
+- `HealthView.h`
+- `I2cScanner.h`
+- `CommandHandler.h`
 
-### Gyroscope
+## Direct Register Access
 
-| Full-Scale | Sensitivity | ODR Range |
-|------------|-------------|-----------|
-| ±125 dps | 4.375 mdps/LSB | 12.5 Hz – 6.66 kHz |
-| ±250 dps | 8.75 mdps/LSB | 12.5 Hz – 6.66 kHz |
-| ±500 dps | 17.50 mdps/LSB | 12.5 Hz – 6.66 kHz |
-| ±1000 dps | 35 mdps/LSB | 12.5 Hz – 6.66 kHz |
-| ±2000 dps | 70 mdps/LSB | 12.5 Hz – 6.66 kHz |
+Use the raw register APIs when you need chip features that are intentionally left at register level:
 
-### Temperature
+- `readRegisterValue()`
+- `writeRegisterValue()`
+- `readRegisterBlock()`
+- `refreshCachedConfig()`
 
-- Resolution: 256 LSB/°C
-- Offset: 0 LSB at 25°C
-- Formula: `T(°C) = raw / 256 + 25`
+This is the intended path for interrupt routing, threshold registers, advanced tap/wake/free-fall setup, and sensor-hub experimentation.
 
-## I2C Address
-
-| SA0 Pin | Address |
-|---------|---------|
-| GND | 0x6A |
-| VDD | 0x6B |
-
-## Examples
-
-| Directory | Description |
-|-----------|-------------|
-| `01_basic_bringup_cli/` | Interactive CLI for testing all driver features |
-
-### Example Helpers (`examples/common/`)
-
-Not part of the library. These simulate project-level glue and keep examples self-contained:
-
-| File | Description |
-|------|-------------|
-| `BoardConfig.h` | Board-specific pin/frequency defaults (SDA=8, SCL=9, 400 kHz) |
-| `BuildConfig.h` | Compile-time LOG_LEVEL configuration |
-| `Log.h` | Serial logging macros (LOGE/LOGW/LOGI/LOGD/LOGT) |
-| `I2cTransport.h` | Wire-based I2C transport adapter with error mapping |
-| `I2cScanner.h` | I2C bus scanner utility |
-
-## Behavioral Contracts
-
-1. **Threading model:** Single-threaded; call `tick()` and all API from the same context. Not ISR-safe.
-2. **Timing model:** `tick()` does bounded work (one status read + one burst read max)
-3. **Resource ownership:** I2C bus owned by application; library uses injected callbacks
-4. **Memory behavior:** All allocation in `begin()`; zero allocation in steady state
-5. **Error handling:** All fallible APIs return `Status`; check with `st.ok()`
-
-## Building & Testing
+## Building And Validation
 
 ```bash
-# ESP32-S3 build
-pio run -e esp32s3dev
-
-# ESP32-S2 build
-pio run -e esp32s2dev
-
-# Native host tests
 pio test -e native
+pio run -e esp32s3dev
+pio run -e esp32s2dev
+python tools/check_core_timing_guard.py
+python tools/check_cli_contract.py
 ```
 
-## Documentation
+## Repository Notes
 
-- [CHANGELOG.md](CHANGELOG.md) — Release history
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Contribution guidelines
-- [docs/datasheet_LSM6DS3TR-C.pdf](docs/datasheet_LSM6DS3TR-C.pdf) — LSM6DS3TR-C datasheet (DocID030071)
-- [docs/application_note.pdf](docs/application_note.pdf) — Application note AN5130
-- `docs/design_tips/` — Calibration, tilt, dead reckoning, noise analysis design tips
-
-## License
-
-MIT License. See [LICENSE](LICENSE).
+- Public headers live in [include/LSM6DS3TR](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR)
+- Implementation lives in [src/LSM6DS3TR.cpp](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/src/LSM6DS3TR.cpp)
+- Version metadata is generated into [include/LSM6DS3TR/Version.h](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR/Version.h) from [library.json](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/library.json)
+- `examples/common` is not installed as part of the library
+- The library never configures I2C pins or owns the bus

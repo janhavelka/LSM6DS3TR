@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Managed support for timestamp control, step counter access, embedded motion features, FIFO configuration, source-register reads, and direct register/block access
+- Common example helper headers and repo contract checks aligned with the stronger sibling I2C libraries in this workspace
+- Native coverage for power-mode validation, timestamp and FIFO helpers, direct-register refresh behavior, command-table corrections, and failed-begin recovery
+
+### Changed
+
+- Standardized the bringup CLI around the workspace family conventions with broader command coverage, version output, register dump/read/write commands, mixed stress testing, and real hardware self-test flow
+- Expanded README coverage to document managed features, CLI usage, validation rules, and the managed-vs-raw split for advanced chip functionality
+
+### Fixed
+
+- Enforced documented accelerometer and gyroscope ODR versus power-mode constraints
+- Enforced documented dependencies for timestamp, embedded functions, FIFO use, and async combined measurements
+- Fixed `recover()` after a failed `begin()` by copying stored config before retrying initialization
+- Fixed `REG_SENSOR_SYNC_TIME_FRAME` register address to `0x02`
+- Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
+
 ## [1.0.0] - 2026-04-04
 
 ### Added
