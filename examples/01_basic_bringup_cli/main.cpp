@@ -53,6 +53,7 @@ struct StressStats {
 
 LSM6DS3TR::LSM6DS3TR device;
 bool verboseMode = false;
+bool continuousMode = false;
 bool pendingRead = false;
 uint32_t pendingStartMs = 0;
 int stressRemaining = 0;
@@ -642,6 +643,7 @@ void finishStressStats() {
 void cancelPending() {
   pendingRead = false;
   stressRemaining = 0;
+  continuousMode = false;
   if (stressStats.active) {
     stressStats.active = false;
     Serial.println("  Cancelled.");
@@ -904,12 +906,13 @@ void printHelp() {
   helpItem("steps", "Read step counter and step timestamp");
   helpItem("fifo", "Read FIFO config and status");
   helpItem("fifo_read [N]", "Read up to N FIFO words");
+  helpItem("stream", "Toggle continuous output (prints at sensor ODR)");
 
   helpSection("Core Config");
-  helpItem("odrxl [hz]", "Get/set accel ODR");
-  helpItem("odrg [hz]", "Get/set gyro ODR");
-  helpItem("fsxl [g]", "Get/set accel full-scale");
-  helpItem("fsg [dps]", "Get/set gyro full-scale");
+  helpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  helpItem("odrg [hz]", "Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  helpItem("fsxl [g]", "Get/set accel full-scale (2|4|8|16)");
+  helpItem("fsg [dps]", "Get/set gyro full-scale (125|250|500|1000|2000)");
   helpItem("apm [hp|lpn]", "Get/set accel power mode");
   helpItem("gpm [hp|lpn]", "Get/set gyro power mode");
   helpItem("gsleep [0|1]", "Get/set gyro sleep");
@@ -944,6 +947,14 @@ void printHelp() {
   helpItem("fifo_step [0|1]", "Get/set FIFO step/timestamp storage");
   helpItem("fifo_stop [0|1]", "Get/set FIFO stop on threshold");
   helpItem("fifo_high [0|1]", "Get/set FIFO high-byte-only mode");
+
+  helpSection("Calibration");
+  helpItem("cal [N]", "Calibrate accel+gyro at rest (Z-up, default 100 samples)");
+  helpItem("calxl [N]", "Calibrate accel only (Z-up, default 100 samples)");
+  helpItem("calg [N]", "Calibrate gyro only (stationary, default 100 samples)");
+  helpItem("biasxl [x y z]", "Get/set accel software bias (g)");
+  helpItem("biasg [x y z]", "Get/set gyro software bias (dps)");
+  helpItem("biasreset", "Clear all software biases to zero");
 
   helpSection("Diagnostics");
   helpItem("probe", "Probe WHO_AM_I without health tracking");
@@ -1102,6 +1113,69 @@ void processCommand(const String& line) {
     else st = device.readWristTiltStatus(value);
     if (!st.ok()) { printStatus(st); return; }
     printRegisterValue(cmd.c_str(), value);
+  } else if (cmd == "stream") {
+    continuousMode = !continuousMode;
+    Serial.printf("  Continuous output: %s\n", continuousMode ? "ON (send 'stream' to stop)" : "OFF");
+  } else if (cmd == "cal" || cmd == "calxl" || cmd == "calg") {
+    int sampleCount = 100;
+    if (count >= 2) {
+      long parsed = 0;
+      if (!parseSignedToken(tokens[1], 1, 10000, parsed)) {
+        Serial.println("  Expected sample count [1..10000]");
+        return;
+      }
+      sampleCount = static_cast<int>(parsed);
+    }
+    const bool doAccel = (cmd == "cal" || cmd == "calxl");
+    const bool doGyro = (cmd == "cal" || cmd == "calg");
+    Serial.printf("  Calibrating with %d samples (keep sensor still, Z-up)...\n", sampleCount);
+    if (doAccel) {
+      LSM6DS3TR::Axes bias;
+      const LSM6DS3TR::Status st = device.captureAccelBias(static_cast<uint16_t>(sampleCount), bias);
+      if (!st.ok()) { printStatus(st); return; }
+      Serial.printf("  Accel bias: x=%.6f y=%.6f z=%.6f g\n", bias.x, bias.y, bias.z);
+    }
+    if (doGyro) {
+      LSM6DS3TR::Axes bias;
+      const LSM6DS3TR::Status st = device.captureGyroBias(static_cast<uint16_t>(sampleCount), bias);
+      if (!st.ok()) { printStatus(st); return; }
+      Serial.printf("  Gyro bias:  x=%.4f y=%.4f z=%.4f dps\n", bias.x, bias.y, bias.z);
+    }
+    Serial.println("  Calibration applied.");
+  } else if (cmd == "biasxl" || cmd == "biasg") {
+    if (count == 1) {
+      // Show current bias
+      const LSM6DS3TR::Axes bias = (cmd == "biasxl") ? device.accelBias() : device.gyroBias();
+      const char* unit = (cmd == "biasxl") ? "g" : "dps";
+      Serial.printf("  %s bias: x=%.6f y=%.6f z=%.6f %s\n",
+                    (cmd == "biasxl") ? "Accel" : "Gyro", bias.x, bias.y, bias.z, unit);
+    } else if (count == 4) {
+      // Set bias manually
+      char* endX = nullptr;
+      char* endY = nullptr;
+      char* endZ = nullptr;
+      const float x = strtof(tokens[1].c_str(), &endX);
+      const float y = strtof(tokens[2].c_str(), &endY);
+      const float z = strtof(tokens[3].c_str(), &endZ);
+      if (*endX != '\0' || *endY != '\0' || *endZ != '\0') {
+        Serial.printf("  Expected %s <x> <y> <z>\n", cmd.c_str());
+        return;
+      }
+      const LSM6DS3TR::Axes bias = {x, y, z};
+      if (cmd == "biasxl") {
+        device.setAccelBias(bias);
+        Serial.printf("  Accel bias set: x=%.6f y=%.6f z=%.6f g\n", x, y, z);
+      } else {
+        device.setGyroBias(bias);
+        Serial.printf("  Gyro bias set: x=%.6f y=%.6f z=%.6f dps\n", x, y, z);
+      }
+    } else {
+      Serial.printf("  Expected %s or %s <x> <y> <z>\n", cmd.c_str(), cmd.c_str());
+    }
+  } else if (cmd == "biasreset") {
+    device.setAccelBias({0.0f, 0.0f, 0.0f});
+    device.setGyroBias({0.0f, 0.0f, 0.0f});
+    Serial.println("  All software biases cleared.");
   } else if (cmd == "selftest") {
     selfTest();
   } else if (cmd == "stress") {
@@ -1468,6 +1542,18 @@ void loop() {
   }
 
   handleMeasurementReady();
+
+  if (continuousMode) {
+    uint8_t statusReg = 0;
+    if (device.readStatusReg(statusReg).ok() &&
+        (statusReg & LSM6DS3TR::cmd::MASK_XLDA)) {
+      LSM6DS3TR::Measurement m;
+      const LSM6DS3TR::Status st = performReadBlocking(m);
+      if (st.ok()) {
+        printMeasurement(m);
+      }
+    }
+  }
 
   String line;
   if (cli_shell::readLine(line)) {

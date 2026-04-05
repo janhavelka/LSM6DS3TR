@@ -134,6 +134,72 @@ public:
   Axes convertGyro(const RawAxes& raw) const;
   float convertTemperature(int16_t raw) const;
 
+  /// @name Software Bias Calibration
+  /// @brief Software-level bias compensation for accel and gyro.
+  ///
+  /// The accelerometer hardware offset registers (0x73–0x75) provide coarse
+  /// offset correction at 8-bit resolution.  Software bias extends this with
+  /// float-precision offsets subtracted during conversion.
+  ///
+  /// The gyroscope has NO hardware offset registers on the LSM6DS3TR-C;
+  /// software bias is the only way to remove zero-rate offset.
+  ///
+  /// Bias values are stored in physical units (g for accel, dps for gyro).
+  /// They are automatically subtracted in getMeasurement() and can be
+  /// manually applied via correctAccel() / correctGyro().
+  /// The low-level convertAccel() / convertGyro() are NOT affected.
+  /// @{
+
+  /// Set accelerometer software bias (g).  Subtracted from converted values.
+  void setAccelBias(const Axes& bias);
+
+  /// Get current accelerometer software bias (g).
+  Axes accelBias() const;
+
+  /// Set gyroscope software bias (dps).  Subtracted from converted values.
+  void setGyroBias(const Axes& bias);
+
+  /// Get current gyroscope software bias (dps).
+  Axes gyroBias() const;
+
+  /// Subtract current accel bias from a converted Axes value in-place.
+  void correctAccel(Axes& inout) const;
+
+  /// Subtract current gyro bias from a converted Axes value in-place.
+  void correctGyro(Axes& inout) const;
+
+  /// Capture accelerometer bias by averaging @p samples readings at rest.
+  ///
+  /// The sensor must be stationary with Z-axis pointing up (+1 g on Z).
+  /// Blocks for approximately (samples / accelODR) seconds.
+  /// Each sample waits for the XLDA data-ready flag with a bounded deadline.
+  ///
+  /// On success the bias is auto-applied (equivalent to setAccelBias(out))
+  /// and returned via @p out so the caller can persist it.
+  ///
+  /// @param samples  Number of readings to average (1–10000).
+  /// @param out      Computed bias in g.
+  /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
+  ///         NOT_INITIALIZED / I2C errors propagated from reads.
+  Status captureAccelBias(uint16_t samples, Axes& out);
+
+  /// Capture gyroscope zero-rate bias by averaging @p samples readings at rest.
+  ///
+  /// The sensor must be stationary (no rotation).
+  /// Blocks for approximately (samples / gyroODR) seconds.
+  /// Each sample waits for the GDA data-ready flag with a bounded deadline.
+  ///
+  /// On success the bias is auto-applied (equivalent to setGyroBias(out))
+  /// and returned via @p out so the caller can persist it.
+  ///
+  /// @param samples  Number of readings to average (1–10000).
+  /// @param out      Computed bias in dps.
+  /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
+  ///         NOT_INITIALIZED / I2C errors propagated from reads.
+  Status captureGyroBias(uint16_t samples, Axes& out);
+
+  /// @}
+
   // Core configuration
   Status setAccelOdr(Odr odr);
   Status setGyroOdr(Odr odr);
@@ -279,6 +345,10 @@ private:
   AccelOffsetWeight _accelOffsetWeight = AccelOffsetWeight::MG_1;
   AccelUserOffset _accelUserOffset;
   FifoConfig _fifoConfig;
+
+  // Software bias calibration
+  Axes _accelBias;
+  Axes _gyroBias;
 };
 
 }  // namespace LSM6DS3TR

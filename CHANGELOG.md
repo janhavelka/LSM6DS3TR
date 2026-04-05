@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Managed support for timestamp control, step counter access, embedded motion features, FIFO configuration, source-register reads, and direct register/block access
+- Software bias calibration API: `setAccelBias()` / `setGyroBias()` / `accelBias()` / `gyroBias()` for float-precision offset correction in physical units
+- Blocking at-rest bias capture: `captureAccelBias(samples)` (Z-up, 1-point) and `captureGyroBias(samples)` (stationary, zero-rate-level) with data-ready polling and bounded deadlines
+- In-place bias correction helpers: `correctAccel()` / `correctGyro()` for manual conversion workflows
+- Automatic bias correction in `getMeasurement()` — corrected values are returned when bias is non-zero
+- CLI calibration commands: `cal`, `calxl`, `calg`, `biasxl`, `biasg`, `biasreset`
+- CLI `stream` command for continuous output at sensor ODR (toggled on/off)
 - Common example helper headers and repo contract checks aligned with the stronger sibling I2C libraries in this workspace
 - Native coverage for power-mode validation, timestamp and FIFO helpers, direct-register refresh behavior, command-table corrections, and failed-begin recovery
 

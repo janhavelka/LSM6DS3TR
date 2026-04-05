@@ -35,6 +35,8 @@ The managed API covers the most practical runtime features of the chip:
 - pedometer, significant motion, tilt, and wrist tilt enable
 - step counter read/reset and step timestamp read
 - accelerometer user offsets and offset weight selection
+- software bias calibration for accel (1-point, Z-up) and gyro (zero-rate-level) with at-rest capture
+- automatic bias correction in `getMeasurement()`; manual helpers `correctAccel()` / `correctGyro()`
 - FIFO configuration, status readout, and FIFO word reads
 - raw sample reads, converted sample helpers, and tick-driven async measurement
 - direct single-register and block register access for advanced diagnostics
@@ -158,6 +160,7 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](/c:/Users/Honza/Doc
 - source-register inspection commands
 - async stress and mixed-operation stress commands
 - hardware self-test flow for accelerometer and gyroscope
+- software bias calibration and continuous streaming mode
 
 Representative commands:
 
@@ -169,6 +172,10 @@ gpm lpn
 ts 1
 pedo 1
 offset -4 7 12
+cal 200
+biasxl
+biasg
+stream
 fifo_mode cont
 fifo_odr 104
 fifo_read 8
