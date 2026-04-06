@@ -592,8 +592,17 @@ void test_get_measurement_applies_manual_bias() {
   LSM6DS3TR::LSM6DS3TR dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
-  dev.setAccelBias({0.100f, 0.200f, 0.300f});
-  dev.setGyroBias({1.25f, -0.50f, 0.25f});
+  Axes accelBias;
+  accelBias.x = 0.100f;
+  accelBias.y = 0.200f;
+  accelBias.z = 0.300f;
+  dev.setAccelBias(accelBias);
+
+  Axes gyroBias;
+  gyroBias.x = 1.25f;
+  gyroBias.y = -0.50f;
+  gyroBias.z = 0.25f;
+  dev.setGyroBias(gyroBias);
 
   Status st = dev.requestMeasurement();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
@@ -806,7 +815,10 @@ void test_offset_and_filter_helpers_work() {
 
   const AccelFilterConfig accelFilter = {true, true, true};
   const GyroFilterConfig gyroFilter = {true, true, GyroHpfMode::HZ_2_07};
-  const AccelUserOffset offset = {-4, 7, 12};
+  AccelUserOffset offset;
+  offset.x = -4;
+  offset.y = 7;
+  offset.z = 12;
 
   TEST_ASSERT_TRUE(dev.setAccelPowerMode(AccelPowerMode::LOW_POWER_NORMAL).ok());
   TEST_ASSERT_TRUE(dev.setGyroPowerMode(GyroPowerMode::LOW_POWER_NORMAL).ok());

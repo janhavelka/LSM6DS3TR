@@ -1167,7 +1167,10 @@ void processCommand(const String& line) {
         Serial.printf("  Expected %s <x> <y> <z>\n", cmd.c_str());
         return;
       }
-      const LSM6DS3TR::Axes bias = {x, y, z};
+      LSM6DS3TR::Axes bias;
+      bias.x = x;
+      bias.y = y;
+      bias.z = z;
       if (cmd == "biasxl") {
         device.setAccelBias(bias);
         Serial.printf("  Accel bias set: x=%.6f y=%.6f z=%.6f g\n", x, y, z);
@@ -1179,8 +1182,12 @@ void processCommand(const String& line) {
       Serial.printf("  Expected %s or %s <x> <y> <z>\n", cmd.c_str(), cmd.c_str());
     }
   } else if (cmd == "biasreset") {
-    device.setAccelBias({0.0f, 0.0f, 0.0f});
-    device.setGyroBias({0.0f, 0.0f, 0.0f});
+    LSM6DS3TR::Axes zeroBias;
+    zeroBias.x = 0.0f;
+    zeroBias.y = 0.0f;
+    zeroBias.z = 0.0f;
+    device.setAccelBias(zeroBias);
+    device.setGyroBias(zeroBias);
     Serial.println("  All software biases cleared.");
   } else if (cmd == "selftest") {
     selfTest();
@@ -1390,7 +1397,10 @@ void processCommand(const String& line) {
           Serial.println("  Expected offset <x> <y> <z>");
           return;
         }
-        const LSM6DS3TR::AccelUserOffset offset = {static_cast<int8_t>(x), static_cast<int8_t>(y), static_cast<int8_t>(z)};
+        LSM6DS3TR::AccelUserOffset offset;
+        offset.x = static_cast<int8_t>(x);
+        offset.y = static_cast<int8_t>(y);
+        offset.z = static_cast<int8_t>(z);
         st = device.setAccelUserOffset(offset);
       } else {
         Serial.println("  Expected offset or offset <x> <y> <z>");
