@@ -461,15 +461,17 @@ void printDriverHealth() {
 }
 
 void printMeasurement(const LSM6DS3TR::Measurement& m) {
-  Serial.printf("Accel: x=%.3f y=%.3f z=%.3f g\n", m.accel.x, m.accel.y, m.accel.z);
-  Serial.printf("Gyro:  x=%.2f y=%.2f z=%.2f dps\n", m.gyro.x, m.gyro.y, m.gyro.z);
-  Serial.printf("Temp:  %.2f C\n", m.temperatureC);
+  Serial.printf("Sample: ax=%+.3f ay=%+.3f az=%+.3f g | gx=%+.2f gy=%+.2f gz=%+.2f dps | t=%.2f C\n",
+                m.accel.x, m.accel.y, m.accel.z,
+                m.gyro.x, m.gyro.y, m.gyro.z,
+                m.temperatureC);
 }
 
 void printRawMeasurement(const LSM6DS3TR::RawMeasurement& raw) {
-  Serial.printf("Raw Accel: x=%d y=%d z=%d\n", raw.accel.x, raw.accel.y, raw.accel.z);
-  Serial.printf("Raw Gyro:  x=%d y=%d z=%d\n", raw.gyro.x, raw.gyro.y, raw.gyro.z);
-  Serial.printf("Raw Temp:  %d\n", raw.temperature);
+  Serial.printf("Raw: ax=%d ay=%d az=%d | gx=%d gy=%d gz=%d | t=%d\n",
+                raw.accel.x, raw.accel.y, raw.accel.z,
+                raw.gyro.x, raw.gyro.y, raw.gyro.z,
+                raw.temperature);
 }
 
 void printHexDump(uint8_t startReg, const uint8_t* data, size_t len) {
@@ -576,6 +578,8 @@ LSM6DS3TR::Status performReadBlocking(LSM6DS3TR::Measurement& out) {
   out.accel = device.convertAccel(raw.accel);
   out.gyro = device.convertGyro(raw.gyro);
   out.temperatureC = device.convertTemperature(raw.temperature);
+  device.correctAccel(out.accel);
+  device.correctGyro(out.gyro);
   return LSM6DS3TR::Status::Ok();
 }
 
@@ -906,7 +910,7 @@ void printHelp() {
   helpItem("steps", "Read step counter and step timestamp");
   helpItem("fifo", "Read FIFO config and status");
   helpItem("fifo_read [N]", "Read up to N FIFO words");
-  helpItem("stream", "Toggle continuous output (prints at sensor ODR)");
+  helpItem("stream", "Toggle continuous output (one line per sample at sensor ODR)");
 
   helpSection("Core Config");
   helpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
@@ -1022,13 +1026,15 @@ void processCommand(const String& line) {
     LSM6DS3TR::RawAxes raw;
     const LSM6DS3TR::Status st = device.readAccelRaw(raw);
     if (!st.ok()) { printStatus(st); return; }
-    const LSM6DS3TR::Axes accel = device.convertAccel(raw);
+    LSM6DS3TR::Axes accel = device.convertAccel(raw);
+    device.correctAccel(accel);
     Serial.printf("Accel: x=%.3f y=%.3f z=%.3f g (raw: %d %d %d)\n", accel.x, accel.y, accel.z, raw.x, raw.y, raw.z);
   } else if (cmd == "gyro") {
     LSM6DS3TR::RawAxes raw;
     const LSM6DS3TR::Status st = device.readGyroRaw(raw);
     if (!st.ok()) { printStatus(st); return; }
-    const LSM6DS3TR::Axes gyro = device.convertGyro(raw);
+    LSM6DS3TR::Axes gyro = device.convertGyro(raw);
+    device.correctGyro(gyro);
     Serial.printf("Gyro: x=%.2f y=%.2f z=%.2f dps (raw: %d %d %d)\n", gyro.x, gyro.y, gyro.z, raw.x, raw.y, raw.z);
   } else if (cmd == "temp") {
     int16_t raw = 0;

@@ -48,22 +48,32 @@ struct FakeBus {
   }
 
   void setMeasurementData() {
-    regs[cmd::REG_OUT_TEMP_L] = 0x00;
-    regs[cmd::REG_OUT_TEMP_H] = 0x19;
+    setTemperatureRaw(6400);
+    setGyroRaw(1000, -500, 0);
+    setAccelRaw(16384, 0, 0);
+  }
 
-    regs[cmd::REG_OUTX_L_G] = 0xE8;
-    regs[cmd::REG_OUTX_H_G] = 0x03;
-    regs[cmd::REG_OUTY_L_G] = 0x0C;
-    regs[cmd::REG_OUTY_H_G] = 0xFE;
-    regs[cmd::REG_OUTZ_L_G] = 0x00;
-    regs[cmd::REG_OUTZ_H_G] = 0x00;
+  void setTemperatureRaw(int16_t value) {
+    regs[cmd::REG_OUT_TEMP_L] = static_cast<uint8_t>(value & 0xFFu);
+    regs[cmd::REG_OUT_TEMP_H] = static_cast<uint8_t>((static_cast<uint16_t>(value) >> 8) & 0xFFu);
+  }
 
-    regs[cmd::REG_OUTX_L_XL] = 0x00;
-    regs[cmd::REG_OUTX_H_XL] = 0x40;
-    regs[cmd::REG_OUTY_L_XL] = 0x00;
-    regs[cmd::REG_OUTY_H_XL] = 0x00;
-    regs[cmd::REG_OUTZ_L_XL] = 0x00;
-    regs[cmd::REG_OUTZ_H_XL] = 0x00;
+  void setGyroRaw(int16_t x, int16_t y, int16_t z) {
+    regs[cmd::REG_OUTX_L_G] = static_cast<uint8_t>(x & 0xFF);
+    regs[cmd::REG_OUTX_H_G] = static_cast<uint8_t>((static_cast<uint16_t>(x) >> 8) & 0xFFu);
+    regs[cmd::REG_OUTY_L_G] = static_cast<uint8_t>(y & 0xFF);
+    regs[cmd::REG_OUTY_H_G] = static_cast<uint8_t>((static_cast<uint16_t>(y) >> 8) & 0xFFu);
+    regs[cmd::REG_OUTZ_L_G] = static_cast<uint8_t>(z & 0xFF);
+    regs[cmd::REG_OUTZ_H_G] = static_cast<uint8_t>((static_cast<uint16_t>(z) >> 8) & 0xFFu);
+  }
+
+  void setAccelRaw(int16_t x, int16_t y, int16_t z) {
+    regs[cmd::REG_OUTX_L_XL] = static_cast<uint8_t>(x & 0xFF);
+    regs[cmd::REG_OUTX_H_XL] = static_cast<uint8_t>((static_cast<uint16_t>(x) >> 8) & 0xFFu);
+    regs[cmd::REG_OUTY_L_XL] = static_cast<uint8_t>(y & 0xFF);
+    regs[cmd::REG_OUTY_H_XL] = static_cast<uint8_t>((static_cast<uint16_t>(y) >> 8) & 0xFFu);
+    regs[cmd::REG_OUTZ_L_XL] = static_cast<uint8_t>(z & 0xFF);
+    regs[cmd::REG_OUTZ_H_XL] = static_cast<uint8_t>((static_cast<uint16_t>(z) >> 8) & 0xFFu);
   }
 
   void setTimestamp(uint32_t value) {
@@ -577,6 +587,91 @@ void test_get_raw_measurement_after_read() {
   TEST_ASSERT_EQUAL_INT16(16384, raw.accel.x);
 }
 
+void test_get_measurement_applies_manual_bias() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  dev.setAccelBias({0.100f, 0.200f, 0.300f});
+  dev.setGyroBias({1.25f, -0.50f, 0.25f});
+
+  Status st = dev.requestMeasurement();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+
+  dev.tick(bus.nowMs);
+  TEST_ASSERT_TRUE(dev.measurementReady());
+
+  Measurement m{};
+  st = dev.getMeasurement(m);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.899f, m.accel.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.200f, m.accel.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.300f, m.accel.z);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 7.50f, m.gyro.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -3.875f, m.gyro.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.25f, m.gyro.z);
+}
+
+void test_capture_accel_bias_auto_applies_to_measurements() {
+  FakeBus bus;
+  bus.setAccelRaw(0, 0, 16384);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  Axes bias{};
+  Status st = dev.captureAccelBias(4, bias);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, bias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, bias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, bias.z);
+
+  const Axes storedBias = dev.accelBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.x, storedBias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.y, storedBias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.z, storedBias.z);
+
+  st = dev.requestMeasurement();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+  dev.tick(bus.nowMs);
+
+  Measurement m{};
+  st = dev.getMeasurement(m);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.accel.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.accel.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, m.accel.z);
+}
+
+void test_capture_gyro_bias_auto_applies_to_measurements() {
+  FakeBus bus;
+  bus.setGyroRaw(100, -50, 25);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  Axes bias{};
+  Status st = dev.captureGyroBias(4, bias);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.875f, bias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.4375f, bias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.21875f, bias.z);
+
+  const Axes storedBias = dev.gyroBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.x, storedBias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.y, storedBias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, bias.z, storedBias.z);
+
+  st = dev.requestMeasurement();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+  dev.tick(bus.nowMs);
+
+  Measurement m{};
+  st = dev.getMeasurement(m);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.gyro.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.gyro.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.gyro.z);
+}
+
 // ==========================================================================
 // Configuration and feature tests
 // ==========================================================================
@@ -1044,6 +1139,9 @@ int main() {
   RUN_TEST(test_request_measurement_rejects_mismatched_active_odr);
   RUN_TEST(test_measurement_not_ready_before_tick);
   RUN_TEST(test_get_raw_measurement_after_read);
+  RUN_TEST(test_get_measurement_applies_manual_bias);
+  RUN_TEST(test_capture_accel_bias_auto_applies_to_measurements);
+  RUN_TEST(test_capture_gyro_bias_auto_applies_to_measurements);
 
   RUN_TEST(test_set_accel_odr);
   RUN_TEST(test_set_gyro_fs);

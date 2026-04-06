@@ -34,6 +34,13 @@ MANDATORY_COMMANDS = [
     "verbose",
     "stress",
     "stress_mix",
+    "stream",
+    "cal",
+    "calxl",
+    "calg",
+    "biasxl",
+    "biasg",
+    "biasreset",
     "version",
 ]
 
