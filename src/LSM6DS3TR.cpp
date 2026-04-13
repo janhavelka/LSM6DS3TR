@@ -46,6 +46,24 @@ static bool isActiveOdr(Odr odr) {
   return odr != Odr::POWER_DOWN;
 }
 
+/// Approximate ODR sample interval in milliseconds (for calibration timeouts).
+static uint32_t odrIntervalMs(Odr odr) {
+  switch (odr) {
+    case Odr::HZ_1_6:  return 625;
+    case Odr::HZ_12_5: return 80;
+    case Odr::HZ_26:   return 39;
+    case Odr::HZ_52:   return 20;
+    case Odr::HZ_104:  return 10;
+    case Odr::HZ_208:  return 5;
+    case Odr::HZ_416:  return 3;
+    case Odr::HZ_833:  return 2;
+    case Odr::HZ_1660: return 1;
+    case Odr::HZ_3330: return 1;
+    case Odr::HZ_6660: return 1;
+    default:           return 0;
+  }
+}
+
 static bool isAccelOdrSupportedInLowPowerNormal(Odr odr) {
   switch (odr) {
     case Odr::POWER_DOWN:
@@ -214,6 +232,8 @@ Status LSM6DS3TR::begin(const Config& config) {
   _accelOffsetWeight = AccelOffsetWeight::MG_1;
   _accelUserOffset = AccelUserOffset{};
   _fifoConfig = FifoConfig{};
+  _accelBias = Axes{};
+  _gyroBias = Axes{};
 
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
@@ -397,6 +417,8 @@ Status LSM6DS3TR::getMeasurement(Measurement& out) {
   out.accel = convertAccel(_rawMeasurement.accel);
   out.gyro = convertGyro(_rawMeasurement.gyro);
   out.temperatureC = convertTemperature(_rawMeasurement.temperature);
+  correctAccel(out.accel);
+  correctGyro(out.gyro);
   _measurementReady = false;
   return Status::Ok();
 }
@@ -1632,6 +1654,138 @@ uint8_t LSM6DS3TR::_buildFifoCtrl4() const {
 uint8_t LSM6DS3TR::_buildFifoCtrl5() const {
   return static_cast<uint8_t>((static_cast<uint8_t>(_fifoConfig.odr) << cmd::BIT_ODR_FIFO) |
                               static_cast<uint8_t>(_fifoConfig.mode));
+}
+
+// ---------------------------------------------------------------------------
+// Software bias calibration
+// ---------------------------------------------------------------------------
+
+void LSM6DS3TR::setAccelBias(const Axes& bias) {
+  _accelBias = bias;
+}
+
+Axes LSM6DS3TR::accelBias() const {
+  return _accelBias;
+}
+
+void LSM6DS3TR::setGyroBias(const Axes& bias) {
+  _gyroBias = bias;
+}
+
+Axes LSM6DS3TR::gyroBias() const {
+  return _gyroBias;
+}
+
+void LSM6DS3TR::correctAccel(Axes& inout) const {
+  inout.x -= _accelBias.x;
+  inout.y -= _accelBias.y;
+  inout.z -= _accelBias.z;
+}
+
+void LSM6DS3TR::correctGyro(Axes& inout) const {
+  inout.x -= _gyroBias.x;
+  inout.y -= _gyroBias.y;
+  inout.z -= _gyroBias.z;
+}
+
+Status LSM6DS3TR::captureAccelBias(uint16_t samples, Axes& out) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (samples == 0 || samples > 10000) {
+    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
+  }
+  if (!isActiveOdr(_config.odrXl)) {
+    return Status::Error(Err::INVALID_PARAM, "Accel ODR is POWER_DOWN");
+  }
+
+  const uint32_t sampleTimeoutMs = odrIntervalMs(_config.odrXl) * 3 + 100;
+  double sumX = 0.0;
+  double sumY = 0.0;
+  double sumZ = 0.0;
+
+  for (uint16_t i = 0; i < samples; ++i) {
+    // Wait for fresh accel data
+    const uint32_t deadline = _nowMs() + sampleTimeoutMs;
+    bool ready = false;
+    while (!ready) {
+      Status st = isAccelDataReady(ready);
+      if (!st.ok()) {
+        return st;
+      }
+      if (!ready && _nowMs() >= deadline) {
+        return Status::Error(Err::TIMEOUT, "Accel data-ready timeout during calibration");
+      }
+    }
+
+    RawAxes raw;
+    Status st = readAccelRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    const Axes phys = convertAccel(raw);
+    sumX += static_cast<double>(phys.x);
+    sumY += static_cast<double>(phys.y);
+    sumZ += static_cast<double>(phys.z);
+  }
+
+  const double n = static_cast<double>(samples);
+  // Bias = average reading - expected value (Z-up: expect X=0, Y=0, Z=+1g)
+  out.x = static_cast<float>(sumX / n);
+  out.y = static_cast<float>(sumY / n);
+  out.z = static_cast<float>(sumZ / n - 1.0);
+  _accelBias = out;
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::captureGyroBias(uint16_t samples, Axes& out) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (samples == 0 || samples > 10000) {
+    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
+  }
+  if (!isActiveOdr(_config.odrG)) {
+    return Status::Error(Err::INVALID_PARAM, "Gyro ODR is POWER_DOWN");
+  }
+
+  const uint32_t sampleTimeoutMs = odrIntervalMs(_config.odrG) * 3 + 100;
+  double sumX = 0.0;
+  double sumY = 0.0;
+  double sumZ = 0.0;
+
+  for (uint16_t i = 0; i < samples; ++i) {
+    // Wait for fresh gyro data
+    const uint32_t deadline = _nowMs() + sampleTimeoutMs;
+    bool ready = false;
+    while (!ready) {
+      Status st = isGyroDataReady(ready);
+      if (!st.ok()) {
+        return st;
+      }
+      if (!ready && _nowMs() >= deadline) {
+        return Status::Error(Err::TIMEOUT, "Gyro data-ready timeout during calibration");
+      }
+    }
+
+    RawAxes raw;
+    Status st = readGyroRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    const Axes phys = convertGyro(raw);
+    sumX += static_cast<double>(phys.x);
+    sumY += static_cast<double>(phys.y);
+    sumZ += static_cast<double>(phys.z);
+  }
+
+  const double n = static_cast<double>(samples);
+  // Bias = average reading (at rest, expected 0 on all axes)
+  out.x = static_cast<float>(sumX / n);
+  out.y = static_cast<float>(sumY / n);
+  out.z = static_cast<float>(sumZ / n);
+  _gyroBias = out;
+  return Status::Ok();
 }
 
 }  // namespace LSM6DS3TR

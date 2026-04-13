@@ -15,9 +15,9 @@ This library follows the same managed synchronous pattern used by the stronger I
 
 The implementation is cross-checked against the repository's device documentation:
 
-- [LSM6DS3TR_imu_implementation_manual.md](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/LSM6DS3TR_imu_implementation_manual.md)
-- [docs/datasheet_LSM6DS3TR-C.pdf](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/docs/datasheet_LSM6DS3TR-C.pdf)
-- [docs/application_note.pdf](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/docs/application_note.pdf)
+- [LSM6DS3TR_imu_implementation_manual.md](LSM6DS3TR_imu_implementation_manual.md)
+- [docs/datasheet_LSM6DS3TR-C.pdf](docs/datasheet_LSM6DS3TR-C.pdf)
+- [docs/application_note.pdf](docs/application_note.pdf)
 
 ## Managed Feature Coverage
 
@@ -35,6 +35,8 @@ The managed API covers the most practical runtime features of the chip:
 - pedometer, significant motion, tilt, and wrist tilt enable
 - step counter read/reset and step timestamp read
 - accelerometer user offsets and offset weight selection
+- software bias calibration for accel (1-point, Z-up) and gyro (zero-rate-level) with at-rest capture
+- automatic bias correction in `getMeasurement()`; manual helpers `correctAccel()` / `correctGyro()`
 - FIFO configuration, status readout, and FIFO word reads
 - raw sample reads, converted sample helpers, and tick-driven async measurement
 - direct single-register and block register access for advanced diagnostics
@@ -66,7 +68,7 @@ lib_deps =
 
 ### Manual
 
-Copy [include/LSM6DS3TR](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR) and [src](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/src) into your project.
+Copy [include/LSM6DS3TR](include/LSM6DS3TR) and [src](src) into your project.
 
 ## Quick Start
 
@@ -149,7 +151,7 @@ void loop() {
 
 ## CLI Example
 
-The main example is [examples/01_basic_bringup_cli/main.cpp](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/examples/01_basic_bringup_cli/main.cpp). It exposes:
+The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_bringup_cli/main.cpp). It exposes:
 
 - probe, recover, health, version, and I2C bus scan commands
 - raw and scaled sample reads
@@ -158,6 +160,8 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](/c:/Users/Honza/Doc
 - source-register inspection commands
 - async stress and mixed-operation stress commands
 - hardware self-test flow for accelerometer and gyroscope
+- software bias calibration and continuous streaming mode with one line per sample
+- converted CLI sample reads (`read`, `accel`, `gyro`, `stream`) that respect the currently configured software bias values
 
 Representative commands:
 
@@ -169,6 +173,10 @@ gpm lpn
 ts 1
 pedo 1
 offset -4 7 12
+cal 200
+biasxl
+biasg
+stream
 fifo_mode cont
 fifo_odr 104
 fifo_read 8
@@ -180,7 +188,7 @@ selftest
 
 ## Example Helpers
 
-Files under [examples/common](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/examples/common) are example-only glue, not part of the library API:
+Files under [examples/common](examples/common) are example-only glue, not part of the library API:
 
 - `BoardConfig.h`
 - `BuildConfig.h`
@@ -216,8 +224,8 @@ python tools/check_cli_contract.py
 
 ## Repository Notes
 
-- Public headers live in [include/LSM6DS3TR](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR)
-- Implementation lives in [src/LSM6DS3TR.cpp](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/src/LSM6DS3TR.cpp)
-- Version metadata is generated into [include/LSM6DS3TR/Version.h](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/include/LSM6DS3TR/Version.h) from [library.json](/c:/Users/Honza/Documents/Projects/LSM6DS3TR/library.json)
+- Public headers live in [include/LSM6DS3TR](include/LSM6DS3TR)
+- Implementation lives in [src/LSM6DS3TR.cpp](src/LSM6DS3TR.cpp)
+- Version metadata is generated into [include/LSM6DS3TR/Version.h](include/LSM6DS3TR/Version.h) from [library.json](library.json)
 - `examples/common` is not installed as part of the library
 - The library never configures I2C pins or owns the bus
