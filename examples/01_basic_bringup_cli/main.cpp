@@ -57,6 +57,7 @@ bool pendingRead = false;
 uint32_t pendingStartMs = 0;
 int stressRemaining = 0;
 StressStats stressStats;
+static constexpr uint32_t STRESS_PROGRESS_UPDATES = 10U;
 
 constexpr int DEFAULT_STRESS_COUNT = 100;
 constexpr int MAX_STRESS_COUNT = 100000;
@@ -127,6 +128,37 @@ const char* successRateColor(float pct) {
   if (pct >= 99.9f) return LOG_COLOR_GREEN;
   if (pct >= 80.0f) return LOG_COLOR_YELLOW;
   return LOG_COLOR_RED;
+}
+
+uint32_t stressProgressStep(uint32_t total) {
+  if (total == 0U) {
+    return 0U;
+  }
+  const uint32_t step = total / STRESS_PROGRESS_UPDATES;
+  return (step == 0U) ? 1U : step;
+}
+
+void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, uint32_t failCount) {
+  if (completed == 0U || total == 0U) {
+    return;
+  }
+  const uint32_t step = stressProgressStep(total);
+  if (step == 0U || (completed != total && (completed % step) != 0U)) {
+    return;
+  }
+  const float pct = (100.0f * static_cast<float>(completed)) / static_cast<float>(total);
+  Serial.printf("  Progress: %lu/%lu (%s%.0f%%%s, ok=%s%lu%s, fail=%s%lu%s)\n",
+                static_cast<unsigned long>(completed),
+                static_cast<unsigned long>(total),
+                successRateColor(pct),
+                pct,
+                LOG_COLOR_RESET,
+                goodIfNonZeroColor(okCount),
+                static_cast<unsigned long>(okCount),
+                LOG_COLOR_RESET,
+                goodIfZeroColor(failCount),
+                static_cast<unsigned long>(failCount),
+                LOG_COLOR_RESET);
 }
 
 const char* odrToStr(LSM6DS3TR::Odr odr) {
@@ -624,15 +656,45 @@ void finishStressStats() {
   stressStats.active = false;
   stressStats.endMs = millis();
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
+  const float successPct =
+      (stressStats.attempts > 0)
+          ? (100.0f * static_cast<float>(stressStats.success) /
+             static_cast<float>(stressStats.attempts))
+          : 0.0f;
   Serial.println("=== Stress Summary ===");
   Serial.printf("  Target:   %d\n", stressStats.target);
   Serial.printf("  Attempts: %d\n", stressStats.attempts);
-  Serial.printf("  Success:  %d\n", stressStats.success);
-  Serial.printf("  Errors:   %lu\n", static_cast<unsigned long>(stressStats.errors));
+  Serial.printf("  Success:  %s%d%s\n",
+                goodIfNonZeroColor(static_cast<uint32_t>(stressStats.success)),
+                stressStats.success,
+                LOG_COLOR_RESET);
+  Serial.printf("  Errors:   %s%lu%s\n",
+                goodIfZeroColor(stressStats.errors),
+                static_cast<unsigned long>(stressStats.errors),
+                LOG_COLOR_RESET);
+  Serial.printf("  Success rate: %s%.2f%%%s\n",
+                successRateColor(successPct),
+                successPct,
+                LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
   if (durationMs > 0U) {
     Serial.printf("  Rate:     %.2f samples/s\n",
                   1000.0f * static_cast<float>(stressStats.attempts) / static_cast<float>(durationMs));
+  }
+  if (stressStats.success > 0 && stressStats.hasSample) {
+    const float avgTemp = static_cast<float>(stressStats.sumTemp / stressStats.success);
+    Serial.printf("  Temp C:   min=%.2f avg=%.2f max=%.2f\n",
+                  stressStats.minTemp,
+                  avgTemp,
+                  stressStats.maxTemp);
+    Serial.printf("  Accel g:  x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                  stressStats.minAx, stressStats.maxAx,
+                  stressStats.minAy, stressStats.maxAy,
+                  stressStats.minAz, stressStats.maxAz);
+    Serial.printf("  Gyro dps: x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                  stressStats.minGx, stressStats.maxGx,
+                  stressStats.minGy, stressStats.maxGy,
+                  stressStats.minGz, stressStats.maxGz);
   }
   if (!stressStats.lastError.ok()) {
     printStatus(stressStats.lastError);
@@ -669,6 +731,10 @@ void handleMeasurementReady() {
       noteStressError(st);
       stressStats.attempts++;
       stressRemaining--;
+      printStressProgress(static_cast<uint32_t>(stressStats.attempts),
+                          static_cast<uint32_t>(stressStats.target),
+                          static_cast<uint32_t>(stressStats.success),
+                          stressStats.errors);
       if (stressRemaining == 0) {
         finishStressStats();
       }
@@ -681,6 +747,10 @@ void handleMeasurementReady() {
     updateStressStats(m);
     stressStats.attempts++;
     stressRemaining--;
+    printStressProgress(static_cast<uint32_t>(stressStats.attempts),
+                        static_cast<uint32_t>(stressStats.target),
+                        static_cast<uint32_t>(stressStats.success),
+                        stressStats.errors);
     if (stressRemaining == 0) {
       finishStressStats();
     }
@@ -839,12 +909,28 @@ void selfTest() {
 void runStressMix(int count) {
   if (count <= 0) count = DEFAULT_STRESS_COUNT;
   if (count > MAX_STRESS_COUNT) count = MAX_STRESS_COUNT;
-  uint32_t errors = 0;
+  struct OpStats {
+    const char* name;
+    uint32_t ok;
+    uint32_t fail;
+  };
+  OpStats stats[] = {
+      {"readAllRaw", 0, 0},
+      {"readAccel", 0, 0},
+      {"readGyro", 0, 0},
+      {"readTemp", 0, 0},
+      {"readStatus", 0, 0},
+      {"readWhoAmI", 0, 0},
+  };
+  static constexpr int OP_COUNT = static_cast<int>(sizeof(stats) / sizeof(stats[0]));
+  uint32_t okTotal = 0;
+  uint32_t failTotal = 0;
   LSM6DS3TR::Status lastError = LSM6DS3TR::Status::Ok();
   const uint32_t startMs = millis();
   for (int i = 0; i < count; ++i) {
     LSM6DS3TR::Status st = LSM6DS3TR::Status::Ok();
-    switch (i % 6) {
+    const int op = i % OP_COUNT;
+    switch (op) {
       case 0: { LSM6DS3TR::RawMeasurement raw; st = device.readAllRaw(raw); break; }
       case 1: { LSM6DS3TR::RawAxes raw; st = device.readAccelRaw(raw); break; }
       case 2: { LSM6DS3TR::RawAxes raw; st = device.readGyroRaw(raw); break; }
@@ -852,16 +938,51 @@ void runStressMix(int count) {
       case 4: { uint8_t statusReg = 0; st = device.readStatusReg(statusReg); break; }
       default: { uint8_t id = 0; st = device.readWhoAmI(id); break; }
     }
-    if (!st.ok()) {
-      errors++;
+    if (st.ok()) {
+      stats[op].ok++;
+      okTotal++;
+    } else {
+      stats[op].fail++;
+      failTotal++;
       lastError = st;
     }
+    printStressProgress(static_cast<uint32_t>(i + 1),
+                        static_cast<uint32_t>(count),
+                        okTotal,
+                        failTotal);
   }
   const uint32_t durationMs = millis() - startMs;
+  const float successPct =
+      (count > 0) ? (100.0f * static_cast<float>(okTotal) / static_cast<float>(count)) : 0.0f;
   Serial.println("=== Mixed Stress Summary ===");
-  Serial.printf("  Iterations: %d\n", count);
-  Serial.printf("  Errors:     %lu\n", static_cast<unsigned long>(errors));
-  Serial.printf("  Duration:   %lu ms\n", static_cast<unsigned long>(durationMs));
+  Serial.printf("  Total: %d\n", count);
+  Serial.printf("  Success: %s%lu%s\n",
+                goodIfNonZeroColor(okTotal),
+                static_cast<unsigned long>(okTotal),
+                LOG_COLOR_RESET);
+  Serial.printf("  Errors: %s%lu%s\n",
+                goodIfZeroColor(failTotal),
+                static_cast<unsigned long>(failTotal),
+                LOG_COLOR_RESET);
+  Serial.printf("  Success rate: %s%.2f%%%s\n",
+                successRateColor(successPct),
+                successPct,
+                LOG_COLOR_RESET);
+  Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
+  if (durationMs > 0U) {
+    Serial.printf("  Rate: %.2f ops/s\n",
+                  (1000.0f * static_cast<float>(count)) / static_cast<float>(durationMs));
+  }
+  for (int i = 0; i < OP_COUNT; ++i) {
+    Serial.printf("  %-10s %sok=%lu%s %sfail=%lu%s\n",
+                  stats[i].name,
+                  goodIfNonZeroColor(stats[i].ok),
+                  static_cast<unsigned long>(stats[i].ok),
+                  LOG_COLOR_RESET,
+                  goodIfZeroColor(stats[i].fail),
+                  static_cast<unsigned long>(stats[i].fail),
+                  LOG_COLOR_RESET);
+  }
   if (!lastError.ok()) {
     printStatus(lastError);
   }
@@ -1122,6 +1243,10 @@ void processCommand(const String& line) {
       noteStressError(st);
       stressStats.attempts++;
       stressRemaining--;
+      printStressProgress(static_cast<uint32_t>(stressStats.attempts),
+                          static_cast<uint32_t>(stressStats.target),
+                          static_cast<uint32_t>(stressStats.success),
+                          stressStats.errors);
       if (stressRemaining == 0) {
         finishStressStats();
       }
