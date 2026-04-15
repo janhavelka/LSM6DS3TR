@@ -28,10 +28,13 @@ struct StressStats {
   bool active = false;
   uint32_t startMs = 0;
   uint32_t endMs = 0;
+  uint32_t successBefore = 0;
+  uint32_t failBefore = 0;
   int target = 0;
   int attempts = 0;
   int success = 0;
   uint32_t errors = 0;
+  bool hasFailure = false;
   bool hasSample = false;
   float minAx = 0.0f;
   float maxAx = 0.0f;
@@ -48,6 +51,7 @@ struct StressStats {
   float minTemp = 0.0f;
   float maxTemp = 0.0f;
   double sumTemp = 0.0;
+  LSM6DS3TR::Status firstError = LSM6DS3TR::Status::Ok();
   LSM6DS3TR::Status lastError = LSM6DS3TR::Status::Ok();
 };
 
@@ -123,6 +127,10 @@ const char* goodIfZeroColor(uint32_t value) {
 
 const char* goodIfNonZeroColor(uint32_t value) {
   return (value > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
+}
+
+const char* skipCountColor(uint32_t value) {
+  return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
 }
 
 const char* successRateColor(float pct) {
@@ -619,11 +627,17 @@ void resetStressStats(int target) {
   stressStats = StressStats{};
   stressStats.active = true;
   stressStats.startMs = millis();
+  stressStats.successBefore = device.totalSuccess();
+  stressStats.failBefore = device.totalFailures();
   stressStats.target = target;
 }
 
 void noteStressError(const LSM6DS3TR::Status& st) {
   stressStats.errors++;
+  if (!stressStats.hasFailure) {
+    stressStats.firstError = st;
+    stressStats.hasFailure = true;
+  }
   stressStats.lastError = st;
 }
 
@@ -660,6 +674,8 @@ void updateStressStats(const LSM6DS3TR::Measurement& m) {
 void finishStressStats() {
   stressStats.active = false;
   stressStats.endMs = millis();
+  const uint32_t successDelta = device.totalSuccess() - stressStats.successBefore;
+  const uint32_t failDelta = device.totalFailures() - stressStats.failBefore;
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
   const float successPct =
       (stressStats.attempts > 0)
@@ -686,6 +702,13 @@ void finishStressStats() {
     Serial.printf("  Rate:     %.2f samples/s\n",
                   1000.0f * static_cast<float>(stressStats.attempts) / static_cast<float>(durationMs));
   }
+  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+                goodIfNonZeroColor(successDelta),
+                static_cast<unsigned long>(successDelta),
+                LOG_COLOR_RESET,
+                goodIfZeroColor(failDelta),
+                static_cast<unsigned long>(failDelta),
+                LOG_COLOR_RESET);
   if (stressStats.success > 0 && stressStats.hasSample) {
     const float avgTemp = static_cast<float>(stressStats.sumTemp / stressStats.success);
     Serial.printf("  Temp C:   min=%.2f avg=%.2f max=%.2f\n",
@@ -701,8 +724,13 @@ void finishStressStats() {
                   stressStats.minGy, stressStats.maxGy,
                   stressStats.minGz, stressStats.maxGz);
   }
-  if (!stressStats.lastError.ok()) {
-    printStatus(stressStats.lastError);
+  if (stressStats.hasFailure) {
+    Serial.println("  First failure:");
+    printStatus(stressStats.firstError);
+    if (stressStats.errors > 1U) {
+      Serial.println("  Last failure:");
+      printStatus(stressStats.lastError);
+    }
   }
 }
 
@@ -836,80 +864,170 @@ bool averageGyroSamples(int sampleCount, LSM6DS3TR::RawAxes& out) {
 }
 
 void selfTest() {
-  Serial.println("=== Self-Test ===");
+  struct TestStats {
+    uint32_t pass = 0;
+    uint32_t fail = 0;
+    uint32_t skip = 0;
+  } stats;
+
+  enum class SelftestOutcome : uint8_t { PASS, FAIL, SKIP };
+  auto report = [&](const char* name, SelftestOutcome outcome, const char* note) {
+    const bool passed = (outcome == SelftestOutcome::PASS);
+    const bool skipped = (outcome == SelftestOutcome::SKIP);
+    const char* color = skipped ? LOG_COLOR_YELLOW : LOG_COLOR_RESULT(passed);
+    const char* tag = skipped ? "SKIP" : (passed ? "PASS" : "FAIL");
+    Serial.printf("  [%s%s%s] %s", color, tag, LOG_COLOR_RESET, name);
+    if (note && note[0]) {
+      Serial.printf(" - %s", note);
+    }
+    Serial.println();
+    if (skipped) {
+      stats.skip++;
+    } else if (passed) {
+      stats.pass++;
+    } else {
+      stats.fail++;
+    }
+  };
+  auto reportCheck = [&](const char* name, bool passed, const char* note) {
+    report(name, passed ? SelftestOutcome::PASS : SelftestOutcome::FAIL, note);
+  };
+  auto reportSkip = [&](const char* name, const char* note) {
+    report(name, SelftestOutcome::SKIP, note);
+  };
+
+  Serial.println("=== LSM6DS3TR selftest (safe commands) ===");
+
+  const uint32_t succBefore = device.totalSuccess();
+  const uint32_t failBefore = device.totalFailures();
+  const uint8_t consBefore = device.consecutiveFailures();
+
   const LSM6DS3TR::Status probeStatus = device.probe();
-  Serial.printf("  Probe: %s%s%s\n", LOG_COLOR_RESULT(probeStatus.ok()), errToStr(probeStatus.code), LOG_COLOR_RESET);
-  if (!probeStatus.ok()) {
+  if (probeStatus.code == LSM6DS3TR::Err::NOT_INITIALIZED) {
+    reportSkip("probe responds", "driver not initialized");
+    reportSkip("remaining checks", "selftest aborted");
+    Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
+                  goodIfNonZeroColor(stats.pass), static_cast<unsigned long>(stats.pass), LOG_COLOR_RESET,
+                  goodIfZeroColor(stats.fail), static_cast<unsigned long>(stats.fail), LOG_COLOR_RESET,
+                  skipCountColor(stats.skip), static_cast<unsigned long>(stats.skip), LOG_COLOR_RESET);
     return;
   }
+
+  const bool probeHealthUnchanged =
+      device.totalSuccess() == succBefore &&
+      device.totalFailures() == failBefore &&
+      device.consecutiveFailures() == consBefore;
+  reportCheck("probe responds", probeStatus.ok(), probeStatus.ok() ? "" : errToStr(probeStatus.code));
+  reportCheck("probe no-health-side-effects", probeHealthUnchanged, "");
 
   uint8_t whoAmI = 0;
   LSM6DS3TR::Status st = device.readWhoAmI(whoAmI);
-  if (!st.ok()) {
-    printStatus(st);
-    return;
-  }
-  Serial.printf("  WHO_AM_I: 0x%02X\n", whoAmI);
+  reportCheck("readWhoAmI", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("chip id matches 0x6A",
+              st.ok() && whoAmI == LSM6DS3TR::cmd::WHO_AM_I_VALUE,
+              st.ok() ? "" : errToStr(st.code));
 
   bool accelPass = false;
   bool gyroPass = false;
+  bool accelExecuted = false;
+  bool gyroExecuted = false;
   static const uint8_t accelRegs[] = {LSM6DS3TR::cmd::REG_CTRL1_XL, LSM6DS3TR::cmd::REG_CTRL5_C, LSM6DS3TR::cmd::REG_CTRL8_XL};
   static const uint8_t gyroRegs[] = {LSM6DS3TR::cmd::REG_CTRL2_G, LSM6DS3TR::cmd::REG_CTRL5_C, LSM6DS3TR::cmd::REG_CTRL7_G};
   uint8_t accelSaved[sizeof(accelRegs)] = {};
   uint8_t gyroSaved[sizeof(gyroRegs)] = {};
 
-  if (readRegisterSnapshot(accelRegs, accelSaved, sizeof(accelRegs))) {
-    if (device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL1_XL, SELF_TEST_CTRL1_XL).ok() &&
+  const bool accelBaselineOk = readRegisterSnapshot(accelRegs, accelSaved, sizeof(accelRegs));
+  reportCheck("capture accel baseline", accelBaselineOk, accelBaselineOk ? "" : "readRegister failed");
+  if (accelBaselineOk) {
+    accelExecuted = true;
+    bool accelConfigured =
+        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL1_XL, SELF_TEST_CTRL1_XL).ok() &&
         device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL8_XL, 0x00).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok()) {
+        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok();
+    reportCheck("configure accel self-test", accelConfigured, accelConfigured ? "" : "register write failed");
+    if (accelConfigured) {
       delay(100);
       LSM6DS3TR::RawAxes nost;
       LSM6DS3TR::RawAxes test;
-      if (averageAccelSamples(SELF_TEST_SAMPLES, nost) &&
-          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_XL_POS).ok()) {
+      const bool accelBaseRead = averageAccelSamples(SELF_TEST_SAMPLES, nost);
+      reportCheck("read accel baseline", accelBaseRead, accelBaseRead ? "" : "sample read failed");
+      const bool accelStimulusOk =
+          accelBaseRead &&
+          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_XL_POS).ok();
+      reportCheck("enable accel stimulus", accelStimulusOk, accelStimulusOk ? "" : "register write failed");
+      if (accelStimulusOk) {
         delay(100);
-        if (averageAccelSamples(SELF_TEST_SAMPLES, test)) {
+        const bool accelStimulusRead = averageAccelSamples(SELF_TEST_SAMPLES, test);
+        reportCheck("read accel stimulus", accelStimulusRead, accelStimulusRead ? "" : "sample read failed");
+        if (accelStimulusRead) {
           const float dx = fabsf(static_cast<float>(test.x - nost.x)) * 0.061f;
           const float dy = fabsf(static_cast<float>(test.y - nost.y)) * 0.061f;
           const float dz = fabsf(static_cast<float>(test.z - nost.z)) * 0.061f;
           accelPass = (dx >= 90.0f && dx <= 1700.0f) &&
                       (dy >= 90.0f && dy <= 1700.0f) &&
                       (dz >= 90.0f && dz <= 1700.0f);
-          Serial.printf("  Accel delta: x=%.1f y=%.1f z=%.1f mg %s%s%s\n",
-                        dx, dy, dz, LOG_COLOR_RESULT(accelPass), accelPass ? "PASS" : "FAIL", LOG_COLOR_RESET);
+          Serial.printf("  Accel delta: x=%.1f y=%.1f z=%.1f mg\n", dx, dy, dz);
+          reportCheck("accel self-test range", accelPass, "");
         }
       }
     }
     restoreRegisterSnapshot(accelRegs, accelSaved, sizeof(accelRegs));
+    reportCheck("restore accel registers", true, "");
+  } else {
+    reportSkip("accel self-test", "baseline capture failed");
   }
 
-  if (readRegisterSnapshot(gyroRegs, gyroSaved, sizeof(gyroRegs))) {
-    if (device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL2_G, SELF_TEST_CTRL2_G).ok() &&
+  const bool gyroBaselineOk = readRegisterSnapshot(gyroRegs, gyroSaved, sizeof(gyroRegs));
+  reportCheck("capture gyro baseline", gyroBaselineOk, gyroBaselineOk ? "" : "readRegister failed");
+  if (gyroBaselineOk) {
+    gyroExecuted = true;
+    bool gyroConfigured =
+        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL2_G, SELF_TEST_CTRL2_G).ok() &&
         device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL7_G, 0x00).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok()) {
+        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok();
+    reportCheck("configure gyro self-test", gyroConfigured, gyroConfigured ? "" : "register write failed");
+    if (gyroConfigured) {
       delay(800);
       LSM6DS3TR::RawAxes nost;
       LSM6DS3TR::RawAxes test;
-      if (averageGyroSamples(SELF_TEST_SAMPLES, nost) &&
-          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_G_POS).ok()) {
+      const bool gyroBaseRead = averageGyroSamples(SELF_TEST_SAMPLES, nost);
+      reportCheck("read gyro baseline", gyroBaseRead, gyroBaseRead ? "" : "sample read failed");
+      const bool gyroStimulusOk =
+          gyroBaseRead &&
+          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_G_POS).ok();
+      reportCheck("enable gyro stimulus", gyroStimulusOk, gyroStimulusOk ? "" : "register write failed");
+      if (gyroStimulusOk) {
         delay(60);
-        if (averageGyroSamples(SELF_TEST_SAMPLES, test)) {
+        const bool gyroStimulusRead = averageGyroSamples(SELF_TEST_SAMPLES, test);
+        reportCheck("read gyro stimulus", gyroStimulusRead, gyroStimulusRead ? "" : "sample read failed");
+        if (gyroStimulusRead) {
           const float dx = fabsf(static_cast<float>(test.x - nost.x)) * 0.00875f;
           const float dy = fabsf(static_cast<float>(test.y - nost.y)) * 0.00875f;
           const float dz = fabsf(static_cast<float>(test.z - nost.z)) * 0.00875f;
           gyroPass = (dx >= 20.0f && dx <= 80.0f) &&
                      (dy >= 20.0f && dy <= 80.0f) &&
                      (dz >= 20.0f && dz <= 80.0f);
-          Serial.printf("  Gyro delta:  x=%.2f y=%.2f z=%.2f dps %s%s%s\n",
-                        dx, dy, dz, LOG_COLOR_RESULT(gyroPass), gyroPass ? "PASS" : "FAIL", LOG_COLOR_RESET);
+          Serial.printf("  Gyro delta: x=%.2f y=%.2f z=%.2f dps\n", dx, dy, dz);
+          reportCheck("gyro self-test range", gyroPass, "");
         }
       }
     }
     restoreRegisterSnapshot(gyroRegs, gyroSaved, sizeof(gyroRegs));
+    reportCheck("restore gyro registers", true, "");
+  } else {
+    reportSkip("gyro self-test", "baseline capture failed");
   }
 
-  const bool overallPass = accelPass && gyroPass;
-  Serial.printf("  Overall: %s%s%s\n", LOG_COLOR_RESULT(overallPass), overallPass ? "PASS" : "FAIL", LOG_COLOR_RESET);
+  if (accelExecuted && gyroExecuted) {
+    reportCheck("overall self-test", accelPass && gyroPass, "");
+  } else {
+    reportSkip("overall self-test", "one or more sections skipped");
+  }
+
+  Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
+                goodIfNonZeroColor(stats.pass), static_cast<unsigned long>(stats.pass), LOG_COLOR_RESET,
+                goodIfZeroColor(stats.fail), static_cast<unsigned long>(stats.fail), LOG_COLOR_RESET,
+                skipCountColor(stats.skip), static_cast<unsigned long>(stats.skip), LOG_COLOR_RESET);
 }
 
 void runStressMix(int count) {
@@ -929,8 +1047,14 @@ void runStressMix(int count) {
       {"readWhoAmI", 0, 0},
   };
   static constexpr int OP_COUNT = static_cast<int>(sizeof(stats) / sizeof(stats[0]));
+  HealthSnapshot<LSM6DS3TR::LSM6DS3TR> healthBefore;
+  healthBefore.capture(device);
+  const uint32_t successBefore = device.totalSuccess();
+  const uint32_t failBefore = device.totalFailures();
   uint32_t okTotal = 0;
   uint32_t failTotal = 0;
+  bool hasFailure = false;
+  LSM6DS3TR::Status firstError = LSM6DS3TR::Status::Ok();
   LSM6DS3TR::Status lastError = LSM6DS3TR::Status::Ok();
   const uint32_t startMs = millis();
   for (int i = 0; i < count; ++i) {
@@ -950,6 +1074,10 @@ void runStressMix(int count) {
     } else {
       stats[op].fail++;
       failTotal++;
+      if (!hasFailure) {
+        firstError = st;
+        hasFailure = true;
+      }
       lastError = st;
     }
     printStressProgress(static_cast<uint32_t>(i + 1),
@@ -960,6 +1088,10 @@ void runStressMix(int count) {
   const uint32_t durationMs = millis() - startMs;
   const float successPct =
       (count > 0) ? (100.0f * static_cast<float>(okTotal) / static_cast<float>(count)) : 0.0f;
+  const uint32_t successDelta = device.totalSuccess() - successBefore;
+  const uint32_t failDelta = device.totalFailures() - failBefore;
+  HealthSnapshot<LSM6DS3TR::LSM6DS3TR> healthAfter;
+  healthAfter.capture(device);
   Serial.println("=== Mixed Stress Summary ===");
   Serial.printf("  Total: %d\n", count);
   Serial.printf("  Success: %s%lu%s\n",
@@ -979,18 +1111,40 @@ void runStressMix(int count) {
     Serial.printf("  Rate: %.2f ops/s\n",
                   (1000.0f * static_cast<float>(count)) / static_cast<float>(durationMs));
   }
+  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+                goodIfNonZeroColor(successDelta),
+                static_cast<unsigned long>(successDelta),
+                LOG_COLOR_RESET,
+                goodIfZeroColor(failDelta),
+                static_cast<unsigned long>(failDelta),
+                LOG_COLOR_RESET);
   for (int i = 0; i < OP_COUNT; ++i) {
-    Serial.printf("  %-10s %sok=%lu%s %sfail=%lu%s\n",
+    const uint32_t opTotal = stats[i].ok + stats[i].fail;
+    const float opPct = (opTotal > 0U)
+                            ? (100.0f * static_cast<float>(stats[i].ok) /
+                               static_cast<float>(opTotal))
+                            : 0.0f;
+    Serial.printf("  %-10s %sok=%lu%s %sfail=%lu%s (%s%.1f%%%s)\n",
                   stats[i].name,
                   goodIfNonZeroColor(stats[i].ok),
                   static_cast<unsigned long>(stats[i].ok),
                   LOG_COLOR_RESET,
                   goodIfZeroColor(stats[i].fail),
                   static_cast<unsigned long>(stats[i].fail),
+                  LOG_COLOR_RESET,
+                  successRateColor(opPct),
+                  opPct,
                   LOG_COLOR_RESET);
   }
-  if (!lastError.ok()) {
-    printStatus(lastError);
+  Serial.println("  Health changes:");
+  printHealthDiff(healthBefore, healthAfter);
+  if (hasFailure) {
+    Serial.println("  First failure:");
+    printStatus(firstError);
+    if (failTotal > 1U) {
+      Serial.println("  Last failure:");
+      printStatus(lastError);
+    }
   }
 }
 
@@ -1219,9 +1373,21 @@ void processCommand(const String& line) {
       Serial.printf("  FIFO[%d] = 0x%04X\n", i, word);
     }
   } else if (cmd == "probe") {
+    HealthSnapshot<LSM6DS3TR::LSM6DS3TR> before;
+    before.capture(device);
     printStatus(device.probe());
+    HealthSnapshot<LSM6DS3TR::LSM6DS3TR> after;
+    after.capture(device);
+    Serial.println("  Health changes:");
+    printHealthDiff(before, after);
   } else if (cmd == "recover") {
+    HealthSnapshot<LSM6DS3TR::LSM6DS3TR> before;
+    before.capture(device);
     printStatus(device.recover());
+    HealthSnapshot<LSM6DS3TR::LSM6DS3TR> after;
+    after.capture(device);
+    Serial.println("  Health changes:");
+    printHealthDiff(before, after);
     printDriverHealth();
   } else if (cmd == "whoami") {
     uint8_t id = 0;
