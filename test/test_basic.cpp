@@ -25,6 +25,7 @@ struct FakeBus {
 
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
+  uint32_t failWriteCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
 
@@ -122,6 +123,10 @@ Status fakeWrite(uint8_t, const uint8_t* data, size_t len, uint32_t, void* user)
   }
   if (bus->writeErrorRemaining > 0) {
     bus->writeErrorRemaining--;
+    return bus->writeError;
+  }
+  if (bus->failWriteCall != 0u && bus->writeCalls == bus->failWriteCall) {
+    bus->failWriteCall = 0;
     return bus->writeError;
   }
 
@@ -325,6 +330,21 @@ void test_begin_rejects_gyro_833_in_low_power_normal() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
 }
 
+void test_begin_rejects_invalid_power_mode_enums() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.accelPowerMode = static_cast<AccelPowerMode>(99);
+
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+
+  cfg = makeConfig(bus);
+  cfg.gyroPowerMode = static_cast<GyroPowerMode>(99);
+  st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+}
+
 void test_begin_detects_wrong_chip_id() {
   FakeBus bus;
   bus.regs[cmd::REG_WHO_AM_I] = 0x00;
@@ -414,6 +434,26 @@ void test_recover_failure_updates_health_once() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(dev.lastError().code));
   TEST_ASSERT_EQUAL_UINT32(bus.nowMs, dev.lastErrorMs());
+}
+
+void test_recover_chip_id_mismatch_updates_health_once() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.nowMs = 2222;
+  bus.regs[cmd::REG_WHO_AM_I] = 0x00;
+  const Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CHIP_ID_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CHIP_ID_MISMATCH),
+                          static_cast<uint8_t>(dev.lastError().code));
+  TEST_ASSERT_EQUAL_INT32(0, dev.lastError().detail);
+  TEST_ASSERT_EQUAL_UINT32(2222u, dev.lastErrorMs());
 }
 
 void test_recover_success_returns_ready() {
@@ -681,6 +721,20 @@ void test_capture_gyro_bias_auto_applies_to_measurements() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, m.gyro.z);
 }
 
+void test_capture_bias_times_out_with_stalled_clock_and_no_data_ready() {
+  FakeBus bus;
+  bus.regs[cmd::REG_STATUS_REG] = 0x00;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  Axes bias{};
+  Status st = dev.captureAccelBias(1, bias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT), static_cast<uint8_t>(st.code));
+
+  st = dev.captureGyroBias(1, bias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT), static_cast<uint8_t>(st.code));
+}
+
 // ==========================================================================
 // Configuration and feature tests
 // ==========================================================================
@@ -741,6 +795,80 @@ void test_set_gyro_power_mode_rejects_unsupported_current_odr() {
 
   const Status st = dev.setGyroPowerMode(GyroPowerMode::LOW_POWER_NORMAL);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+}
+
+void test_power_mode_setters_reject_invalid_enums() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t writesBefore = bus.writeCalls;
+
+  Status st = dev.setAccelPowerMode(static_cast<AccelPowerMode>(99));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = dev.setGyroPowerMode(static_cast<GyroPowerMode>(99));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+}
+
+void test_cached_setters_roll_back_after_i2c_failure() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorRemaining = 1;
+  Status st = dev.setAccelPowerMode(AccelPowerMode::LOW_POWER_NORMAL);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  AccelPowerMode accelMode = AccelPowerMode::LOW_POWER_NORMAL;
+  TEST_ASSERT_TRUE(dev.getAccelPowerMode(accelMode).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AccelPowerMode::HIGH_PERFORMANCE),
+                          static_cast<uint8_t>(accelMode));
+
+  TEST_ASSERT_TRUE(dev.setGyroSleepEnabled(true).ok());
+  bus.writeErrorRemaining = 1;
+  st = dev.setGyroSleepEnabled(false);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  bool sleepEnabled = false;
+  TEST_ASSERT_TRUE(dev.getGyroSleepEnabled(sleepEnabled).ok());
+  TEST_ASSERT_TRUE(sleepEnabled);
+}
+
+void test_multi_register_setters_roll_back_cache_after_partial_i2c_failure() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  GyroFilterConfig gyroFilter;
+  gyroFilter.lpf1Enabled = true;
+  gyroFilter.highPassEnabled = true;
+  gyroFilter.highPassMode = GyroHpfMode::HZ_2_07;
+  bus.failWriteCall = bus.writeCalls + 2u;
+  Status st = dev.setGyroFilterConfig(gyroFilter);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+
+  GyroFilterConfig gyroFilterOut;
+  TEST_ASSERT_TRUE(dev.getGyroFilterConfig(gyroFilterOut).ok());
+  TEST_ASSERT_FALSE(gyroFilterOut.lpf1Enabled);
+  TEST_ASSERT_FALSE(gyroFilterOut.highPassEnabled);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(GyroHpfMode::HZ_0_0081),
+                          static_cast<uint8_t>(gyroFilterOut.highPassMode));
+
+  FifoConfig fifo;
+  fifo.threshold = 0x120u;
+  fifo.odr = Odr::HZ_104;
+  fifo.mode = FifoMode::CONTINUOUS;
+  fifo.accelDecimation = FifoDecimation::NONE;
+  fifo.gyroDecimation = FifoDecimation::DIV_2;
+  bus.failWriteCall = bus.writeCalls + 3u;
+  st = dev.configureFifo(fifo);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+
+  FifoConfig fifoOut;
+  TEST_ASSERT_TRUE(dev.getFifoConfig(fifoOut).ok());
+  TEST_ASSERT_EQUAL_UINT16(0u, fifoOut.threshold);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(FifoMode::BYPASS),
+                          static_cast<uint8_t>(fifoOut.mode));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Odr::POWER_DOWN),
+                          static_cast<uint8_t>(fifoOut.odr));
 }
 
 void test_timestamp_requires_active_sensor() {
@@ -861,6 +989,34 @@ void test_offset_and_filter_helpers_work() {
   TEST_ASSERT_EQUAL_INT8(-4, offsetOut.x);
   TEST_ASSERT_EQUAL_INT8(7, offsetOut.y);
   TEST_ASSERT_EQUAL_INT8(12, offsetOut.z);
+}
+
+void test_filter_offset_and_fifo_setters_reject_invalid_enums() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t writesBefore = bus.writeCalls;
+
+  GyroFilterConfig gyroFilter;
+  gyroFilter.highPassMode = static_cast<GyroHpfMode>(99);
+  Status st = dev.setGyroFilterConfig(gyroFilter);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  st = dev.setAccelOffsetWeight(static_cast<AccelOffsetWeight>(99));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  FifoConfig fifo;
+  fifo.odr = Odr::HZ_104;
+  fifo.mode = static_cast<FifoMode>(2);
+  st = dev.configureFifo(fifo);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  fifo.mode = FifoMode::FIFO;
+  fifo.accelDecimation = static_cast<FifoDecimation>(99);
+  st = dev.configureFifo(fifo);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
 }
 
 void test_fifo_configuration_and_read_helpers_work() {
@@ -996,6 +1152,31 @@ void test_direct_register_access_and_refresh_work() {
   TEST_ASSERT_EQUAL_INT8(-7, offset.z);
 }
 
+void test_direct_register_access_rejects_invalid_bounds_without_bus_io() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+
+  uint8_t value = 0;
+  Status st = dev.readRegisterValue(static_cast<uint8_t>(cmd::REG_Z_OFS_USR + 1u), value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  st = dev.writeRegisterValue(static_cast<uint8_t>(cmd::REG_Z_OFS_USR + 1u), 0x12u);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  uint8_t block[2] = {};
+  st = dev.readRegisterBlock(cmd::REG_Z_OFS_USR, block, sizeof(block));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  st = dev.readRegisterBlock(cmd::REG_CTRL1_XL, block, 0);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+}
+
 void test_source_register_helpers_work() {
   FakeBus bus;
   bus.regs[cmd::REG_WAKE_UP_SRC] = 0x11;
@@ -1044,6 +1225,21 @@ void test_soft_reset_restores_config() {
   TEST_ASSERT_TRUE(dev.getGyroFs(gyroFs).ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Odr::HZ_208), static_cast<uint8_t>(accelOdr));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(GyroFs::DPS_500), static_cast<uint8_t>(gyroFs));
+}
+
+void test_soft_reset_raw_poll_failure_updates_health() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_ERROR, "forced reset poll error", -33);
+  const Status st = dev.softReset();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
 }
 
 void test_end_resets_state() {
@@ -1132,6 +1328,7 @@ int main() {
   RUN_TEST(test_begin_rejects_accel_416_in_low_power_normal);
   RUN_TEST(test_begin_rejects_gyro_1_6);
   RUN_TEST(test_begin_rejects_gyro_833_in_low_power_normal);
+  RUN_TEST(test_begin_rejects_invalid_power_mode_enums);
   RUN_TEST(test_begin_detects_wrong_chip_id);
   RUN_TEST(test_probe_after_failed_begin_uses_stored_transport);
   RUN_TEST(test_recover_after_failed_begin_retries_begin);
@@ -1139,6 +1336,7 @@ int main() {
 
   RUN_TEST(test_probe_failure_does_not_update_health);
   RUN_TEST(test_recover_failure_updates_health_once);
+  RUN_TEST(test_recover_chip_id_mismatch_updates_health_once);
   RUN_TEST(test_recover_success_returns_ready);
   RUN_TEST(test_recover_reaches_offline_when_threshold_is_one);
 
@@ -1154,25 +1352,32 @@ int main() {
   RUN_TEST(test_get_measurement_applies_manual_bias);
   RUN_TEST(test_capture_accel_bias_auto_applies_to_measurements);
   RUN_TEST(test_capture_gyro_bias_auto_applies_to_measurements);
+  RUN_TEST(test_capture_bias_times_out_with_stalled_clock_and_no_data_ready);
 
   RUN_TEST(test_set_accel_odr);
   RUN_TEST(test_set_gyro_fs);
   RUN_TEST(test_sensitivity_helpers);
   RUN_TEST(test_set_accel_power_mode_rejects_unsupported_current_odr);
   RUN_TEST(test_set_gyro_power_mode_rejects_unsupported_current_odr);
+  RUN_TEST(test_power_mode_setters_reject_invalid_enums);
+  RUN_TEST(test_cached_setters_roll_back_after_i2c_failure);
+  RUN_TEST(test_multi_register_setters_roll_back_cache_after_partial_i2c_failure);
   RUN_TEST(test_timestamp_requires_active_sensor);
   RUN_TEST(test_embedded_functions_require_accel_odr_at_least_26hz);
   RUN_TEST(test_set_accel_odr_rejects_disabling_embedded_function_support);
   RUN_TEST(test_timestamp_helpers_work);
   RUN_TEST(test_step_counter_helpers_work);
   RUN_TEST(test_offset_and_filter_helpers_work);
+  RUN_TEST(test_filter_offset_and_fifo_setters_reject_invalid_enums);
   RUN_TEST(test_fifo_configuration_and_read_helpers_work);
   RUN_TEST(test_fifo_requires_bdu_when_active);
   RUN_TEST(test_read_fifo_word_reports_empty);
   RUN_TEST(test_direct_register_access_and_refresh_work);
+  RUN_TEST(test_direct_register_access_rejects_invalid_bounds_without_bus_io);
   RUN_TEST(test_source_register_helpers_work);
 
   RUN_TEST(test_soft_reset_restores_config);
+  RUN_TEST(test_soft_reset_raw_poll_failure_updates_health);
   RUN_TEST(test_end_resets_state);
 
   RUN_TEST(test_command_table_fix_for_sensor_sync_time_frame);

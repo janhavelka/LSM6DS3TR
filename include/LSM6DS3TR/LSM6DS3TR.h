@@ -172,30 +172,34 @@ public:
   ///
   /// The sensor must be stationary with Z-axis pointing up (+1 g on Z).
   /// Blocks for approximately (samples / accelODR) seconds.
-  /// Each sample waits for the XLDA data-ready flag with a bounded deadline.
+  /// Each sample waits for the XLDA data-ready flag with a bounded deadline
+  /// and finite polling cap, so a stalled time source cannot spin forever.
   ///
   /// On success the bias is auto-applied (equivalent to setAccelBias(out))
   /// and returned via @p out so the caller can persist it.
   ///
-  /// @param samples  Number of readings to average (1–10000).
+  /// @param samples  Number of readings to average (1-10000).
   /// @param out      Computed bias in g.
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
-  ///         NOT_INITIALIZED / I2C errors propagated from reads.
+  ///         TIMEOUT if data-ready never arrives; NOT_INITIALIZED / I2C errors
+  ///         propagated from reads.
   Status captureAccelBias(uint16_t samples, Axes& out);
 
   /// Capture gyroscope zero-rate bias by averaging @p samples readings at rest.
   ///
   /// The sensor must be stationary (no rotation).
   /// Blocks for approximately (samples / gyroODR) seconds.
-  /// Each sample waits for the GDA data-ready flag with a bounded deadline.
+  /// Each sample waits for the GDA data-ready flag with a bounded deadline
+  /// and finite polling cap, so a stalled time source cannot spin forever.
   ///
   /// On success the bias is auto-applied (equivalent to setGyroBias(out))
   /// and returned via @p out so the caller can persist it.
   ///
-  /// @param samples  Number of readings to average (1–10000).
+  /// @param samples  Number of readings to average (1-10000).
   /// @param out      Computed bias in dps.
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
-  ///         NOT_INITIALIZED / I2C errors propagated from reads.
+  ///         TIMEOUT if data-ready never arrives; NOT_INITIALIZED / I2C errors
+  ///         propagated from reads.
   Status captureGyroBias(uint16_t samples, Axes& out);
 
   /// @}
@@ -262,7 +266,9 @@ public:
   Status readFifoStatus(FifoStatus& out);
   Status readFifoWord(uint16_t& out);
 
-  // Register and source access
+  // Register and source access. Public raw access is bounded to the main
+  // user register window through Z_OFS_USR and rejects zero-length or wrapping
+  // blocks before touching the bus.
   Status readRegisterValue(uint8_t reg, uint8_t& value);
   Status writeRegisterValue(uint8_t reg, uint8_t value);
   Status readRegisterBlock(uint8_t startReg, uint8_t* buf, size_t len);
@@ -293,6 +299,7 @@ private:
 
   // Health management
   Status _updateHealth(const Status& st);
+  Status _recordFailure(const Status& st);
 
   // Internal helpers
   Status _applyConfig();

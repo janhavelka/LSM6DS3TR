@@ -11,6 +11,7 @@
 #include "examples/common/BusDiag.h"
 #include "examples/common/CliShell.h"
 #include "examples/common/HealthView.h"
+#include "examples/common/CliStyle.h"
 #include "examples/common/Log.h"
 #include "examples/common/TransportAdapter.h"
 
@@ -1153,106 +1154,99 @@ void printRegisterValue(const char* label, uint8_t value) {
 }
 
 void printHelp() {
-  auto helpSection = [](const char* title) {
-    Serial.printf("\n%s[%s]%s\n", LOG_COLOR_GREEN, title, LOG_COLOR_RESET);
-  };
-  auto helpItem = [](const char* cmd, const char* desc) {
-    Serial.printf("  %s%-24s%s - %s\n", LOG_COLOR_CYAN, cmd, LOG_COLOR_RESET, desc);
-  };
-
   Serial.println();
-  Serial.printf("%s=== LSM6DS3TR-C CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
+  cli::printHelpHeader("LSM6DS3TR-C CLI Help");
   Serial.printf("Version: %s\n", LSM6DS3TR::VERSION_FULL);
 
-  helpSection("Common");
-  helpItem("help / ?", "Show this help");
-  helpItem("version / ver", "Print version and build metadata");
-  helpItem("scan", "Scan I2C bus");
-  helpItem("drv", "Show driver health");
-  helpItem("drv1", "Show one-line health view");
-  helpItem("cfg / settings", "Show current cached configuration");
-  helpItem("refresh", "Refresh cached config from device registers");
-  helpItem("verbose [0|1]", "Toggle or set verbose mode");
+  cli::printHelpSection("Common");
+  cli::printHelpItem("help / ?", "Show this help");
+  cli::printHelpItem("version / ver", "Print version and build metadata");
+  cli::printHelpItem("scan", "Scan I2C bus");
+  cli::printHelpItem("drv", "Show driver health");
+  cli::printHelpItem("drv1", "Show one-line health view");
+  cli::printHelpItem("cfg / settings", "Show current cached configuration");
+  cli::printHelpItem("refresh", "Refresh cached config from device registers");
+  cli::printHelpItem("verbose [0|1]", "Toggle or set verbose mode");
 
-  helpSection("Measurement");
-  helpItem("read", "Read accel + gyro + temp (converted)");
-  helpItem("raw", "Read accel + gyro + temp (raw)");
-  helpItem("accel", "Read accelerometer only");
-  helpItem("gyro", "Read gyroscope only");
-  helpItem("temp", "Read temperature only");
-  helpItem("status", "Read STATUS_REG with decoded data-ready bits");
-  helpItem("tsread", "Read timestamp counter");
-  helpItem("steps", "Read step counter and step timestamp");
-  helpItem("fifo", "Read FIFO config and status");
-  helpItem("fifo_read [N]", "Read up to N FIFO words");
-  helpItem("stream", "Toggle continuous output (one line per sample at sensor ODR)");
+  cli::printHelpSection("Measurement");
+  cli::printHelpItem("read", "Read accel + gyro + temp (converted)");
+  cli::printHelpItem("raw", "Read accel + gyro + temp (raw)");
+  cli::printHelpItem("accel", "Read accelerometer only");
+  cli::printHelpItem("gyro", "Read gyroscope only");
+  cli::printHelpItem("temp", "Read temperature only");
+  cli::printHelpItem("status", "Read STATUS_REG with decoded data-ready bits");
+  cli::printHelpItem("tsread", "Read timestamp counter");
+  cli::printHelpItem("steps", "Read step counter and step timestamp");
+  cli::printHelpItem("fifo", "Read FIFO config and status");
+  cli::printHelpItem("fifo_read [N]", "Read up to N FIFO words");
+  cli::printHelpItem("stream", "Toggle continuous output (one line per sample at sensor ODR)");
 
-  helpSection("Core Config");
-  helpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
-  helpItem("odrg [hz]", "Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)");
-  helpItem("fsxl [g]", "Get/set accel full-scale (2|4|8|16)");
-  helpItem("fsg [dps]", "Get/set gyro full-scale (125|250|500|1000|2000)");
-  helpItem("apm [hp|lpn]", "Get/set accel power mode");
-  helpItem("gpm [hp|lpn]", "Get/set gyro power mode");
-  helpItem("gsleep [0|1]", "Get/set gyro sleep");
-  helpItem("reset", "Software reset and re-apply cached config");
-  helpItem("boot", "Issue boot command and refresh cached config");
+  cli::printHelpSection("Core Config");
+  cli::printHelpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  cli::printHelpItem("odrg [hz]", "Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  cli::printHelpItem("fsxl [g]", "Get/set accel full-scale (2|4|8|16)");
+  cli::printHelpItem("fsg [dps]", "Get/set gyro full-scale (125|250|500|1000|2000)");
+  cli::printHelpItem("apm [hp|lpn]", "Get/set accel power mode");
+  cli::printHelpItem("gpm [hp|lpn]", "Get/set gyro power mode");
+  cli::printHelpItem("gsleep [0|1]", "Get/set gyro sleep");
+  cli::printHelpItem("reset", "Software reset and re-apply cached config");
+  cli::printHelpItem("boot", "Issue boot command and refresh cached config");
 
-  helpSection("Filters And Embedded");
-  helpItem("alpf2 [0|1]", "Get/set accel LPF2");
-  helpItem("aslope [0|1]", "Get/set accel high-pass/slope");
-  helpItem("a6d [0|1]", "Get/set accel low-pass on 6D");
-  helpItem("glpf1 [0|1]", "Get/set gyro LPF1");
-  helpItem("ghpf [0|1]", "Get/set gyro HPF");
-  helpItem("ghpfmode [0..3]", "Get/set gyro HPF cutoff");
-  helpItem("ts [0|1]", "Get/set timestamp enable");
-  helpItem("tshr [0|1]", "Get/set timestamp high resolution");
-  helpItem("tsreset", "Reset timestamp counter");
-  helpItem("pedo [0|1]", "Get/set pedometer");
-  helpItem("sigmot [0|1]", "Get/set significant motion");
-  helpItem("tilt [0|1]", "Get/set tilt detection");
-  helpItem("wtilt [0|1]", "Get/set wrist tilt");
-  helpItem("stepreset", "Reset step counter");
+  cli::printHelpSection("Filters And Embedded");
+  cli::printHelpItem("alpf2 [0|1]", "Get/set accel LPF2");
+  cli::printHelpItem("aslope [0|1]", "Get/set accel high-pass/slope");
+  cli::printHelpItem("a6d [0|1]", "Get/set accel low-pass on 6D");
+  cli::printHelpItem("glpf1 [0|1]", "Get/set gyro LPF1");
+  cli::printHelpItem("ghpf [0|1]", "Get/set gyro HPF");
+  cli::printHelpItem("ghpfmode [0..3]", "Get/set gyro HPF cutoff");
+  cli::printHelpItem("ts [0|1]", "Get/set timestamp enable");
+  cli::printHelpItem("tshr [0|1]", "Get/set timestamp high resolution");
+  cli::printHelpItem("tsreset", "Reset timestamp counter");
+  cli::printHelpItem("pedo [0|1]", "Get/set pedometer");
+  cli::printHelpItem("sigmot [0|1]", "Get/set significant motion");
+  cli::printHelpItem("tilt [0|1]", "Get/set tilt detection");
+  cli::printHelpItem("wtilt [0|1]", "Get/set wrist tilt");
+  cli::printHelpItem("stepreset", "Reset step counter");
 
-  helpSection("Offsets And FIFO");
-  helpItem("ofswt [1|16]", "Get/set accel offset weight");
-  helpItem("offset [x y z]", "Get/set accel user offsets");
-  helpItem("fifo_mode [mode]", "Get/set FIFO mode");
-  helpItem("fifo_odr [hz]", "Get/set FIFO ODR");
-  helpItem("fifo_xl [off|1|2|3|4|8|16|32]", "Get/set FIFO accel decimation");
-  helpItem("fifo_g [off|1|2|3|4|8|16|32]", "Get/set FIFO gyro decimation");
-  helpItem("fifo_th [N]", "Get/set FIFO threshold (0..2047)");
-  helpItem("fifo_temp [0|1]", "Get/set FIFO temperature storage");
-  helpItem("fifo_step [0|1]", "Get/set FIFO step/timestamp storage");
-  helpItem("fifo_stop [0|1]", "Get/set FIFO stop on threshold");
-  helpItem("fifo_high [0|1]", "Get/set FIFO high-byte-only mode");
+  cli::printHelpSection("Offsets And FIFO");
+  cli::printHelpItem("ofswt [1|16]", "Get/set accel offset weight");
+  cli::printHelpItem("offset [x y z]", "Get/set accel user offsets");
+  cli::printHelpItem("fifo_mode [mode]", "Get/set FIFO mode");
+  cli::printHelpItem("fifo_odr [hz]", "Get/set FIFO ODR");
+  cli::printHelpItem("fifo_xl [off|1|2|3|4|8|16|32]", "Get/set FIFO accel decimation");
+  cli::printHelpItem("fifo_g [off|1|2|3|4|8|16|32]", "Get/set FIFO gyro decimation");
+  cli::printHelpItem("fifo_th [N]", "Get/set FIFO threshold (0..2047)");
+  cli::printHelpItem("fifo_temp [0|1]", "Get/set FIFO temperature storage");
+  cli::printHelpItem("fifo_step [0|1]", "Get/set FIFO step/timestamp storage");
+  cli::printHelpItem("fifo_stop [0|1]", "Get/set FIFO stop on threshold");
+  cli::printHelpItem("fifo_high [0|1]", "Get/set FIFO high-byte-only mode");
 
-  helpSection("Calibration");
-  helpItem("cal [N]", "Calibrate accel+gyro at rest (Z-up, default 100 samples)");
-  helpItem("calxl [N]", "Calibrate accel only (Z-up, default 100 samples)");
-  helpItem("calg [N]", "Calibrate gyro only (stationary, default 100 samples)");
-  helpItem("biasxl [x y z]", "Get/set accel software bias (g)");
-  helpItem("biasg [x y z]", "Get/set gyro software bias (dps)");
-  helpItem("biasreset", "Clear all software biases to zero");
+  cli::printHelpSection("Calibration");
+  cli::printHelpItem("cal [N]", "Calibrate accel+gyro at rest (Z-up, default 100 samples)");
+  cli::printHelpItem("calxl [N]", "Calibrate accel only (Z-up, default 100 samples)");
+  cli::printHelpItem("calg [N]", "Calibrate gyro only (stationary, default 100 samples)");
+  cli::printHelpItem("biasxl [x y z]", "Get/set accel software bias (g)");
+  cli::printHelpItem("biasg [x y z]", "Get/set gyro software bias (dps)");
+  cli::printHelpItem("biasreset", "Clear all software biases to zero");
 
-  helpSection("Diagnostics");
-  helpItem("probe", "Probe WHO_AM_I without health tracking");
-  helpItem("recover", "Retry initialization/recovery");
-  helpItem("whoami", "Read WHO_AM_I register");
-  helpItem("wusrc", "Read WAKE_UP_SRC");
-  helpItem("tapsrc", "Read TAP_SRC");
-  helpItem("6dsrc", "Read D6D_SRC");
-  helpItem("funcsrc1", "Read FUNC_SRC1");
-  helpItem("funcsrc2", "Read FUNC_SRC2");
-  helpItem("wtstatus", "Read WRIST_TILT_IA");
-  helpItem("selftest", "Run accelerometer and gyroscope self-test");
-  helpItem("stress [N]", "Async converted-sample stress test");
-  helpItem("stress_mix [N]", "Blocking mixed-operation stress test");
+  cli::printHelpSection("Diagnostics");
+  cli::printHelpItem("probe", "Probe WHO_AM_I without health tracking");
+  cli::printHelpItem("recover", "Retry initialization/recovery");
+  cli::printHelpItem("whoami", "Read WHO_AM_I register");
+  cli::printHelpItem("wusrc", "Read WAKE_UP_SRC");
+  cli::printHelpItem("tapsrc", "Read TAP_SRC");
+  cli::printHelpItem("6dsrc", "Read D6D_SRC");
+  cli::printHelpItem("funcsrc1", "Read FUNC_SRC1");
+  cli::printHelpItem("funcsrc2", "Read FUNC_SRC2");
+  cli::printHelpItem("wtstatus", "Read WRIST_TILT_IA");
+  cli::printHelpItem("selftest", "Run accelerometer and gyroscope self-test");
+  cli::printHelpItem("stress [N]", "Async converted-sample stress test");
+  cli::printHelpItem("stress_mix [N]", "Blocking mixed-operation stress test");
 
-  helpSection("Registers");
-  helpItem("rreg <addr>", "Read register byte (reserved 0x43-0x48 blocked)");
-  helpItem("wreg <addr> <val>", "Write register byte and refresh cache when needed");
-  helpItem("dump [addr len]", "Hex dump register range outside 0x43-0x48");
+  cli::printHelpSection("Registers");
+  cli::printHelpItem("rreg <addr>", "Read register byte (reserved 0x43-0x48 blocked)");
+  cli::printHelpItem("wreg <addr> <val>", "Write register byte and refresh cache when needed");
+  cli::printHelpItem("dump [addr len]", "Hex dump register range outside 0x43-0x48");
 }
 
 void processCommand(const String& line) {
@@ -1830,7 +1824,7 @@ void setup() {
 
   Serial.println();
   Serial.println("Type 'help' for commands");
-  Serial.print("> ");
+  cli::printPrompt();
 }
 
 void loop() {
@@ -1865,6 +1859,6 @@ void loop() {
   String line;
   if (cli_shell::readLine(line)) {
     processCommand(line);
-    Serial.print("> ");
+    cli::printPrompt();
   }
 }

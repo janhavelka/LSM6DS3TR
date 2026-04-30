@@ -56,6 +56,8 @@ The driver enforces several device constraints from the datasheet and applicatio
 - timestamp requires at least one active sensor
 - FIFO configuration requires BDU enabled
 - async combined measurements require BDU and matching active accel/gyro ODR
+- managed setters validate enum values before I2C and keep cached state unchanged if a write fails
+- software-reset, boot, and calibration waits use bounded polling; transport failures during raw reset/boot polling are recorded in driver health
 
 ## Installation
 
@@ -209,6 +211,8 @@ Use the raw register APIs when you need chip features that are intentionally lef
 - `writeRegisterValue()`
 - `readRegisterBlock()`
 - `refreshCachedConfig()`
+
+Public raw access is limited to the main user-register window through `Z_OFS_USR`; zero-length, oversized, and wrapping block reads are rejected before the bus is touched. Writes to managed configuration registers refresh the cached configuration after the write succeeds.
 
 This is the intended path for interrupt routing, threshold registers, advanced tap/wake/free-fall setup, and sensor-hub experimentation.
 

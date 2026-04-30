@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Hardened cached configuration setters so invalid enum values are rejected before I2C and cached state rolls back on failed writes.
+- Documented direct-register access bounds and bounded calibration/reset polling behavior.
+
+### Fixed
+
+- Made accel/gyro bias capture exit with `TIMEOUT` even if the injected millisecond source stalls while data-ready never asserts.
+- Made `recover()` record chip-ID mismatches in health tracking and made reset/boot raw polling failures update health.
+- Rejected out-of-range public raw register addresses and invalid register blocks before touching the bus.
+
 ## [1.0.0] - 2026-04-06
 
 ### Added
