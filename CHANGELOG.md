@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Doxyfile inputs now include the implementation manual while keeping extracted
+  math-heavy design tips out of generated API docs.
 - Hardened cached configuration setters so invalid enum values are rejected before I2C and cached state rolls back on failed writes.
 - Documented direct-register access bounds and bounded calibration/reset polling behavior.
 
