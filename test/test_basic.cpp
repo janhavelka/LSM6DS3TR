@@ -492,6 +492,54 @@ void test_recover_reaches_offline_when_threshold_is_one() {
   TEST_ASSERT_FALSE(dev.isOnline());
 }
 
+void test_offline_read_all_raw_returns_busy_without_i2c() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_ERROR, "forced timeout", -10);
+  (void)dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t writesBefore = bus.writeCalls;
+  RawMeasurement raw{};
+  Status st = dev.readAllRaw(raw);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_STRING("Driver is offline; call recover()", st.msg);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+}
+
+void test_failed_recover_from_offline_keeps_latch_after_intermediate_success() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 3;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  for (uint8_t i = 0; i < cfg.offlineThreshold; ++i) {
+    bus.readErrorRemaining = 1;
+    bus.readError = Status::Error(Err::I2C_ERROR, "forced recover error", -20);
+    TEST_ASSERT_FALSE(dev.recover().ok());
+  }
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  bus.regs[cmd::REG_WHO_AM_I] = 0x00;
+  const Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CHIP_ID_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_TRUE(dev.consecutiveFailures() >= cfg.offlineThreshold);
+}
+
 // ==========================================================================
 // Measurement tests
 // ==========================================================================
@@ -1339,6 +1387,8 @@ int main() {
   RUN_TEST(test_recover_chip_id_mismatch_updates_health_once);
   RUN_TEST(test_recover_success_returns_ready);
   RUN_TEST(test_recover_reaches_offline_when_threshold_is_one);
+  RUN_TEST(test_offline_read_all_raw_returns_busy_without_i2c);
+  RUN_TEST(test_failed_recover_from_offline_keeps_latch_after_intermediate_success);
 
   RUN_TEST(test_read_all_raw_returns_data);
   RUN_TEST(test_convert_accel_at_2g);

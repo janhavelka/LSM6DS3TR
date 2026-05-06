@@ -300,6 +300,8 @@ private:
   // Health management
   Status _updateHealth(const Status& st);
   Status _recordFailure(const Status& st);
+  void _reassertOfflineLatch();
+  Status _ensureNormalI2cAllowed() const;
 
   // Internal helpers
   Status _applyConfig();
@@ -330,6 +332,7 @@ private:
   uint8_t _consecutiveFailures = 0;
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
+  bool _allowOfflineI2c = false;
 
   // Measurement state
   bool _measurementRequested = false;

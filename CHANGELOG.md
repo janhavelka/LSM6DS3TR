@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native coverage proving latched `OFFLINE` blocks normal I2C operations without touching the bus while explicit recovery/reset paths remain available.
+- README documentation for the single-threaded, non-ISR driver contract and explicit recovery model.
+
 ### Changed
 
 - Doxyfile inputs now include the implementation manual while keeping extracted
   math-heavy design tips out of generated API docs.
+- Explicit recovery/reset bypass internals now use the shared `ScopedOfflineI2cAllowance` / `_reassertOfflineLatch()` procedure so failed recovery attempts that begin from `OFFLINE` keep the latch asserted.
 - Hardened cached configuration setters so invalid enum values are rejected before I2C and cached state rolls back on failed writes.
 - Documented direct-register access bounds and bounded calibration/reset polling behavior.
+- Health behavior is now standardized on latched `OFFLINE`: normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch I2C until `recover()` succeeds.
 
 ### Fixed
 

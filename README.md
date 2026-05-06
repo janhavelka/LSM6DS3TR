@@ -59,6 +59,13 @@ The driver enforces several device constraints from the datasheet and applicatio
 - managed setters validate enum values before I2C and keep cached state unchanged if a write fails
 - software-reset, boot, and calibration waits use bounded polling; transport failures during raw reset/boot polling are recorded in driver health
 
+## Thread, ISR, And Recovery Model
+
+- The driver is single-threaded: call public APIs from one task or loop context, or serialize access externally.
+- Do not call I2C-backed APIs from ISRs. Use an interrupt only to set an application flag, then call the driver from normal task context.
+- `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch the bus.
+- `probe()` remains a raw diagnostic check and does not update health counters. `recover()`, `softReset()`, and `boot()` are explicit recovery/reset paths and may access I2C while offline.
+
 ## Installation
 
 ### PlatformIO

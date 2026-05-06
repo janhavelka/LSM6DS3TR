@@ -19,6 +19,24 @@ static constexpr uint32_t RESET_TIMEOUT_MS = 25;
 static constexpr uint32_t BOOT_TIMEOUT_MS = 25;
 static constexpr uint16_t RESET_MAX_POLLS = 255;
 
+class ScopedOfflineI2cAllowance {
+public:
+  explicit ScopedOfflineI2cAllowance(bool& flag, bool allow) : _flag(flag), _old(flag) {
+    _flag = allow;
+  }
+
+  ~ScopedOfflineI2cAllowance() {
+    _flag = _old;
+  }
+
+  ScopedOfflineI2cAllowance(const ScopedOfflineI2cAllowance&) = delete;
+  ScopedOfflineI2cAllowance& operator=(const ScopedOfflineI2cAllowance&) = delete;
+
+private:
+  bool& _flag;
+  bool _old;
+};
+
 static bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
   return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
 }
@@ -442,16 +460,24 @@ Status LSM6DS3TR::recover() {
     return begin(config);
   }
 
-  uint8_t chipId = 0;
-  Status st = readRegister(cmd::REG_WHO_AM_I, chipId);
-  if (!st.ok()) {
-    return st;
-  }
-  if (chipId != cmd::WHO_AM_I_VALUE) {
-    return _recordFailure(Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId));
-  }
+  const bool startedOffline = _driverState == DriverState::OFFLINE;
+  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
+  Status result = [this]() -> Status {
+    uint8_t chipId = 0;
+    Status st = readRegister(cmd::REG_WHO_AM_I, chipId);
+    if (!st.ok()) {
+      return st;
+    }
+    if (chipId != cmd::WHO_AM_I_VALUE) {
+      return _recordFailure(Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId));
+    }
 
-  return _applyConfig();
+    return _applyConfig();
+  }();
+  if (startedOffline && !result.ok() && !result.inProgress()) {
+    _reassertOfflineLatch();
+  }
+  return result;
 }
 
 Status LSM6DS3TR::requestMeasurement() {
@@ -1282,38 +1308,46 @@ Status LSM6DS3TR::softReset() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  _measurementRequested = false;
-  _measurementReady = false;
-  _hasSample = false;
+  const bool startedOffline = _driverState == DriverState::OFFLINE;
+  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
+  Status result = [this]() -> Status {
+    _measurementRequested = false;
+    _measurementReady = false;
+    _hasSample = false;
 
-  const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_SW_RESET | cmd::MASK_IF_INC |
-                                             (_config.bdu ? cmd::MASK_BDU : 0));
-  Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
-  if (!st.ok()) {
-    return st;
-  }
-
-  const uint32_t deadline = _nowMs() + RESET_TIMEOUT_MS;
-  bool resetDone = false;
-  for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
-    if (deadlineReached(_nowMs(), deadline)) {
-      return Status::Error(Err::TIMEOUT, "Reset timeout");
-    }
-    uint8_t ctrl3Read = 0;
-    st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
+    const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_SW_RESET | cmd::MASK_IF_INC |
+                                               (_config.bdu ? cmd::MASK_BDU : 0));
+    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
     if (!st.ok()) {
-      return _recordFailure(st);
+      return st;
     }
-    if (st.ok() && (ctrl3Read & cmd::MASK_SW_RESET) == 0) {
-      resetDone = true;
-      break;
-    }
-  }
-  if (!resetDone) {
-    return Status::Error(Err::TIMEOUT, "Reset polling limit", RESET_MAX_POLLS);
-  }
 
-  return _applyConfig();
+    const uint32_t deadline = _nowMs() + RESET_TIMEOUT_MS;
+    bool resetDone = false;
+    for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
+      if (deadlineReached(_nowMs(), deadline)) {
+        return Status::Error(Err::TIMEOUT, "Reset timeout");
+      }
+      uint8_t ctrl3Read = 0;
+      st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
+      if (!st.ok()) {
+        return _recordFailure(st);
+      }
+      if ((ctrl3Read & cmd::MASK_SW_RESET) == 0) {
+        resetDone = true;
+        break;
+      }
+    }
+    if (!resetDone) {
+      return Status::Error(Err::TIMEOUT, "Reset polling limit", RESET_MAX_POLLS);
+    }
+
+    return _applyConfig();
+  }();
+  if (startedOffline && !result.ok() && !result.inProgress()) {
+    _reassertOfflineLatch();
+  }
+  return result;
 }
 
 Status LSM6DS3TR::boot() {
@@ -1321,34 +1355,42 @@ Status LSM6DS3TR::boot() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_BOOT | cmd::MASK_IF_INC |
-                                             (_config.bdu ? cmd::MASK_BDU : 0));
-  Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
-  if (!st.ok()) {
-    return st;
-  }
-
-  const uint32_t deadline = _nowMs() + BOOT_TIMEOUT_MS;
-  bool bootDone = false;
-  for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
-    if (deadlineReached(_nowMs(), deadline)) {
-      return Status::Error(Err::TIMEOUT, "Boot timeout");
-    }
-    uint8_t ctrl3Read = 0;
-    st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
+  const bool startedOffline = _driverState == DriverState::OFFLINE;
+  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
+  Status result = [this]() -> Status {
+    const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_BOOT | cmd::MASK_IF_INC |
+                                               (_config.bdu ? cmd::MASK_BDU : 0));
+    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
     if (!st.ok()) {
-      return _recordFailure(st);
+      return st;
     }
-    if (st.ok() && (ctrl3Read & cmd::MASK_BOOT) == 0) {
-      bootDone = true;
-      break;
-    }
-  }
-  if (!bootDone) {
-    return Status::Error(Err::TIMEOUT, "Boot polling limit", RESET_MAX_POLLS);
-  }
 
-  return refreshCachedConfig();
+    const uint32_t deadline = _nowMs() + BOOT_TIMEOUT_MS;
+    bool bootDone = false;
+    for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
+      if (deadlineReached(_nowMs(), deadline)) {
+        return Status::Error(Err::TIMEOUT, "Boot timeout");
+      }
+      uint8_t ctrl3Read = 0;
+      st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
+      if (!st.ok()) {
+        return _recordFailure(st);
+      }
+      if ((ctrl3Read & cmd::MASK_BOOT) == 0) {
+        bootDone = true;
+        break;
+      }
+    }
+    if (!bootDone) {
+      return Status::Error(Err::TIMEOUT, "Boot polling limit", RESET_MAX_POLLS);
+    }
+
+    return refreshCachedConfig();
+  }();
+  if (startedOffline && !result.ok() && !result.inProgress()) {
+    _reassertOfflineLatch();
+  }
+  return result;
 }
 
 Status LSM6DS3TR::readRegisterValue(uint8_t reg, uint8_t& value) {
@@ -1573,6 +1615,10 @@ Status LSM6DS3TR::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
   if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
+  Status allowed = _ensureNormalI2cAllowed();
+  if (!allowed.ok()) {
+    return allowed;
+  }
 
   Status st = _i2cWriteReadRaw(txBuf, txLen, rxBuf, rxLen);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
@@ -1584,6 +1630,10 @@ Status LSM6DS3TR::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
 Status LSM6DS3TR::_i2cWriteTracked(const uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
+  }
+  Status allowed = _ensureNormalI2cAllowed();
+  if (!allowed.ok()) {
+    return allowed;
   }
 
   Status st = _i2cWriteRaw(buf, len);
@@ -1702,6 +1752,21 @@ Status LSM6DS3TR::_recordFailure(const Status& st) {
   }
 
   return st;
+}
+
+void LSM6DS3TR::_reassertOfflineLatch() {
+  _driverState = DriverState::OFFLINE;
+  const uint8_t threshold = _config.offlineThreshold == 0 ? 1 : _config.offlineThreshold;
+  if (_consecutiveFailures < threshold) {
+    _consecutiveFailures = threshold;
+  }
+}
+
+Status LSM6DS3TR::_ensureNormalI2cAllowed() const {
+  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
+    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::_applyConfig() {
