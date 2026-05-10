@@ -4,8 +4,8 @@
 
 | # | Document Title | Filename | ST Literature # | Pages | Role |
 |---|---------------|----------|-----------------|-------|------|
-| 1 | LSM6DS3TR-C iNEMO inertial module: always-on 3D accelerometer and 3D gyroscope — Datasheet | `datasheet_LSM6DS3TR-C.pdf` | DocID030071 Rev 3 (May 2017) | 114 | Primary datasheet |
-| 2 | LSM6DS3TR-C Application Note | `application_note.pdf` | AN5130 Rev 1 (Mar 2018) | 109 | Primary application note — programming sequences, filters, interrupts, FIFO, sensor hub, embedded functions |
+| 1 | LSM6DS3TR-C iNEMO inertial module: always-on 3D accelerometer and 3D gyroscope — Datasheet | `LSM6DS3TR-C_datasheet.pdf` | DocID030071 Rev 3 (May 2017) | 114 | Primary datasheet |
+| 2 | LSM6DS3TR-C Application Note | `LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf` | AN5130 Rev 1 (Mar 2018) | 109 | Primary application note — programming sequences, filters, interrupts, FIFO, sensor hub, embedded functions |
 | 3 | 1-point or 3-point tumble sensor calibration | `calibration_1_or_3_point.pdf` | DT0105 Rev 2 (Jan 2022) | 5 | Design tip — accelerometer offset/gain calibration |
 | 4 | Computing tilt measurement and tilt-compensated eCompass | `computing_tilt.pdf` | DT0058 Rev 3 (Jan 2021) | 6 | Design tip — roll/pitch/yaw from accel+mag data |
 | 5 | Residual linear acceleration by gravity subtraction to enable dead-reckoning | `dead_reckoning.pdf` | DT0106 Rev 1 (Aug 2018) | 6 | Design tip — linear acceleration extraction & double integration |
@@ -27,15 +27,15 @@
 
 | Field | Value | Source |
 |-------|-------|--------|
-| Device name | LSM6DS3TR-C | datasheet_LSM6DS3TR-C.pdf, p1 |
-| Full title | iNEMO inertial module: always-on 3D accelerometer and 3D gyroscope | datasheet_LSM6DS3TR-C.pdf, p1 |
-| Package | LGA-14L | datasheet_LSM6DS3TR-C.pdf, p1 |
-| Body size | 2.5 mm × 3 mm × 0.83 mm (typ.) | datasheet_LSM6DS3TR-C.pdf, p1 |
-| Pin count | 14 | datasheet_LSM6DS3TR-C.pdf, p20 |
-| WHO_AM_I register value | 0x6A (register address 0x0F) | datasheet_LSM6DS3TR-C.pdf, p48 |
-| Operating temperature | −40 °C to +85 °C | datasheet_LSM6DS3TR-C.pdf, p1 |
-| Packing | Tape & Reel | datasheet_LSM6DS3TR-C.pdf, p1 |
-| ST literature number | DocID030071 Rev 3 | datasheet_LSM6DS3TR-C.pdf, p1 |
+| Device name | LSM6DS3TR-C | LSM6DS3TR-C_datasheet.pdf, p1 |
+| Full title | iNEMO inertial module: always-on 3D accelerometer and 3D gyroscope | LSM6DS3TR-C_datasheet.pdf, p1 |
+| Package | LGA-14L | LSM6DS3TR-C_datasheet.pdf, p1 |
+| Body size | 2.5 mm × 3 mm × 0.83 mm (typ.) | LSM6DS3TR-C_datasheet.pdf, p1 |
+| Pin count | 14 | LSM6DS3TR-C_datasheet.pdf, p20 |
+| WHO_AM_I register value | 0x6A (register address 0x0F) | LSM6DS3TR-C_datasheet.pdf, p48 |
+| Operating temperature | −40 °C to +85 °C | LSM6DS3TR-C_datasheet.pdf, p1 |
+| Packing | Tape & Reel | LSM6DS3TR-C_datasheet.pdf, p1 |
+| ST literature number | DocID030071 Rev 3 | LSM6DS3TR-C_datasheet.pdf, p1 |
 
 **Note:** No variant devices (e.g. automotive suffix, SPI-only variant) are mentioned in the source documents for the LSM6DS3TR-C specifically. The datasheet does not reference a "-Q1" or other suffix variant.
 
@@ -45,17 +45,17 @@
 
 The LSM6DS3TR-C is a system-in-package featuring a 3D digital accelerometer and a 3D digital gyroscope. Key capabilities:
 
-- **Accelerometer**: ±2/±4/±8/±16 g full scale, ODR from 1.6 Hz (low-power only) to 6.66 kHz (datasheet_LSM6DS3TR-C.pdf, p21–22)
-- **Gyroscope**: ±125/±250/±500/±1000/±2000 dps full scale, ODR from 12.5 Hz to 6.66 kHz (datasheet_LSM6DS3TR-C.pdf, p21–22)
+- **Accelerometer**: ±2/±4/±8/±16 g full scale, ODR from 1.6 Hz (low-power only) to 6.66 kHz (LSM6DS3TR-C_datasheet.pdf, p21–22)
+- **Gyroscope**: ±125/±250/±500/±1000/±2000 dps full scale, ODR from 12.5 Hz to 6.66 kHz (LSM6DS3TR-C_datasheet.pdf, p21–22)
 - **FIFO**: 4 kbyte buffer with 5 operating modes (Bypass, FIFO, Continuous, Continuous-to-FIFO, Bypass-to-Continuous); stores gyro, accel, external sensor, step counter/timestamp, and temperature data (AN5130, p74)
-- **Temperature sensor**: 16-bit, 256 LSB/°C, 0 LSB at 25 °C, max 52 Hz refresh (datasheet_LSM6DS3TR-C.pdf, p25)
+- **Temperature sensor**: 16-bit, 256 LSB/°C, 0 LSB at 25 °C, max 52 Hz refresh (LSM6DS3TR-C_datasheet.pdf, p25)
 - **Timestamp**: 24-bit counter, resolution selectable as 6.4 ms or 25 μs (AN5130, p57)
-- **Event detection**: Free-fall, wake-up, 6D/4D orientation, single/double tap, activity/inactivity (datasheet_LSM6DS3TR-C.pdf, p16)
+- **Event detection**: Free-fall, wake-up, 6D/4D orientation, single/double tap, activity/inactivity (LSM6DS3TR-C_datasheet.pdf, p16)
 - **Embedded functions**: Pedometer (step detector + step counter), significant motion, relative tilt, absolute wrist tilt — all hardware-implemented at 26 Hz (AN5130, p50)
-- **Sensor hub**: I2C master for up to 4 external sensors (Mode 2), with hard-iron/soft-iron magnetometer correction (datasheet_LSM6DS3TR-C.pdf, p16; AN5130, p58)
-- **Interfaces**: I2C slave (standard/fast mode, up to 400 kHz), SPI (3-wire and 4-wire, up to 10 MHz), I2C master (116.3 kHz) (datasheet_LSM6DS3TR-C.pdf, p26–28)
+- **Sensor hub**: I2C master for up to 4 external sensors (Mode 2), with hard-iron/soft-iron magnetometer correction (LSM6DS3TR-C_datasheet.pdf, p16; AN5130, p58)
+- **Interfaces**: I2C slave (standard/fast mode, up to 400 kHz), SPI (3-wire and 4-wire, up to 10 MHz), I2C master (116.3 kHz) (LSM6DS3TR-C_datasheet.pdf, p26–28)
 
-Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (datasheet_LSM6DS3TR-C.pdf, p1, p24)
+Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (LSM6DS3TR-C_datasheet.pdf, p1, p24)
 
 ---
 
@@ -65,33 +65,33 @@ Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| Interface type | I2C slave | datasheet_LSM6DS3TR-C.pdf, p20 |
-| Standard mode clock | 0–100 kHz | datasheet_LSM6DS3TR-C.pdf, p27 |
-| Fast mode clock | 0–400 kHz | datasheet_LSM6DS3TR-C.pdf, p27 |
-| Address format | 7-bit: `110101x`b | datasheet_LSM6DS3TR-C.pdf, p39 |
-| SA0 = 0 (SDO/SA0 → GND) | 0x6A | datasheet_LSM6DS3TR-C.pdf, p39 |
-| SA0 = 1 (SDO/SA0 → VDD_IO) | 0x6B | datasheet_LSM6DS3TR-C.pdf, p39 |
-| SDA type | Open-drain bidirectional | datasheet_LSM6DS3TR-C.pdf, p20 |
-| Auto-increment | Enabled by default (IF_INC bit in CTRL3_C = 1) | datasheet_LSM6DS3TR-C.pdf, p50 |
-| Sub-address MSB (read) | Set to 1 for auto-increment multi-byte reads | datasheet_LSM6DS3TR-C.pdf, p39 |
+| Interface type | I2C slave | LSM6DS3TR-C_datasheet.pdf, p20 |
+| Standard mode clock | 0–100 kHz | LSM6DS3TR-C_datasheet.pdf, p27 |
+| Fast mode clock | 0–400 kHz | LSM6DS3TR-C_datasheet.pdf, p27 |
+| Address format | 7-bit: `110101x`b | LSM6DS3TR-C_datasheet.pdf, p39 |
+| SA0 = 0 (SDO/SA0 → GND) | 0x6A | LSM6DS3TR-C_datasheet.pdf, p39 |
+| SA0 = 1 (SDO/SA0 → VDD_IO) | 0x6B | LSM6DS3TR-C_datasheet.pdf, p39 |
+| SDA type | Open-drain bidirectional | LSM6DS3TR-C_datasheet.pdf, p20 |
+| Auto-increment | Enabled by default (IF_INC bit in CTRL3_C = 1) | LSM6DS3TR-C_datasheet.pdf, p50 |
+| Sub-address MSB (read) | Set to 1 for auto-increment multi-byte reads | LSM6DS3TR-C_datasheet.pdf, p39 |
 
 ### SPI Interface
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| SPI modes | 3-wire and 4-wire | datasheet_LSM6DS3TR-C.pdf, p41 |
-| Max clock frequency | 10 MHz | datasheet_LSM6DS3TR-C.pdf, p26 |
-| CPOL/CPHA | 00 or 11 (SPI mode 0 or 3) | datasheet_LSM6DS3TR-C.pdf, p41 |
-| CS pin | Pin 12; 0 = SPI enabled, 1 = I2C enabled | datasheet_LSM6DS3TR-C.pdf, p20 |
-| Read/write bit | bit 0 of first byte: 0 = write, 1 = read | datasheet_LSM6DS3TR-C.pdf, p41 |
+| SPI modes | 3-wire and 4-wire | LSM6DS3TR-C_datasheet.pdf, p41 |
+| Max clock frequency | 10 MHz | LSM6DS3TR-C_datasheet.pdf, p26 |
+| CPOL/CPHA | 00 or 11 (SPI mode 0 or 3) | LSM6DS3TR-C_datasheet.pdf, p41 |
+| CS pin | Pin 12; 0 = SPI enabled, 1 = I2C enabled | LSM6DS3TR-C_datasheet.pdf, p20 |
+| Read/write bit | bit 0 of first byte: 0 = write, 1 = read | LSM6DS3TR-C_datasheet.pdf, p41 |
 
 ### I2C Master Interface (Sensor Hub)
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| Master clock frequency | 116.3 kHz | datasheet_LSM6DS3TR-C.pdf, p28 |
+| Master clock frequency | 116.3 kHz | LSM6DS3TR-C_datasheet.pdf, p28 |
 | Max external sensors | 4 | AN5130, p58 |
-| Data pins | SDx (pin 2 = MSDA), SCx (pin 3 = MSCL) | datasheet_LSM6DS3TR-C.pdf, p20 |
+| Data pins | SDx (pin 2 = MSDA), SCx (pin 3 = MSCL) | LSM6DS3TR-C_datasheet.pdf, p20 |
 | Internal pull-up | Configurable via PULL_UP_EN bit in MASTER_CONFIG | AN5130, p60 |
 | Trigger signal | Accelerometer DRDY (default) or external via INT2 pin | AN5130, p59 |
 
@@ -103,24 +103,24 @@ Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (
 
 | Pin # | Name | Mode 1 Function | Mode 2 Function | Source |
 |-------|------|-----------------|-----------------|--------|
-| 1 | SDO/SA0 | SPI SDO / I2C SA0 (LSB) | SPI SDO / I2C SA0 (LSB) | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 2 | SDx | Connect to VDDIO or GND | I2C master data (MSDA) | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 3 | SCx | Connect to VDDIO or GND | I2C master clock (MSCL) | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 4 | INT1 | Programmable interrupt 1 | Programmable interrupt 1 | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 5 | VDDIO | Power supply for I/O pins | Power supply for I/O pins | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 6 | GND | Ground | Ground | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 7 | GND | Ground | Ground | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 8 | VDD | Power supply | Power supply | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 9 | INT2 | Interrupt 2 / DEN | Interrupt 2 / DEN / MDRDY | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 10 | NC | Leave unconnected | Leave unconnected | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 11 | NC | Leave unconnected | Leave unconnected | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 12 | CS | I2C/SPI mode select (1=I2C, 0=SPI) | I2C/SPI mode select | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 13 | SCL | I2C SCL / SPI SPC | I2C SCL / SPI SPC | datasheet_LSM6DS3TR-C.pdf, p20 |
-| 14 | SDA | I2C SDA / SPI SDI / 3-wire SDO | I2C SDA / SPI SDI / 3-wire SDO | datasheet_LSM6DS3TR-C.pdf, p20 |
+| 1 | SDO/SA0 | SPI SDO / I2C SA0 (LSB) | SPI SDO / I2C SA0 (LSB) | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 2 | SDx | Connect to VDDIO or GND | I2C master data (MSDA) | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 3 | SCx | Connect to VDDIO or GND | I2C master clock (MSCL) | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 4 | INT1 | Programmable interrupt 1 | Programmable interrupt 1 | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 5 | VDDIO | Power supply for I/O pins | Power supply for I/O pins | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 6 | GND | Ground | Ground | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 7 | GND | Ground | Ground | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 8 | VDD | Power supply | Power supply | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 9 | INT2 | Interrupt 2 / DEN | Interrupt 2 / DEN / MDRDY | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 10 | NC | Leave unconnected | Leave unconnected | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 11 | NC | Leave unconnected | Leave unconnected | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 12 | CS | I2C/SPI mode select (1=I2C, 0=SPI) | I2C/SPI mode select | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 13 | SCL | I2C SCL / SPI SPC | I2C SCL / SPI SPC | LSM6DS3TR-C_datasheet.pdf, p20 |
+| 14 | SDA | I2C SDA / SPI SDI / 3-wire SDO | I2C SDA / SPI SDI / 3-wire SDO | LSM6DS3TR-C_datasheet.pdf, p20 |
 
-**NC pin note:** Pins 10–11 have internal pull-ups that can be disabled. Disable procedure: write 80h→FUNC_CFG_ACCESS, then 01h→PEDO_DEB_REG (0x15=05h), then 00h→FUNC_CFG_ACCESS. (datasheet_LSM6DS3TR-C.pdf, p42)
+**NC pin note:** Pins 10–11 have internal pull-ups that can be disabled. Disable procedure: write 80h→FUNC_CFG_ACCESS, then 01h→PEDO_DEB_REG (0x15=05h), then 00h→FUNC_CFG_ACCESS. (LSM6DS3TR-C_datasheet.pdf, p42)
 
-**Decoupling capacitors:** 100 nF recommended on VDD (pin 8) and VDDIO (pin 5). (datasheet_LSM6DS3TR-C.pdf, p20)
+**Decoupling capacitors:** 100 nF recommended on VDD (pin 8) and VDDIO (pin 5). (LSM6DS3TR-C_datasheet.pdf, p20)
 
 ---
 
@@ -130,30 +130,30 @@ Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| Supply voltage (VDD) | −0.3 V to 4.8 V | datasheet_LSM6DS3TR-C.pdf, p29 |
-| Storage temperature | −40 °C to +125 °C | datasheet_LSM6DS3TR-C.pdf, p29 |
-| Mechanical shock (0.2 ms) | 10,000 g | datasheet_LSM6DS3TR-C.pdf, p29 |
-| ESD protection (HBM) | 2 kV | datasheet_LSM6DS3TR-C.pdf, p29 |
-| Input voltage on control pins | −0.3 V to VDD_IO + 0.3 V | datasheet_LSM6DS3TR-C.pdf, p29 |
+| Supply voltage (VDD) | −0.3 V to 4.8 V | LSM6DS3TR-C_datasheet.pdf, p29 |
+| Storage temperature | −40 °C to +125 °C | LSM6DS3TR-C_datasheet.pdf, p29 |
+| Mechanical shock (0.2 ms) | 10,000 g | LSM6DS3TR-C_datasheet.pdf, p29 |
+| ESD protection (HBM) | 2 kV | LSM6DS3TR-C_datasheet.pdf, p29 |
+| Input voltage on control pins | −0.3 V to VDD_IO + 0.3 V | LSM6DS3TR-C_datasheet.pdf, p29 |
 
-**Warning:** Supply voltage on any pin should never exceed 4.8 V. Device is sensitive to mechanical shock and ESD. (datasheet_LSM6DS3TR-C.pdf, p29)
+**Warning:** Supply voltage on any pin should never exceed 4.8 V. Device is sensitive to mechanical shock and ESD. (LSM6DS3TR-C_datasheet.pdf, p29)
 
 ### Recommended Operating Conditions
 
 | Parameter | Min | Typ | Max | Unit | Source |
 |-----------|-----|-----|-----|------|--------|
-| VDD | 1.71 | 1.8 | 3.6 | V | datasheet_LSM6DS3TR-C.pdf, p24 |
-| VDDIO | 1.62 | — | VDD + 0.1 | V | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Operating temperature | −40 | — | +85 | °C | datasheet_LSM6DS3TR-C.pdf, p24 |
+| VDD | 1.71 | 1.8 | 3.6 | V | LSM6DS3TR-C_datasheet.pdf, p24 |
+| VDDIO | 1.62 | — | VDD + 0.1 | V | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Operating temperature | −40 | — | +85 | °C | LSM6DS3TR-C_datasheet.pdf, p24 |
 
 ### Digital I/O Levels (@ VDD = 1.8 V)
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| VIH (input high) | 0.7 × VDD_IO | datasheet_LSM6DS3TR-C.pdf, p24 |
-| VIL (input low) | 0.3 × VDD_IO | datasheet_LSM6DS3TR-C.pdf, p24 |
-| VOH (output high, IOH = 4 mA) | VDD_IO − 0.2 V | datasheet_LSM6DS3TR-C.pdf, p24 |
-| VOL (output low, IOL = 4 mA) | 0.2 V | datasheet_LSM6DS3TR-C.pdf, p24 |
+| VIH (input high) | 0.7 × VDD_IO | LSM6DS3TR-C_datasheet.pdf, p24 |
+| VIL (input low) | 0.3 × VDD_IO | LSM6DS3TR-C_datasheet.pdf, p24 |
+| VOH (output high, IOH = 4 mA) | VDD_IO − 0.2 V | LSM6DS3TR-C_datasheet.pdf, p24 |
+| VOL (output low, IOL = 4 mA) | 0.2 V | LSM6DS3TR-C_datasheet.pdf, p24 |
 
 ---
 
@@ -163,63 +163,63 @@ Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (
 
 | Parameter | Test Conditions | Typ | Unit | Source |
 |-----------|----------------|-----|------|--------|
-| Combo high-performance mode | ODR = 1.6 kHz | 0.90 | mA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Combo normal mode | ODR = 208 Hz | 0.45 | mA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Combo low-power mode | ODR = 52 Hz | 0.29 | mA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accelerometer HP mode | ODR < 1.6 kHz | 150 | μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accelerometer HP mode | ODR ≥ 1.6 kHz | 160 | μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accelerometer normal mode | ODR = 208 Hz | 85 | μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accelerometer low-power mode | ODR = 12.5 Hz | 9 | μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Power-down (both sensors) | — | 3 | μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Turn-on time | — | 35 | ms | datasheet_LSM6DS3TR-C.pdf, p24 |
+| Combo high-performance mode | ODR = 1.6 kHz | 0.90 | mA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Combo normal mode | ODR = 208 Hz | 0.45 | mA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Combo low-power mode | ODR = 52 Hz | 0.29 | mA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accelerometer HP mode | ODR < 1.6 kHz | 150 | μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accelerometer HP mode | ODR ≥ 1.6 kHz | 160 | μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accelerometer normal mode | ODR = 208 Hz | 85 | μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accelerometer low-power mode | ODR = 12.5 Hz | 9 | μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Power-down (both sensors) | — | 3 | μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Turn-on time | — | 35 | ms | LSM6DS3TR-C_datasheet.pdf, p24 |
 
 ### Accelerometer Mechanical Characteristics (@ VDD = 1.8 V, T = 25 °C)
 
 | Parameter | Value | Unit | Source |
 |-----------|-------|------|--------|
-| Full-scale range | ±2 / ±4 / ±8 / ±16 | g | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±2 g) | 0.061 | mg/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±4 g) | 0.122 | mg/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±8 g) | 0.244 | mg/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±16 g) | 0.488 | mg/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity change vs. temp | ±0.01 | %/°C | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Zero-g offset accuracy | ±40 | mg | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Zero-g level change vs. temp | ±0.5 | mg/°C | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Noise density (HP mode, ≤ ±8 g) | 90 | μg/√Hz | datasheet_LSM6DS3TR-C.pdf, p22 |
-| Noise density (HP mode, ±16 g) | 130 | μg/√Hz | datasheet_LSM6DS3TR-C.pdf, p22 |
-| RMS noise (normal/LP, ±2 g) | 1.7 | mg RMS | datasheet_LSM6DS3TR-C.pdf, p22 |
-| RMS noise (normal/LP, ±4 g) | 2.0 | mg RMS | datasheet_LSM6DS3TR-C.pdf, p22 |
-| RMS noise (normal/LP, ±8 g) | 2.4 | mg RMS | datasheet_LSM6DS3TR-C.pdf, p22 |
-| RMS noise (normal/LP, ±16 g) | 3.0 | mg RMS | datasheet_LSM6DS3TR-C.pdf, p22 |
-| Self-test output change | 90–1700 | mg | datasheet_LSM6DS3TR-C.pdf, p22 |
+| Full-scale range | ±2 / ±4 / ±8 / ±16 | g | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±2 g) | 0.061 | mg/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±4 g) | 0.122 | mg/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±8 g) | 0.244 | mg/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±16 g) | 0.488 | mg/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity change vs. temp | ±0.01 | %/°C | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Zero-g offset accuracy | ±40 | mg | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Zero-g level change vs. temp | ±0.5 | mg/°C | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Noise density (HP mode, ≤ ±8 g) | 90 | μg/√Hz | LSM6DS3TR-C_datasheet.pdf, p22 |
+| Noise density (HP mode, ±16 g) | 130 | μg/√Hz | LSM6DS3TR-C_datasheet.pdf, p22 |
+| RMS noise (normal/LP, ±2 g) | 1.7 | mg RMS | LSM6DS3TR-C_datasheet.pdf, p22 |
+| RMS noise (normal/LP, ±4 g) | 2.0 | mg RMS | LSM6DS3TR-C_datasheet.pdf, p22 |
+| RMS noise (normal/LP, ±8 g) | 2.4 | mg RMS | LSM6DS3TR-C_datasheet.pdf, p22 |
+| RMS noise (normal/LP, ±16 g) | 3.0 | mg RMS | LSM6DS3TR-C_datasheet.pdf, p22 |
+| Self-test output change | 90–1700 | mg | LSM6DS3TR-C_datasheet.pdf, p22 |
 
 ### Gyroscope Mechanical Characteristics (@ VDD = 1.8 V, T = 25 °C)
 
 | Parameter | Value | Unit | Source |
 |-----------|-------|------|--------|
-| Full-scale range | ±125 / ±245 / ±500 / ±1000 / ±2000 | dps | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±125 dps) | 4.375 | mdps/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±250 dps) | 8.75 | mdps/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±500 dps) | 17.50 | mdps/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±1000 dps) | 35 | mdps/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity (±2000 dps) | 70 | mdps/LSB | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Sensitivity change vs. temp | ±0.007 | %/°C | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Zero-rate level | ±3 | dps | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Zero-rate change vs. temp | ±0.05 | dps/°C | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Rate noise density (HP mode) | 5 | mdps/√Hz | datasheet_LSM6DS3TR-C.pdf, p21 |
-| RMS noise (normal/LP mode) | 75 | mdps | datasheet_LSM6DS3TR-C.pdf, p21 |
-| Self-test change (±250 dps) | 20–80 | dps | datasheet_LSM6DS3TR-C.pdf, p22 |
-| Self-test change (±2000 dps) | 150–700 | dps | datasheet_LSM6DS3TR-C.pdf, p22 |
+| Full-scale range | ±125 / ±245 / ±500 / ±1000 / ±2000 | dps | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±125 dps) | 4.375 | mdps/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±250 dps) | 8.75 | mdps/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±500 dps) | 17.50 | mdps/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±1000 dps) | 35 | mdps/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity (±2000 dps) | 70 | mdps/LSB | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Sensitivity change vs. temp | ±0.007 | %/°C | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Zero-rate level | ±3 | dps | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Zero-rate change vs. temp | ±0.05 | dps/°C | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Rate noise density (HP mode) | 5 | mdps/√Hz | LSM6DS3TR-C_datasheet.pdf, p21 |
+| RMS noise (normal/LP mode) | 75 | mdps | LSM6DS3TR-C_datasheet.pdf, p21 |
+| Self-test change (±250 dps) | 20–80 | dps | LSM6DS3TR-C_datasheet.pdf, p22 |
+| Self-test change (±2000 dps) | 150–700 | dps | LSM6DS3TR-C_datasheet.pdf, p22 |
 
 ### Temperature Sensor Characteristics
 
 | Parameter | Value | Unit | Source |
 |-----------|-------|------|--------|
-| Refresh rate | 52 (max) | Hz | datasheet_LSM6DS3TR-C.pdf, p25 |
-| Offset | −15 to +15 (0 LSB typ. at 25 °C) | °C | datasheet_LSM6DS3TR-C.pdf, p25 |
-| Sensitivity | 256 | LSB/°C | datasheet_LSM6DS3TR-C.pdf, p25 |
-| Stabilization time | 500 | μs | datasheet_LSM6DS3TR-C.pdf, p25 |
-| ADC resolution | 16 | bit | datasheet_LSM6DS3TR-C.pdf, p25 |
+| Refresh rate | 52 (max) | Hz | LSM6DS3TR-C_datasheet.pdf, p25 |
+| Offset | −15 to +15 (0 LSB typ. at 25 °C) | °C | LSM6DS3TR-C_datasheet.pdf, p25 |
+| Sensitivity | 256 | LSB/°C | LSM6DS3TR-C_datasheet.pdf, p25 |
+| Stabilization time | 500 | μs | LSM6DS3TR-C_datasheet.pdf, p25 |
+| ADC resolution | 16 | bit | LSM6DS3TR-C_datasheet.pdf, p25 |
 
 ---
 
@@ -227,19 +227,19 @@ Power consumption: 0.90 mA combo high-performance mode; 3 μA power-down mode. (
 
 ### Power Mode Selection
 
-The accelerometer and gyroscope operate independently with separate ODR and power mode settings. (datasheet_LSM6DS3TR-C.pdf, p31)
+The accelerometer and gyroscope operate independently with separate ODR and power mode settings. (LSM6DS3TR-C_datasheet.pdf, p31)
 
 **Accelerometer power modes** (controlled by `XL_HM_MODE` in FUNC_CFG_ACCESS (01h)):
 - `XL_HM_MODE = 0`: High-performance mode for all ODRs (12.5 Hz–6.66 kHz)
 - `XL_HM_MODE = 1`: Low-power mode (1.6, 12.5, 26, 52 Hz) and Normal mode (104, 208 Hz)
 
-(datasheet_LSM6DS3TR-C.pdf, p31)
+(LSM6DS3TR-C_datasheet.pdf, p31)
 
 **Gyroscope power modes** (controlled by `G_HM_MODE` in CTRL7_G (16h)):
 - `G_HM_MODE = 0`: High-performance mode for all ODRs (12.5 Hz–6.66 kHz)
 - `G_HM_MODE = 1`: Low-power mode (12.5, 26, 52 Hz) and Normal mode (104, 208 Hz)
 
-(datasheet_LSM6DS3TR-C.pdf, p31)
+(LSM6DS3TR-C_datasheet.pdf, p31)
 
 **Gyroscope Sleep mode**: Gyroscope maintains bias calibration while consuming less power. Enabled via `SLEEP_G` bit in CTRL4_C (13h). (AN5130, p12)
 
@@ -280,91 +280,91 @@ The accelerometer and gyroscope operate independently with separate ODR and powe
 
 | Configuration | Current | Source |
 |---------------|---------|--------|
-| Both sensors power-down | 3 μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accel only, LP 12.5 Hz | 9 μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accel only, normal 208 Hz | 85 μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accel only, HP < 1.6 kHz | 150 μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Accel only, HP ≥ 1.6 kHz | 160 μA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Combo LP 52 Hz | 0.29 mA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Combo normal 208 Hz | 0.45 mA | datasheet_LSM6DS3TR-C.pdf, p24 |
-| Combo HP 1.6 kHz | 0.90 mA | datasheet_LSM6DS3TR-C.pdf, p24 |
+| Both sensors power-down | 3 μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accel only, LP 12.5 Hz | 9 μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accel only, normal 208 Hz | 85 μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accel only, HP < 1.6 kHz | 150 μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Accel only, HP ≥ 1.6 kHz | 160 μA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Combo LP 52 Hz | 0.29 mA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Combo normal 208 Hz | 0.45 mA | LSM6DS3TR-C_datasheet.pdf, p24 |
+| Combo HP 1.6 kHz | 0.90 mA | LSM6DS3TR-C_datasheet.pdf, p24 |
 
 ---
 
 ## 9. Register Map (Main Registers)
 
-All registers are 8-bit. Default values indicated where documented. Address space 00h–75h. (datasheet_LSM6DS3TR-C.pdf, p44–96)
+All registers are 8-bit. Default values indicated where documented. Address space 00h–75h. (LSM6DS3TR-C_datasheet.pdf, p44–96)
 
 | Addr | Name | Type | Default | Description | Source |
 |------|------|------|---------|-------------|--------|
-| 01h | FUNC_CFG_ACCESS | R/W | 00h | Access embedded function registers; XL_HM_MODE bit (b4) selects accel power mode | datasheet_LSM6DS3TR-C.pdf, p45 |
-| 02h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | datasheet_LSM6DS3TR-C.pdf, p46 |
-| 04h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | datasheet_LSM6DS3TR-C.pdf, p46 |
-| 06h | FIFO_CTRL1 | R/W | 00h | FIFO threshold low [FTH_7:0] | datasheet_LSM6DS3TR-C.pdf, p46 |
-| 07h | FIFO_CTRL2 | R/W | 00h | FIFO threshold high [FTH_10:8], TIMER_PEDO_FIFO_EN/DRDY, FIFO_TEMP_EN | datasheet_LSM6DS3TR-C.pdf, p47 |
-| 08h | FIFO_CTRL3 | R/W | 00h | Gyro/accel FIFO decimation [DEC_FIFO_GYRO, DEC_FIFO_XL] | datasheet_LSM6DS3TR-C.pdf, p47 |
-| 09h | FIFO_CTRL4 | R/W | 00h | 3rd/4th data set decimation, STOP_ON_FTH, ONLY_HIGH_DATA | datasheet_LSM6DS3TR-C.pdf, p48 |
-| 0Ah | FIFO_CTRL5 | R/W | 00h | FIFO ODR [ODR_FIFO_3:0], FIFO mode [FIFO_MODE_2:0] | datasheet_LSM6DS3TR-C.pdf, p48 |
-| 0Bh | DRDY_PULSE_CFG_G | R/W | 00h | DRDY pulsed mode, INT2_WRIST_TILT | datasheet_LSM6DS3TR-C.pdf, p49 |
-| 0Dh | INT1_CTRL | R/W | 00h | INT1 pin control (DRDY, FIFO, boot, step, sig-motion) | datasheet_LSM6DS3TR-C.pdf, p49 |
-| 0Eh | INT2_CTRL | R/W | 00h | INT2 pin control (DRDY, FIFO, step-delta, step-OV, temp) | datasheet_LSM6DS3TR-C.pdf, p50 |
-| 0Fh | WHO_AM_I | R | 6Ah | Device identification | datasheet_LSM6DS3TR-C.pdf, p50 |
-| 10h | CTRL1_XL | R/W | 00h | Accel ODR [ODR_XL_3:0], full-scale [FS_XL_1:0], LPF1_BW_SEL | datasheet_LSM6DS3TR-C.pdf, p50 |
-| 11h | CTRL2_G | R/W | 00h | Gyro ODR [ODR_G_3:0], full-scale [FS_G_1:0], FS_125 | datasheet_LSM6DS3TR-C.pdf, p51 |
-| 12h | CTRL3_C | R/W | 04h | BOOT, BDU, H_LACTIVE, PP_OD, SIM, IF_INC, BLE, SW_RESET | datasheet_LSM6DS3TR-C.pdf, p52 |
-| 13h | CTRL4_C | R/W | 00h | DEN_XL_EN, SLEEP_G, INT2_on_INT1, DEN_DRDY_INT1, DRDY_MASK, I2C_disable, LPF1_SEL_G | datasheet_LSM6DS3TR-C.pdf, p53 |
-| 14h | CTRL5_C | R/W | 00h | Self-test [ST_XL, ST_G], DEN_LH, rounding | datasheet_LSM6DS3TR-C.pdf, p54 |
-| 15h | CTRL6_C | R/W | 00h | TRIG_EN, LVL1_EN, LVL2_EN, XL_HM_MODE (redundant — **unclear**: also at 01h b4) | datasheet_LSM6DS3TR-C.pdf, p55 |
-| 16h | CTRL7_G | R/W | 00h | G_HM_MODE, HP_EN_G, HPM_G[1:0], ROUNDING_STATUS, HP_G_RST | datasheet_LSM6DS3TR-C.pdf, p56 |
-| 17h | CTRL8_XL | R/W | 00h | LPF2_XL_EN, HPCF_XL[1:0], HP_REF_MODE, INPUT_COMPOSITE, HP_SLOPE_XL_EN, LOW_PASS_ON_6D | datasheet_LSM6DS3TR-C.pdf, p57 |
-| 18h | CTRL9_XL | R/W | E0h | DEN stamping axis bits [DEN_X, DEN_Y, DEN_Z], SOFT_EN | datasheet_LSM6DS3TR-C.pdf, p58 |
-| 19h | CTRL10_C | R/W | 00h | WRIST_TILT_EN, TIMER_EN, PEDO_EN, TILT_EN, FUNC_EN, PEDO_RST_STEP, SIGN_MOTION_EN | datasheet_LSM6DS3TR-C.pdf, p59 |
-| 1Ah | MASTER_CONFIG | R/W | 00h | DRDY_ON_INT1, DATA_VALID_SEL_FIFO, START_CONFIG, PULL_UP_EN, PASS_THROUGH_MODE, IRON_EN, MASTER_ON | datasheet_LSM6DS3TR-C.pdf, p60 |
-| 1Bh | WAKE_UP_SRC | R | 00h | FF_IA, SLEEP_STATE_IA, WU_IA, X_WU, Y_WU, Z_WU | datasheet_LSM6DS3TR-C.pdf, p61 |
-| 1Ch | TAP_SRC | R | 00h | TAP_IA, SINGLE_TAP, DOUBLE_TAP, TAP_SIGN, X/Y/Z_TAP | datasheet_LSM6DS3TR-C.pdf, p62 |
-| 1Dh | D6D_SRC | R | 00h | DEN_DRDY, D6D_IA, ZH, ZL, YH, YL, XH, XL | datasheet_LSM6DS3TR-C.pdf, p63 |
-| 1Eh | STATUS_REG | R | 00h | TDA (temp), GDA (gyro), XLDA (accel) data available | datasheet_LSM6DS3TR-C.pdf, p64 |
-| 20h–21h | OUT_TEMP_L/H | R | 00h | Temperature output (16-bit, two's complement) | datasheet_LSM6DS3TR-C.pdf, p65 |
-| 22h–27h | OUTX/Y/Z_L/H_G | R | 00h | Gyroscope output X, Y, Z (16-bit, two's complement each) | datasheet_LSM6DS3TR-C.pdf, p65–67 |
-| 28h–2Dh | OUTX/Y/Z_L/H_XL | R | 00h | Accelerometer output X, Y, Z (16-bit, two's complement each) | datasheet_LSM6DS3TR-C.pdf, p67–69 |
-| 2Eh–39h | SENSORHUB1–12_REG | R | 00h | External sensor data (1st & 2nd FIFO data sets for hub) | datasheet_LSM6DS3TR-C.pdf, p69–74 |
-| 3Ah | FIFO_STATUS1 | R | 00h | DIFF_FIFO[7:0] — unread word count low | datasheet_LSM6DS3TR-C.pdf, p75 |
-| 3Bh | FIFO_STATUS2 | R | 00h | WaterM, OVER_RUN, FIFO_FULL_SMART, FIFO_EMPTY, DIFF_FIFO[10:8] | datasheet_LSM6DS3TR-C.pdf, p75 |
-| 3Ch–3Dh | FIFO_STATUS3/4 | R | 00h | FIFO_PATTERN[9:0] — identifies next data in FIFO | datasheet_LSM6DS3TR-C.pdf, p76 |
-| 3Eh–3Fh | FIFO_DATA_OUT_L/H | R | 00h | FIFO data output (16-bit) | datasheet_LSM6DS3TR-C.pdf, p77 |
-| 40h–42h | TIMESTAMP0–2_REG | R | 00h | Timestamp (24-bit) | datasheet_LSM6DS3TR-C.pdf, p77–78 |
-| 49h–4Ah | STEP_TIMESTAMP_L/H | R | 00h | Step timestamp (16-bit) | datasheet_LSM6DS3TR-C.pdf, p83 |
-| 4Bh–4Ch | STEP_COUNTER_L/H | R | 00h | Step counter (16-bit unsigned) | datasheet_LSM6DS3TR-C.pdf, p83–84 |
-| 4Dh–52h | SENSORHUB13–18_REG | R | 00h | External sensor data (secondary set) | datasheet_LSM6DS3TR-C.pdf, p80–82 |
-| 53h | FUNC_SRC1 | R | 00h | STEP_OVERFLOW, STEP_COUNT_DELTA_IA, STEP_DETECTED, TILT_IA, SENSORHUB_END_OP, SI_END_OP, HI_FAIL, SIGN_MOTION_IA | datasheet_LSM6DS3TR-C.pdf, p83 |
-| 54h | FUNC_SRC2 | R | 00h | WRIST_TILT_IA, SLAVEx_NACK (x=0..3) | datasheet_LSM6DS3TR-C.pdf, p84 |
-| 55h | WRIST_TILT_IA | R | 00h | Wrist tilt axis source (X/Y/Z pos/neg) | datasheet_LSM6DS3TR-C.pdf, p85 |
-| 58h | TAP_CFG | R/W | 00h | INTERRUPTS_ENABLE, INACT_EN[1:0], SLOPE_FDS, TAP_X/Y/Z_EN, LIR | datasheet_LSM6DS3TR-C.pdf, p86 |
-| 59h | TAP_THS_6D | R/W | 00h | D4D_EN, SIXD_THS[1:0], TAP_THS[4:0] | datasheet_LSM6DS3TR-C.pdf, p87 |
-| 5Ah | INT_DUR2 | R/W | 00h | DUR[3:0], QUIET[1:0], SHOCK[1:0] | datasheet_LSM6DS3TR-C.pdf, p88 |
-| 5Bh | WAKE_UP_THS | R/W | 00h | SINGLE_DOUBLE_TAP, WK_THS[5:0] | datasheet_LSM6DS3TR-C.pdf, p89 |
-| 5Ch | WAKE_UP_DUR | R/W | 00h | FF_DUR5, WAKE_DUR[1:0], TIMER_HR, SLEEP_DUR[3:0] | datasheet_LSM6DS3TR-C.pdf, p89 |
-| 5Dh | FREE_FALL | R/W | 00h | FF_DUR[4:0] (bits 7:3), FF_THS[2:0] (bits 2:0) | datasheet_LSM6DS3TR-C.pdf, p90 |
-| 5Eh | MD1_CFG | R/W | 00h | INT1 routing: INACT, SINGLE_TAP, WU, FF, DOUBLE_TAP, 6D, TILT, TIMER | datasheet_LSM6DS3TR-C.pdf, p91 |
-| 5Fh | MD2_CFG | R/W | 00h | INT2 routing: INACT, SINGLE_TAP, WU, FF, DOUBLE_TAP, 6D, TILT, IRON | datasheet_LSM6DS3TR-C.pdf, p92 |
-| 60h | MASTER_CMD_CODE | R/W | 00h | Master command code | datasheet_LSM6DS3TR-C.pdf, p93 |
-| 61h | SENS_SYNC_SPI_ERROR_CODE | R/W | 00h | Sensor sync SPI error code | datasheet_LSM6DS3TR-C.pdf, p93 |
-| 66h–6Bh | OUT_MAG_RAW_X/Y/Z_L/H | R | 00h | Raw magnetometer data (from sensor hub) | datasheet_LSM6DS3TR-C.pdf, p94 |
-| 73h | X_OFS_USR | R/W | 00h | Accelerometer X-axis user offset correction | datasheet_LSM6DS3TR-C.pdf, p95 |
-| 74h | Y_OFS_USR | R/W | 00h | Accelerometer Y-axis user offset correction | datasheet_LSM6DS3TR-C.pdf, p95 |
-| 75h | Z_OFS_USR | R/W | 00h | Accelerometer Z-axis user offset correction | datasheet_LSM6DS3TR-C.pdf, p96 |
+| 01h | FUNC_CFG_ACCESS | R/W | 00h | Access embedded function registers; XL_HM_MODE bit (b4) selects accel power mode | LSM6DS3TR-C_datasheet.pdf, p45 |
+| 02h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | LSM6DS3TR-C_datasheet.pdf, p46 |
+| 04h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | LSM6DS3TR-C_datasheet.pdf, p46 |
+| 06h | FIFO_CTRL1 | R/W | 00h | FIFO threshold low [FTH_7:0] | LSM6DS3TR-C_datasheet.pdf, p46 |
+| 07h | FIFO_CTRL2 | R/W | 00h | FIFO threshold high [FTH_10:8], TIMER_PEDO_FIFO_EN/DRDY, FIFO_TEMP_EN | LSM6DS3TR-C_datasheet.pdf, p47 |
+| 08h | FIFO_CTRL3 | R/W | 00h | Gyro/accel FIFO decimation [DEC_FIFO_GYRO, DEC_FIFO_XL] | LSM6DS3TR-C_datasheet.pdf, p47 |
+| 09h | FIFO_CTRL4 | R/W | 00h | 3rd/4th data set decimation, STOP_ON_FTH, ONLY_HIGH_DATA | LSM6DS3TR-C_datasheet.pdf, p48 |
+| 0Ah | FIFO_CTRL5 | R/W | 00h | FIFO ODR [ODR_FIFO_3:0], FIFO mode [FIFO_MODE_2:0] | LSM6DS3TR-C_datasheet.pdf, p48 |
+| 0Bh | DRDY_PULSE_CFG_G | R/W | 00h | DRDY pulsed mode, INT2_WRIST_TILT | LSM6DS3TR-C_datasheet.pdf, p49 |
+| 0Dh | INT1_CTRL | R/W | 00h | INT1 pin control (DRDY, FIFO, boot, step, sig-motion) | LSM6DS3TR-C_datasheet.pdf, p49 |
+| 0Eh | INT2_CTRL | R/W | 00h | INT2 pin control (DRDY, FIFO, step-delta, step-OV, temp) | LSM6DS3TR-C_datasheet.pdf, p50 |
+| 0Fh | WHO_AM_I | R | 6Ah | Device identification | LSM6DS3TR-C_datasheet.pdf, p50 |
+| 10h | CTRL1_XL | R/W | 00h | Accel ODR [ODR_XL_3:0], full-scale [FS_XL_1:0], LPF1_BW_SEL | LSM6DS3TR-C_datasheet.pdf, p50 |
+| 11h | CTRL2_G | R/W | 00h | Gyro ODR [ODR_G_3:0], full-scale [FS_G_1:0], FS_125 | LSM6DS3TR-C_datasheet.pdf, p51 |
+| 12h | CTRL3_C | R/W | 04h | BOOT, BDU, H_LACTIVE, PP_OD, SIM, IF_INC, BLE, SW_RESET | LSM6DS3TR-C_datasheet.pdf, p52 |
+| 13h | CTRL4_C | R/W | 00h | DEN_XL_EN, SLEEP_G, INT2_on_INT1, DEN_DRDY_INT1, DRDY_MASK, I2C_disable, LPF1_SEL_G | LSM6DS3TR-C_datasheet.pdf, p53 |
+| 14h | CTRL5_C | R/W | 00h | Self-test [ST_XL, ST_G], DEN_LH, rounding | LSM6DS3TR-C_datasheet.pdf, p54 |
+| 15h | CTRL6_C | R/W | 00h | TRIG_EN, LVL1_EN, LVL2_EN, XL_HM_MODE (redundant — **unclear**: also at 01h b4) | LSM6DS3TR-C_datasheet.pdf, p55 |
+| 16h | CTRL7_G | R/W | 00h | G_HM_MODE, HP_EN_G, HPM_G[1:0], ROUNDING_STATUS, HP_G_RST | LSM6DS3TR-C_datasheet.pdf, p56 |
+| 17h | CTRL8_XL | R/W | 00h | LPF2_XL_EN, HPCF_XL[1:0], HP_REF_MODE, INPUT_COMPOSITE, HP_SLOPE_XL_EN, LOW_PASS_ON_6D | LSM6DS3TR-C_datasheet.pdf, p57 |
+| 18h | CTRL9_XL | R/W | E0h | DEN stamping axis bits [DEN_X, DEN_Y, DEN_Z], SOFT_EN | LSM6DS3TR-C_datasheet.pdf, p58 |
+| 19h | CTRL10_C | R/W | 00h | WRIST_TILT_EN, TIMER_EN, PEDO_EN, TILT_EN, FUNC_EN, PEDO_RST_STEP, SIGN_MOTION_EN | LSM6DS3TR-C_datasheet.pdf, p59 |
+| 1Ah | MASTER_CONFIG | R/W | 00h | DRDY_ON_INT1, DATA_VALID_SEL_FIFO, START_CONFIG, PULL_UP_EN, PASS_THROUGH_MODE, IRON_EN, MASTER_ON | LSM6DS3TR-C_datasheet.pdf, p60 |
+| 1Bh | WAKE_UP_SRC | R | 00h | FF_IA, SLEEP_STATE_IA, WU_IA, X_WU, Y_WU, Z_WU | LSM6DS3TR-C_datasheet.pdf, p61 |
+| 1Ch | TAP_SRC | R | 00h | TAP_IA, SINGLE_TAP, DOUBLE_TAP, TAP_SIGN, X/Y/Z_TAP | LSM6DS3TR-C_datasheet.pdf, p62 |
+| 1Dh | D6D_SRC | R | 00h | DEN_DRDY, D6D_IA, ZH, ZL, YH, YL, XH, XL | LSM6DS3TR-C_datasheet.pdf, p63 |
+| 1Eh | STATUS_REG | R | 00h | TDA (temp), GDA (gyro), XLDA (accel) data available | LSM6DS3TR-C_datasheet.pdf, p64 |
+| 20h–21h | OUT_TEMP_L/H | R | 00h | Temperature output (16-bit, two's complement) | LSM6DS3TR-C_datasheet.pdf, p65 |
+| 22h–27h | OUTX/Y/Z_L/H_G | R | 00h | Gyroscope output X, Y, Z (16-bit, two's complement each) | LSM6DS3TR-C_datasheet.pdf, p65–67 |
+| 28h–2Dh | OUTX/Y/Z_L/H_XL | R | 00h | Accelerometer output X, Y, Z (16-bit, two's complement each) | LSM6DS3TR-C_datasheet.pdf, p67–69 |
+| 2Eh–39h | SENSORHUB1–12_REG | R | 00h | External sensor data (1st & 2nd FIFO data sets for hub) | LSM6DS3TR-C_datasheet.pdf, p69–74 |
+| 3Ah | FIFO_STATUS1 | R | 00h | DIFF_FIFO[7:0] — unread word count low | LSM6DS3TR-C_datasheet.pdf, p75 |
+| 3Bh | FIFO_STATUS2 | R | 00h | WaterM, OVER_RUN, FIFO_FULL_SMART, FIFO_EMPTY, DIFF_FIFO[10:8] | LSM6DS3TR-C_datasheet.pdf, p75 |
+| 3Ch–3Dh | FIFO_STATUS3/4 | R | 00h | FIFO_PATTERN[9:0] — identifies next data in FIFO | LSM6DS3TR-C_datasheet.pdf, p76 |
+| 3Eh–3Fh | FIFO_DATA_OUT_L/H | R | 00h | FIFO data output (16-bit) | LSM6DS3TR-C_datasheet.pdf, p77 |
+| 40h–42h | TIMESTAMP0–2_REG | R | 00h | Timestamp (24-bit) | LSM6DS3TR-C_datasheet.pdf, p77–78 |
+| 49h–4Ah | STEP_TIMESTAMP_L/H | R | 00h | Step timestamp (16-bit) | LSM6DS3TR-C_datasheet.pdf, p83 |
+| 4Bh–4Ch | STEP_COUNTER_L/H | R | 00h | Step counter (16-bit unsigned) | LSM6DS3TR-C_datasheet.pdf, p83–84 |
+| 4Dh–52h | SENSORHUB13–18_REG | R | 00h | External sensor data (secondary set) | LSM6DS3TR-C_datasheet.pdf, p80–82 |
+| 53h | FUNC_SRC1 | R | 00h | STEP_OVERFLOW, STEP_COUNT_DELTA_IA, STEP_DETECTED, TILT_IA, SENSORHUB_END_OP, SI_END_OP, HI_FAIL, SIGN_MOTION_IA | LSM6DS3TR-C_datasheet.pdf, p83 |
+| 54h | FUNC_SRC2 | R | 00h | WRIST_TILT_IA, SLAVEx_NACK (x=0..3) | LSM6DS3TR-C_datasheet.pdf, p84 |
+| 55h | WRIST_TILT_IA | R | 00h | Wrist tilt axis source (X/Y/Z pos/neg) | LSM6DS3TR-C_datasheet.pdf, p85 |
+| 58h | TAP_CFG | R/W | 00h | INTERRUPTS_ENABLE, INACT_EN[1:0], SLOPE_FDS, TAP_X/Y/Z_EN, LIR | LSM6DS3TR-C_datasheet.pdf, p86 |
+| 59h | TAP_THS_6D | R/W | 00h | D4D_EN, SIXD_THS[1:0], TAP_THS[4:0] | LSM6DS3TR-C_datasheet.pdf, p87 |
+| 5Ah | INT_DUR2 | R/W | 00h | DUR[3:0], QUIET[1:0], SHOCK[1:0] | LSM6DS3TR-C_datasheet.pdf, p88 |
+| 5Bh | WAKE_UP_THS | R/W | 00h | SINGLE_DOUBLE_TAP, WK_THS[5:0] | LSM6DS3TR-C_datasheet.pdf, p89 |
+| 5Ch | WAKE_UP_DUR | R/W | 00h | FF_DUR5, WAKE_DUR[1:0], TIMER_HR, SLEEP_DUR[3:0] | LSM6DS3TR-C_datasheet.pdf, p89 |
+| 5Dh | FREE_FALL | R/W | 00h | FF_DUR[4:0] (bits 7:3), FF_THS[2:0] (bits 2:0) | LSM6DS3TR-C_datasheet.pdf, p90 |
+| 5Eh | MD1_CFG | R/W | 00h | INT1 routing: INACT, SINGLE_TAP, WU, FF, DOUBLE_TAP, 6D, TILT, TIMER | LSM6DS3TR-C_datasheet.pdf, p91 |
+| 5Fh | MD2_CFG | R/W | 00h | INT2 routing: INACT, SINGLE_TAP, WU, FF, DOUBLE_TAP, 6D, TILT, IRON | LSM6DS3TR-C_datasheet.pdf, p92 |
+| 60h | MASTER_CMD_CODE | R/W | 00h | Master command code | LSM6DS3TR-C_datasheet.pdf, p93 |
+| 61h | SENS_SYNC_SPI_ERROR_CODE | R/W | 00h | Sensor sync SPI error code | LSM6DS3TR-C_datasheet.pdf, p93 |
+| 66h–6Bh | OUT_MAG_RAW_X/Y/Z_L/H | R | 00h | Raw magnetometer data (from sensor hub) | LSM6DS3TR-C_datasheet.pdf, p94 |
+| 73h | X_OFS_USR | R/W | 00h | Accelerometer X-axis user offset correction | LSM6DS3TR-C_datasheet.pdf, p95 |
+| 74h | Y_OFS_USR | R/W | 00h | Accelerometer Y-axis user offset correction | LSM6DS3TR-C_datasheet.pdf, p95 |
+| 75h | Z_OFS_USR | R/W | 00h | Accelerometer Z-axis user offset correction | LSM6DS3TR-C_datasheet.pdf, p96 |
 
 **Key control register bits:**
 
-- **CTRL3_C (12h)**: `IF_INC` (auto-increment, default = 1), `BDU` (block data update, set to 1 for proper reading), `BLE` (big/little-endian), `SW_RESET`, `BOOT`. (datasheet_LSM6DS3TR-C.pdf, p52)
-- **CTRL1_XL (10h)**: `ODR_XL[3:0]` (bits 7:4), `FS_XL[1:0]` (bits 3:2): 00=±2g, 01=±16g, 10=±4g, 11=±8g. `LPF1_BW_SEL` (bit 1). (datasheet_LSM6DS3TR-C.pdf, p50)
-- **CTRL2_G (11h)**: `ODR_G[3:0]` (bits 7:4), `FS_G[1:0]` (bits 3:2): 00=250dps, 01=500dps, 10=1000dps, 11=2000dps. `FS_125` (bit 1): 1=125 dps. (datasheet_LSM6DS3TR-C.pdf, p51)
+- **CTRL3_C (12h)**: `IF_INC` (auto-increment, default = 1), `BDU` (block data update, set to 1 for proper reading), `BLE` (big/little-endian), `SW_RESET`, `BOOT`. (LSM6DS3TR-C_datasheet.pdf, p52)
+- **CTRL1_XL (10h)**: `ODR_XL[3:0]` (bits 7:4), `FS_XL[1:0]` (bits 3:2): 00=±2g, 01=±16g, 10=±4g, 11=±8g. `LPF1_BW_SEL` (bit 1). (LSM6DS3TR-C_datasheet.pdf, p50)
+- **CTRL2_G (11h)**: `ODR_G[3:0]` (bits 7:4), `FS_G[1:0]` (bits 3:2): 00=250dps, 01=500dps, 10=1000dps, 11=2000dps. `FS_125` (bit 1): 1=125 dps. (LSM6DS3TR-C_datasheet.pdf, p51)
 
 ---
 
 ## 10. Embedded Functions Register Map (Bank A & Bank B)
 
-Embedded function registers are accessed by setting `FUNC_CFG_EN` (bit 7) in FUNC_CFG_ACCESS (01h). Bank A = FUNC_CFG_EN=1, FUNC_CFG_EN_B=0. Bank B = FUNC_CFG_EN=1, FUNC_CFG_EN_B=1. (datasheet_LSM6DS3TR-C.pdf, p97)
+Embedded function registers are accessed by setting `FUNC_CFG_EN` (bit 7) in FUNC_CFG_ACCESS (01h). Bank A = FUNC_CFG_EN=1, FUNC_CFG_EN_B=0. Bank B = FUNC_CFG_EN=1, FUNC_CFG_EN_B=1. (LSM6DS3TR-C_datasheet.pdf, p97)
 
 **Critical:** Modifications to embedded function registers must be done while the device is in power-down mode. (AN5130, p56)
 
@@ -410,12 +410,12 @@ Embedded function registers are accessed by setting `FUNC_CFG_EN` (bit 7) in FUN
 
 | FS_XL[1:0] | Full Scale | Sensitivity (mg/LSB) | Source |
 |-------------|------------|---------------------|--------|
-| 00 | ±2 g | 0.061 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 10 | ±4 g | 0.122 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 11 | ±8 g | 0.244 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 01 | ±16 g | 0.488 | datasheet_LSM6DS3TR-C.pdf, p21 |
+| 00 | ±2 g | 0.061 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 10 | ±4 g | 0.122 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 11 | ±8 g | 0.244 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 01 | ±16 g | 0.488 | LSM6DS3TR-C_datasheet.pdf, p21 |
 
-**Note:** FS_XL encoding is non-sequential: `01` = ±16 g, not ±4 g. (datasheet_LSM6DS3TR-C.pdf, p50)
+**Note:** FS_XL encoding is non-sequential: `01` = ±16 g, not ±4 g. (LSM6DS3TR-C_datasheet.pdf, p50)
 
 ### Filtering Chain
 
@@ -440,7 +440,7 @@ The slope filter computes: `slope(tn) = [acc(tn) - acc(tn-1)] / 2`. Selected by 
 
 ### Accelerometer User Offset Registers
 
-Three 8-bit registers (X_OFS_USR, Y_OFS_USR, Z_OFS_USR at 73h–75h) provide user-programmable offset correction. Weight selectable via `USR_OFF_W` bit in CTRL6_C: 0 = 2^−10 g/LSB (~1 mg/LSB), 1 = 2^−6 g/LSB (~15.6 mg/LSB). (AN5130, p27; datasheet_LSM6DS3TR-C.pdf, p95)
+Three 8-bit registers (X_OFS_USR, Y_OFS_USR, Z_OFS_USR at 73h–75h) provide user-programmable offset correction. Weight selectable via `USR_OFF_W` bit in CTRL6_C: 0 = 2^−10 g/LSB (~1 mg/LSB), 1 = 2^−6 g/LSB (~15.6 mg/LSB). (AN5130, p27; LSM6DS3TR-C_datasheet.pdf, p95)
 
 ### Turn-On Time
 
@@ -459,11 +459,11 @@ Samples to discard after power-on depend on ODR and filter configuration — con
 
 | FS_G[1:0] | FS_125 | Full Scale | Sensitivity (mdps/LSB) | Source |
 |-----------|--------|------------|----------------------|--------|
-| — | 1 | ±125 dps | 4.375 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 00 | 0 | ±250 dps | 8.75 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 01 | 0 | ±500 dps | 17.50 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 10 | 0 | ±1000 dps | 35 | datasheet_LSM6DS3TR-C.pdf, p21 |
-| 11 | 0 | ±2000 dps | 70 | datasheet_LSM6DS3TR-C.pdf, p21 |
+| — | 1 | ±125 dps | 4.375 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 00 | 0 | ±250 dps | 8.75 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 01 | 0 | ±500 dps | 17.50 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 10 | 0 | ±1000 dps | 35 | LSM6DS3TR-C_datasheet.pdf, p21 |
+| 11 | 0 | ±2000 dps | 70 | LSM6DS3TR-C_datasheet.pdf, p21 |
 
 ### Filtering Chain
 
@@ -615,7 +615,7 @@ Both modes switch on the edge of an interrupt signal from one of: significant mo
 
 ### Interrupt Pins
 
-Two programmable interrupt pins (INT1 = pin 4, INT2 = pin 9). Both are push-pull by default; open-drain selectable via `PP_OD` bit in CTRL3_C. Active-high by default; active-low via `H_LACTIVE` bit in CTRL3_C. (datasheet_LSM6DS3TR-C.pdf, p52)
+Two programmable interrupt pins (INT1 = pin 4, INT2 = pin 9). Both are push-pull by default; open-drain selectable via `PP_OD` bit in CTRL3_C. Active-high by default; active-low via `H_LACTIVE` bit in CTRL3_C. (LSM6DS3TR-C_datasheet.pdf, p52)
 
 `INT2_on_INT1` bit (CTRL4_C b5): When set to 1, all enabled INT2 signals are OR'd onto INT1 pin. (AN5130, p35)
 
@@ -899,7 +899,7 @@ Wraps at 0xFFFFFF (16,777,215). Reset by writing 0xAA to TIMESTAMP_REG2. Overflo
 
 ### Overview
 
-I2C master interface on SDx (MSDA, pin 2) and SCx (MSCL, pin 3). Up to 4 external sensors. Clock: 116.3 kHz. Both accelerometer and gyroscope must not simultaneously be in power-down for sensor hub to function. (AN5130, p58; datasheet_LSM6DS3TR-C.pdf, p28)
+I2C master interface on SDx (MSDA, pin 2) and SCx (MSCL, pin 3). Up to 4 external sensors. Clock: 116.3 kHz. Both accelerometer and gyroscope must not simultaneously be in power-down for sensor hub to function. (AN5130, p58; LSM6DS3TR-C_datasheet.pdf, p28)
 
 Enable: `FUNC_EN = 1` in CTRL10_C, then `MASTER_ON = 1` in MASTER_CONFIG (1Ah). (AN5130, p59)
 
@@ -974,7 +974,7 @@ For external magnetometer connected as slave 0 (Slave0_numop = 6). (AN5130, p69)
 
 ### Temperature Sensor
 
-Active whenever at least one sensor (accel or gyro) is not in power-down. Output: 16-bit two's complement in OUT_TEMP_L/H (20h/21h). (AN5130, p96; datasheet_LSM6DS3TR-C.pdf, p25)
+Active whenever at least one sensor (accel or gyro) is not in power-down. Output: 16-bit two's complement in OUT_TEMP_L/H (20h/21h). (AN5130, p96; LSM6DS3TR-C_datasheet.pdf, p25)
 
 - Sensitivity: 256 LSB/°C
 - Zero level: 0 LSB at 25 °C
@@ -997,7 +997,7 @@ Active whenever at least one sensor (accel or gyro) is not in power-down. Output
 
 Enabled by `ST_XL[1:0]` in CTRL5_C (14h): 00 = off, 01 = positive, 10 = negative. (AN5130, p99)
 
-Pass criteria: |output(ST enabled) − output(ST disabled)| must be 90–1700 mg (FS independent, measured at 1 LSB = 0.061 mg at ±2 g). (datasheet_LSM6DS3TR-C.pdf, p22)
+Pass criteria: |output(ST enabled) − output(ST disabled)| must be 90–1700 mg (FS independent, measured at 1 LSB = 0.061 mg at ±2 g). (LSM6DS3TR-C_datasheet.pdf, p22)
 
 ### Gyroscope Self-Test
 
@@ -1007,7 +1007,7 @@ Pass criteria:
 - At ±250 dps: 20–80 dps (measured at 1 LSB = 70 mdps at ±2000 dps)
 - At ±2000 dps: 150–700 dps
 
-(datasheet_LSM6DS3TR-C.pdf, p22)
+(LSM6DS3TR-C_datasheet.pdf, p22)
 
 ### Boot and Reset
 
@@ -1096,7 +1096,7 @@ Overlapping Allan variance (OAVAR) recommended for better confidence, up to m = 
 2. Wait 15 ms for boot to complete (both sensors automatically in power-down after boot)
 3. Registers become accessible
 
-(AN5130, p49; datasheet_LSM6DS3TR-C.pdf, p24)
+(AN5130, p49; LSM6DS3TR-C_datasheet.pdf, p24)
 
 ### Basic Accelerometer Startup (Mode 1)
 
@@ -1186,7 +1186,7 @@ Set `BDU = 1` in CTRL3_C to prevent output registers from being updated mid-read
 
 ## 21. Addendum — I2C Slave Timing Parameters
 
-The following detailed I2C timing values are required for bus design and signal integrity analysis. (datasheet_LSM6DS3TR-C.pdf, p27, Table 7)
+The following detailed I2C timing values are required for bus design and signal integrity analysis. (LSM6DS3TR-C_datasheet.pdf, p27, Table 7)
 
 | Symbol | Parameter | Standard Mode Min | Standard Mode Max | Fast Mode Min | Fast Mode Max | Unit |
 |--------|-----------|-------------------|-------------------|---------------|---------------|------|
@@ -1200,13 +1200,13 @@ The following detailed I2C timing values are required for bus design and signal 
 | tsu(SP) | STOP condition setup time | 4 | — | 0.6 | — | μs |
 | tw(SP:SR) | Bus free time (STOP→START) | 4.7 | — | 1.3 | — | μs |
 
-**Note:** Data based on standard I2C protocol requirement, not tested in production. Measurement points at 0.2×VDD_IO and 0.8×VDD_IO. (datasheet_LSM6DS3TR-C.pdf, p27)
+**Note:** Data based on standard I2C protocol requirement, not tested in production. Measurement points at 0.2×VDD_IO and 0.8×VDD_IO. (LSM6DS3TR-C_datasheet.pdf, p27)
 
 ---
 
 ## 22. Addendum — SPI Timing Parameters
 
-Full SPI slave timing values for bus design. Values guaranteed at 10 MHz for both 3-wire and 4-wire SPI, based on characterization (not production-tested). (datasheet_LSM6DS3TR-C.pdf, p26, Table 6)
+Full SPI slave timing values for bus design. Values guaranteed at 10 MHz for both 3-wire and 4-wire SPI, based on characterization (not production-tested). (LSM6DS3TR-C_datasheet.pdf, p26, Table 6)
 
 | Symbol | Parameter | Min | Max | Unit |
 |--------|-----------|-----|-----|------|
@@ -1220,13 +1220,13 @@ Full SPI slave timing values for bus design. Values guaranteed at 10 MHz for bot
 | th(SO) | SDO output hold time | 5 | — | ns |
 | tdis(SO) | SDO output disable time | — | 50 | ns |
 
-**Note:** Measurement points at 0.2×VDD_IO and 0.8×VDD_IO for both input and output ports. (datasheet_LSM6DS3TR-C.pdf, p26)
+**Note:** Measurement points at 0.2×VDD_IO and 0.8×VDD_IO for both input and output ports. (LSM6DS3TR-C_datasheet.pdf, p26)
 
 ---
 
 ## 23. Addendum — I2C Master Timing Parameters
 
-Detailed I2C master timing for sensor hub bus design. The LSM6DS3TR-C master operates at a fixed 116.3 kHz clock in Fast Mode only. (datasheet_LSM6DS3TR-C.pdf, p28, Table 8)
+Detailed I2C master timing for sensor hub bus design. The LSM6DS3TR-C master operates at a fixed 116.3 kHz clock in Fast Mode only. (LSM6DS3TR-C_datasheet.pdf, p28, Table 8)
 
 | Symbol | Parameter | I2C Master Value | I2C Fast Mode Min (ref) | Unit |
 |--------|-----------|-----------------|------------------------|------|
@@ -1241,7 +1241,7 @@ Detailed I2C master timing for sensor hub bus design. The LSM6DS3TR-C master ope
 | tsu(SP) | STOP condition setup time | 2.73 | 0.6 | μs |
 | tw(SP:SR) | Bus free time (STOP→START) | 21 | 1.3 | μs |
 
-(datasheet_LSM6DS3TR-C.pdf, p28)
+(LSM6DS3TR-C_datasheet.pdf, p28)
 
 ---
 
@@ -1251,11 +1251,11 @@ Detailed I2C master timing for sensor hub bus design. The LSM6DS3TR-C master ope
 
 | Addr | Name | Source |
 |------|------|--------|
-| 43h–48h | RESERVED | datasheet_LSM6DS3TR-C.pdf, p49 (register map) |
-| 49h | STEP_TIMESTAMP_L | datasheet_LSM6DS3TR-C.pdf, p83 |
-| 4Ah | STEP_TIMESTAMP_H | datasheet_LSM6DS3TR-C.pdf, p83 |
-| 4Bh | STEP_COUNTER_L | datasheet_LSM6DS3TR-C.pdf, p83 |
-| 4Ch | STEP_COUNTER_H | datasheet_LSM6DS3TR-C.pdf, p84 |
+| 43h–48h | RESERVED | LSM6DS3TR-C_datasheet.pdf, p49 (register map) |
+| 49h | STEP_TIMESTAMP_L | LSM6DS3TR-C_datasheet.pdf, p83 |
+| 4Ah | STEP_TIMESTAMP_H | LSM6DS3TR-C_datasheet.pdf, p83 |
+| 4Bh | STEP_COUNTER_L | LSM6DS3TR-C_datasheet.pdf, p83 |
+| 4Ch | STEP_COUNTER_H | LSM6DS3TR-C_datasheet.pdf, p84 |
 
 **Note:** This corrects an error in Section 9 above where these registers were listed at 43h–46h instead of 49h–4Ch. The main register map table has been corrected in-place.
 
@@ -1467,7 +1467,7 @@ The self-test is enabled via `ST_G[1:0]` in CTRL5_C: `01b` = positive, `11b` = n
 10. Set CTRL5_C = 00h (disable self-test)
 11. Set CTRL2_G = 00h (gyro power-down)
 
-(AN5130, p97–98; datasheet_LSM6DS3TR-C.pdf, p22)
+(AN5130, p97–98; LSM6DS3TR-C_datasheet.pdf, p22)
 
 ### Accelerometer Self-Test Procedure
 
@@ -1487,13 +1487,13 @@ The self-test is enabled via `ST_XL[1:0]` in CTRL5_C: `01b` = positive, `10b` = 
 10. Set CTRL5_C = 00h (disable self-test)
 11. Set CTRL1_XL = 00h (accel power-down)
 
-(AN5130, p99–100; datasheet_LSM6DS3TR-C.pdf, p22)
+(AN5130, p99–100; LSM6DS3TR-C_datasheet.pdf, p22)
 
 ---
 
 ## 29. Addendum — Block Data Update (BDU) Mechanism
 
-When `BDU = 1` (bit 6 of CTRL3_C, 12h), the output data registers (OUT_TEMP, OUT_G, OUT_XL) are **not updated with new measurement data** until **both** the lower byte (xxxx_L) and upper byte (xxxx_H) of the previous data have been read. This guarantees that the MSB and LSB of any 16-bit output value come from the same measurement sample. (AN5130, p25; datasheet_LSM6DS3TR-C.pdf, p52)
+When `BDU = 1` (bit 6 of CTRL3_C, 12h), the output data registers (OUT_TEMP, OUT_G, OUT_XL) are **not updated with new measurement data** until **both** the lower byte (xxxx_L) and upper byte (xxxx_H) of the previous data have been read. This guarantees that the MSB and LSB of any 16-bit output value come from the same measurement sample. (AN5130, p25; LSM6DS3TR-C_datasheet.pdf, p52)
 
 Without BDU (BDU = 0), the registers are updated continuously at the ODR rate. If a multi-byte read spans an update boundary, the lower byte may be from sample N while the upper byte is from sample N+1 (or vice versa), producing a corrupted value. (AN5130, p25)
 
@@ -1576,19 +1576,19 @@ The LPF1 filter provides two outputs selectable via `LPF1_BW_SEL` and `INPUT_COM
 
 ### Gyroscope-Only Current Consumption
 
-The datasheet (p24) specifies current consumption only for accelerometer-only and combined modes. Gyroscope-only current can be estimated as: (datasheet_LSM6DS3TR-C.pdf, p24)
+The datasheet (p24) specifies current consumption only for accelerometer-only and combined modes. Gyroscope-only current can be estimated as: (LSM6DS3TR-C_datasheet.pdf, p24)
 - Combo HP − Accel HP ≈ 0.90 mA − 0.16 mA ≈ 0.74 mA (gyro contribution at HP)
 - Combo Normal − Accel Normal ≈ 0.45 mA − 0.085 mA ≈ 0.365 mA (gyro contribution at normal)
 
 ### Power-on Supply Sequence Note
 
-During power-on, pins SCx and SDx should be connected to VDDIO or GND (Mode 1) to avoid undefined states. The device selection between I2C and SPI depends on the CS pin state during power-up. (AN5130, p12; datasheet_LSM6DS3TR-C.pdf, p45)
+During power-on, pins SCx and SDx should be connected to VDDIO or GND (Mode 1) to avoid undefined states. The device selection between I2C and SPI depends on the CS pin state during power-up. (AN5130, p12; LSM6DS3TR-C_datasheet.pdf, p45)
 
 ---
 
 ## 34. Addendum — Absolute Maximum Ratings (Complete)
 
-(datasheet_LSM6DS3TR-C.pdf, p29, Table 9)
+(LSM6DS3TR-C_datasheet.pdf, p29, Table 9)
 
 | Symbol | Parameter | Maximum Value | Unit |
 |--------|-----------|--------------|------|
@@ -1599,7 +1599,7 @@ During power-on, pins SCx and SDx should be connected to VDDIO or GND (Mode 1) t
 | Vin | Input voltage on any control pin (CS, SCL/SPC, SDA/SDI/SDO, SDO/SA0) | −0.3 to VDD_IO + 0.3 | V |
 
 **Warnings:**
-- Supply voltage on any pin should **never exceed 4.8 V**. (datasheet_LSM6DS3TR-C.pdf, p29)
-- Device is sensitive to mechanical shock — improper handling can cause permanent damage. (datasheet_LSM6DS3TR-C.pdf, p29)
-- Device is sensitive to ESD — improper handling can cause permanent damage. (datasheet_LSM6DS3TR-C.pdf, p29)
-- Stresses above absolute maximum ratings may cause permanent damage. Exposure to max ratings for extended periods may affect reliability. (datasheet_LSM6DS3TR-C.pdf, p29)
+- Supply voltage on any pin should **never exceed 4.8 V**. (LSM6DS3TR-C_datasheet.pdf, p29)
+- Device is sensitive to mechanical shock — improper handling can cause permanent damage. (LSM6DS3TR-C_datasheet.pdf, p29)
+- Device is sensitive to ESD — improper handling can cause permanent damage. (LSM6DS3TR-C_datasheet.pdf, p29)
+- Stresses above absolute maximum ratings may cause permanent damage. Exposure to max ratings for extended periods may affect reliability. (LSM6DS3TR-C_datasheet.pdf, p29)

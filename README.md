@@ -16,8 +16,8 @@ This library follows the same managed synchronous pattern used by the stronger I
 The implementation is cross-checked against the repository's device documentation:
 
 - [LSM6DS3TR_imu_implementation_manual.md](LSM6DS3TR_imu_implementation_manual.md)
-- [docs/datasheet_LSM6DS3TR-C.pdf](docs/datasheet_LSM6DS3TR-C.pdf)
-- [docs/application_note.pdf](docs/application_note.pdf)
+- [docs/LSM6DS3TR-C_datasheet.pdf](docs/LSM6DS3TR-C_datasheet.pdf)
+- [docs/LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf](docs/LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf)
 
 ## Managed Feature Coverage
 
