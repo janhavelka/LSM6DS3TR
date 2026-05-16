@@ -80,6 +80,23 @@ uint32_t exampleNowMs(void*) {
   return millis();
 }
 
+Config makeDefaultConfig() {
+  Config cfg;
+  cfg.i2cWrite = transport_adapter::wireWrite;
+  cfg.i2cWriteRead = transport_adapter::wireWriteRead;
+  cfg.i2cUser = &Wire;
+  cfg.i2cAddress = 0x6A;
+  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
+  cfg.nowMs = exampleNowMs;
+  cfg.offlineThreshold = 5;
+  cfg.odrXl = Odr::HZ_104;
+  cfg.odrG = Odr::HZ_104;
+  cfg.fsXl = AccelFs::G_2;
+  cfg.fsG = GyroFs::DPS_250;
+  cfg.bdu = true;
+  return cfg;
+}
+
 const char* errToStr(LSM6DS3TR::Err err) {
   using namespace LSM6DS3TR;
   switch (err) {
@@ -535,6 +552,29 @@ void printHexDump(uint8_t startReg, const uint8_t* data, size_t len) {
 }
 
 void printSettings() {
+  LSM6DS3TR::SettingsSnapshot snap;
+  LSM6DS3TR::Status snapStatus = device.getSettings(snap);
+  if (!snapStatus.ok()) {
+    printStatus(snapStatus);
+    return;
+  }
+
+  Serial.println("=== Current Settings ===");
+  Serial.printf("  Initialized:        %s\n", log_bool_str(snap.initialized));
+  Serial.printf("  Driver state:       %s\n", stateToStr(snap.state));
+  Serial.printf("  I2C address:        0x%02X\n", snap.i2cAddress);
+  Serial.printf("  I2C timeout:        %lu ms\n", static_cast<unsigned long>(snap.i2cTimeoutMs));
+  Serial.printf("  Offline threshold:  %u\n", static_cast<unsigned>(snap.offlineThreshold));
+  Serial.printf("  Measurement ready:  %s\n", log_bool_str(snap.measurementReady));
+  Serial.printf("  Has sample:         %s\n", log_bool_str(snap.hasSample));
+  Serial.printf("  sampleTimestampMs:  %lu\n",
+                static_cast<unsigned long>(snap.sampleTimestampMs));
+  Serial.printf("  sampleAgeMs:        %lu\n",
+                static_cast<unsigned long>(device.sampleAgeMs(millis())));
+  if (!snap.initialized) {
+    return;
+  }
+
   LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
   LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
   LSM6DS3TR::AccelFs fsXl = LSM6DS3TR::AccelFs::G_2;
@@ -577,7 +617,6 @@ void printSettings() {
   (void)device.getAccelUserOffset(offset);
   (void)device.getFifoConfig(fifo);
 
-  Serial.println("=== Current Settings ===");
   Serial.printf("  Accel ODR:          %s\n", odrToStr(odrXl));
   Serial.printf("  Gyro ODR:           %s\n", odrToStr(odrG));
   Serial.printf("  Accel FS:           %s\n", accelFsToStr(fsXl));
@@ -1162,6 +1201,7 @@ void printHelp() {
   cli::printHelpItem("help / ?", "Show this help");
   cli::printHelpItem("version / ver", "Print version and build metadata");
   cli::printHelpItem("scan", "Scan I2C bus");
+  cli::printHelpItem("begin", "Initialize/reinitialize device");
   cli::printHelpItem("drv", "Show driver health");
   cli::printHelpItem("drv1", "Show one-line health view");
   cli::printHelpItem("cfg / settings", "Show current cached configuration");
@@ -1232,13 +1272,14 @@ void printHelp() {
   cli::printHelpSection("Diagnostics");
   cli::printHelpItem("probe", "Probe WHO_AM_I without health tracking");
   cli::printHelpItem("recover", "Retry initialization/recovery");
-  cli::printHelpItem("whoami", "Read WHO_AM_I register");
+  cli::printHelpItem("whoami / id", "Read WHO_AM_I register");
   cli::printHelpItem("wusrc", "Read WAKE_UP_SRC");
   cli::printHelpItem("tapsrc", "Read TAP_SRC");
   cli::printHelpItem("6dsrc", "Read D6D_SRC");
   cli::printHelpItem("funcsrc1", "Read FUNC_SRC1");
   cli::printHelpItem("funcsrc2", "Read FUNC_SRC2");
   cli::printHelpItem("wtstatus", "Read WRIST_TILT_IA");
+  cli::printHelpItem("shub [N]", "Read SENSORHUB1..12 output bytes");
   cli::printHelpItem("selftest", "Run accelerometer and gyroscope self-test");
   cli::printHelpItem("stress [N]", "Async converted-sample stress test");
   cli::printHelpItem("stress_mix [N]", "Blocking mixed-operation stress test");
@@ -1265,6 +1306,16 @@ void processCommand(const String& line) {
     printVersionInfo();
   } else if (cmd == "scan") {
     bus_diag::scan();
+  } else if (cmd == "begin") {
+    LOGI("Initializing LSM6DS3TR-C...");
+    continuousMode = false;
+    pendingRead = false;
+    device.end();
+    const LSM6DS3TR::Status st = device.begin(makeDefaultConfig());
+    printStatus(st);
+    if (st.ok()) {
+      printDriverHealth();
+    }
   } else if (cmd == "drv") {
     printDriverHealth();
   } else if (cmd == "drv1") {
@@ -1311,14 +1362,14 @@ void processCommand(const String& line) {
     if (!st.ok()) { printStatus(st); return; }
     Serial.printf("Temp: %.2f C (raw: %d)\n", device.convertTemperature(raw), raw);
   } else if (cmd == "status") {
-    uint8_t statusReg = 0;
-    const LSM6DS3TR::Status st = device.readStatusReg(statusReg);
+    LSM6DS3TR::StatusReg statusReg;
+    const LSM6DS3TR::Status st = device.readStatus(statusReg);
     if (!st.ok()) { printStatus(st); return; }
     Serial.printf("  STATUS_REG = 0x%02X (XLDA=%d GDA=%d TDA=%d)\n",
-                  statusReg,
-                  (statusReg & LSM6DS3TR::cmd::MASK_XLDA) ? 1 : 0,
-                  (statusReg & LSM6DS3TR::cmd::MASK_GDA) ? 1 : 0,
-                  (statusReg & LSM6DS3TR::cmd::MASK_TDA) ? 1 : 0);
+                  statusReg.raw,
+                  statusReg.accelDataReady ? 1 : 0,
+                  statusReg.gyroDataReady ? 1 : 0,
+                  statusReg.tempDataReady ? 1 : 0);
   } else if (cmd == "tsread") {
     uint32_t timestamp = 0;
     const LSM6DS3TR::Status st = device.readTimestamp(timestamp);
@@ -1346,6 +1397,9 @@ void processCommand(const String& line) {
     Serial.printf("  Threshold: %u\n", fifo.threshold);
     Serial.printf("  Unread words: %u\n", status.unreadWords);
     Serial.printf("  Pattern: %u\n", status.pattern);
+    Serial.printf("  Watermark: %s\n", log_bool_str(status.watermark));
+    Serial.printf("  Overrun: %s\n", log_bool_str(status.overrun));
+    Serial.printf("  Full smart: %s\n", log_bool_str(status.fullSmart));
     Serial.printf("  Empty: %s\n", log_bool_str(status.empty));
   } else if (cmd == "fifo_read") {
     int countToRead = 1;
@@ -1383,11 +1437,17 @@ void processCommand(const String& line) {
     Serial.println("  Health changes:");
     printHealthDiff(before, after);
     printDriverHealth();
-  } else if (cmd == "whoami") {
+  } else if (cmd == "whoami" || cmd == "id") {
     uint8_t id = 0;
     const LSM6DS3TR::Status st = device.readWhoAmI(id);
     if (!st.ok()) { printStatus(st); return; }
-    Serial.printf("  WHO_AM_I = 0x%02X\n", id);
+    const bool match = id == LSM6DS3TR::cmd::WHO_AM_I_VALUE;
+    Serial.printf("  WHO_AM_I = 0x%02X expected=0x%02X match=%s%s%s\n",
+                  id,
+                  LSM6DS3TR::cmd::WHO_AM_I_VALUE,
+                  cli::yesNoColor(match),
+                  match ? "YES" : "NO",
+                  LOG_COLOR_RESET);
   } else if (cmd == "wusrc" || cmd == "tapsrc" || cmd == "6dsrc" ||
              cmd == "funcsrc1" || cmd == "funcsrc2" || cmd == "wtstatus") {
     uint8_t value = 0;
@@ -1400,6 +1460,18 @@ void processCommand(const String& line) {
     else st = device.readWristTiltStatus(value);
     if (!st.ok()) { printStatus(st); return; }
     printRegisterValue(cmd.c_str(), value);
+  } else if (cmd == "shub") {
+    uint32_t countToRead = 12;
+    if (count >= 2) {
+      if (count < 2 || !parseUnsignedToken(tokens[1], 12UL, countToRead) || countToRead == 0UL) {
+        Serial.println("  Expected shub [1..12]");
+        return;
+      }
+    }
+    LSM6DS3TR::SensorHubData data;
+    const LSM6DS3TR::Status st = device.readSensorHub(data, static_cast<uint8_t>(countToRead));
+    if (!st.ok()) { printStatus(st); return; }
+    printHexDump(LSM6DS3TR::cmd::REG_SENSORHUB1, data.bytes, data.count);
   } else if (cmd == "stream") {
     continuousMode = !continuousMode;
     Serial.printf("  Continuous output: %s\n", continuousMode ? "ON (send 'stream' to stop)" : "OFF");
@@ -1799,21 +1871,7 @@ void setup() {
   LOGI("I2C initialized (SDA=%d, SCL=%d)", board::I2C_SDA, board::I2C_SCL);
   bus_diag::scan();
 
-  LSM6DS3TR::Config cfg;
-  cfg.i2cWrite = transport_adapter::wireWrite;
-  cfg.i2cWriteRead = transport_adapter::wireWriteRead;
-  cfg.i2cUser = &Wire;
-  cfg.i2cAddress = 0x6A;
-  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
-  cfg.nowMs = exampleNowMs;
-  cfg.offlineThreshold = 5;
-  cfg.odrXl = LSM6DS3TR::Odr::HZ_104;
-  cfg.odrG = LSM6DS3TR::Odr::HZ_104;
-  cfg.fsXl = LSM6DS3TR::AccelFs::G_2;
-  cfg.fsG = LSM6DS3TR::GyroFs::DPS_250;
-  cfg.bdu = true;
-
-  const LSM6DS3TR::Status st = device.begin(cfg);
+  const LSM6DS3TR::Status st = device.begin(makeDefaultConfig());
   if (!st.ok()) {
     LOGE("Device initialization failed; CLI remains available for probe/recover");
     printStatus(st);

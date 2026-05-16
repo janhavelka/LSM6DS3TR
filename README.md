@@ -42,7 +42,10 @@ The managed API covers the most practical runtime features of the chip:
 - direct single-register and block register access for advanced diagnostics
 - source register reads for wake-up, tap, 6D, embedded function, and wrist-tilt status
 
-Advanced interrupt routing, threshold tuning, tap/wake/free-fall configuration, and sensor-hub flows remain available through the raw register APIs and the CLI register commands rather than dedicated managed wrappers.
+Advanced interrupt routing, threshold tuning, tap/wake/free-fall configuration,
+and deeper sensor-hub setup remain available through the raw register APIs and
+the CLI register commands. Basic sensor-hub output readback is available through
+`SensorHubData` and `readSensorHub()`.
 
 ## Important Runtime Rules
 
@@ -57,6 +60,8 @@ The driver enforces several device constraints from the datasheet and applicatio
 - FIFO configuration requires BDU enabled
 - async combined measurements require BDU and matching active accel/gyro ODR
 - managed setters validate enum values before I2C and keep cached state unchanged if a write fails
+- `Config::offlineThreshold = 0` is normalized to one; failed `begin()` clears
+  cached config, feature flags, samples, and health before validation.
 - software-reset, boot, and calibration waits use bounded polling; transport failures during raw reset/boot polling are recorded in driver health
 
 ## Thread, ISR, And Recovery Model
@@ -171,12 +176,17 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 - hardware self-test flow for accelerometer and gyroscope
 - software bias calibration and continuous streaming mode with one line per sample
 - converted CLI sample reads (`read`, `accel`, `gyro`, `stream`) that respect the currently configured software bias values
+- decoded `status` output, expanded FIFO flags, `begin`, `whoami` / `id`, and
+  `shub [1..12]` for sensor-hub output bytes
 
 Representative commands:
 
 ```text
 probe
 cfg
+status
+whoami
+shub 12
 odrxl 104
 gpm lpn
 ts 1
@@ -222,6 +232,14 @@ Use the raw register APIs when you need chip features that are intentionally lef
 Public raw access is limited to the main user-register window through `Z_OFS_USR`; zero-length, oversized, and wrapping block reads are rejected before the bus is touched. Writes to managed configuration registers refresh the cached configuration after the write succeeds.
 
 This is the intended path for interrupt routing, threshold registers, advanced tap/wake/free-fall setup, and sensor-hub experimentation.
+
+## Diagnostics And Snapshots
+
+Cache-only diagnostics include `SettingsSnapshot`, `getSettings()`,
+`settings()`, `driverState()`, `hasSample()`, `sampleTimestampMs()`, and
+`sampleAgeMs(nowMs)`. `StatusReg` and `readStatus(StatusReg&)` expose decoded
+accelerometer, gyroscope, and temperature data-ready flags without requiring
+callers to decode `STATUS_REG` manually.
 
 ## Building And Validation
 

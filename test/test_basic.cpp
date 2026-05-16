@@ -228,6 +228,7 @@ void test_status_ok() {
 void test_status_error() {
   const Status st = Status::Error(Err::I2C_ERROR, "Test error", 42);
   TEST_ASSERT_FALSE(st.ok());
+  TEST_ASSERT_TRUE(st.is(Err::I2C_ERROR));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_INT32(42, st.detail);
 }
@@ -254,6 +255,45 @@ void test_config_defaults() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AccelFs::G_2), static_cast<uint8_t>(cfg.fsXl));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(GyroFs::DPS_250), static_cast<uint8_t>(cfg.fsG));
   TEST_ASSERT_TRUE(cfg.bdu);
+}
+
+void test_get_settings_snapshot_and_sample_aliases() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.i2cAddress = 0x6B;
+  cfg.offlineThreshold = 4;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(dev.isInitialized());
+  TEST_ASSERT_EQUAL_HEX8(0x6B, dev.getConfig().i2cAddress);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.driverState()));
+  TEST_ASSERT_TRUE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_HEX8(0x6B, snap.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(10u, snap.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(4u, snap.offlineThreshold);
+  TEST_ASSERT_TRUE(snap.hasNowMsHook);
+  TEST_ASSERT_FALSE(snap.hasSample);
+  TEST_ASSERT_FALSE(dev.hasSample());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.sampleTimestampMs());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.sampleAgeMs(bus.nowMs));
+
+  RawMeasurement raw;
+  TEST_ASSERT_TRUE(dev.readAllRaw(raw).ok());
+  TEST_ASSERT_TRUE(dev.hasSample());
+  TEST_ASSERT_EQUAL_UINT32(bus.nowMs, dev.sampleTimestampMs());
+  TEST_ASSERT_EQUAL_UINT32(25u, dev.sampleAgeMs(bus.nowMs + 25u));
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.hasSample);
+  TEST_ASSERT_EQUAL_UINT32(bus.nowMs, snap.sampleTimestampMs);
+
+  SettingsSnapshot byValue = dev.settings();
+  TEST_ASSERT_TRUE(byValue.hasSample);
 }
 
 // ==========================================================================
@@ -290,6 +330,30 @@ void test_begin_rejects_invalid_address() {
   cfg.i2cAddress = 0x50;
   const Status st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+}
+
+void test_invalid_begin_after_success_clears_health_snapshot() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_ERROR, "forced recover error", -9);
+  (void)dev.recover();
+  TEST_ASSERT_GREATER_THAN_UINT32(0u, dev.totalFailures());
+
+  Config bad = makeConfig(bus);
+  bad.i2cAddress = 0x50;
+  const Status st = dev.begin(bad);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastErrorMs());
 }
 
 void test_begin_rejects_accel_1_6_in_high_performance() {
@@ -352,6 +416,12 @@ void test_begin_detects_wrong_chip_id() {
   const Status st = dev.begin(makeConfig(bus));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CHIP_ID_MISMATCH),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastErrorMs());
 }
 
 void test_probe_after_failed_begin_uses_stored_transport() {
@@ -476,6 +546,28 @@ void test_recover_success_returns_ready() {
   TEST_ASSERT_EQUAL_UINT32(4321u, dev.lastOkMs());
 }
 
+void test_runtime_in_progress_does_not_update_health() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.nowMs = 5678;
+  bus.readErrorRemaining = 1;
+  bus.readError = Status{Err::IN_PROGRESS, 0, "Read pending"};
+
+  RawMeasurement raw{};
+  const Status st = dev.readAllRaw(raw);
+  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OK),
+                          static_cast<uint8_t>(dev.lastError().code));
+}
+
 void test_recover_reaches_offline_when_threshold_is_one() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR dev;
@@ -560,6 +652,21 @@ void test_read_all_raw_returns_data() {
   TEST_ASSERT_EQUAL_INT16(-500, raw.gyro.y);
   TEST_ASSERT_EQUAL_INT16(0, raw.gyro.z);
   TEST_ASSERT_EQUAL_INT16(6400, raw.temperature);
+}
+
+void test_read_status_decodes_data_ready_bits() {
+  FakeBus bus;
+  bus.regs[cmd::REG_STATUS_REG] = static_cast<uint8_t>(cmd::MASK_XLDA | cmd::MASK_TDA);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  StatusReg status;
+  const Status st = dev.readStatus(status);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(cmd::MASK_XLDA | cmd::MASK_TDA), status.raw);
+  TEST_ASSERT_TRUE(status.accelDataReady);
+  TEST_ASSERT_FALSE(status.gyroDataReady);
+  TEST_ASSERT_TRUE(status.tempDataReady);
 }
 
 void test_convert_accel_at_2g() {
@@ -1233,6 +1340,9 @@ void test_source_register_helpers_work() {
   bus.regs[cmd::REG_FUNC_SRC1] = 0x44;
   bus.regs[cmd::REG_FUNC_SRC2] = 0x55;
   bus.regs[cmd::REG_WRIST_TILT_IA] = 0x66;
+  for (uint8_t i = 0; i < 12u; ++i) {
+    bus.regs[static_cast<uint8_t>(cmd::REG_SENSORHUB1 + i)] = static_cast<uint8_t>(0xA0u + i);
+  }
   LSM6DS3TR::LSM6DS3TR dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
@@ -1249,6 +1359,17 @@ void test_source_register_helpers_work() {
   TEST_ASSERT_EQUAL_HEX8(0x55, value);
   TEST_ASSERT_TRUE(dev.readWristTiltStatus(value).ok());
   TEST_ASSERT_EQUAL_HEX8(0x66, value);
+
+  SensorHubData sensorHub;
+  TEST_ASSERT_TRUE(dev.readSensorHub(sensorHub, 4).ok());
+  TEST_ASSERT_EQUAL_UINT8(4u, sensorHub.count);
+  TEST_ASSERT_EQUAL_HEX8(0xA0, sensorHub.bytes[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xA1, sensorHub.bytes[1]);
+  TEST_ASSERT_EQUAL_HEX8(0xA2, sensorHub.bytes[2]);
+  TEST_ASSERT_EQUAL_HEX8(0xA3, sensorHub.bytes[3]);
+
+  const Status st = dev.readSensorHub(sensorHub, 0);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
 // ==========================================================================
@@ -1368,10 +1489,12 @@ int main() {
   RUN_TEST(test_status_in_progress);
 
   RUN_TEST(test_config_defaults);
+  RUN_TEST(test_get_settings_snapshot_and_sample_aliases);
 
   RUN_TEST(test_begin_rejects_missing_callbacks);
   RUN_TEST(test_begin_success_sets_ready_and_health);
   RUN_TEST(test_begin_rejects_invalid_address);
+  RUN_TEST(test_invalid_begin_after_success_clears_health_snapshot);
   RUN_TEST(test_begin_rejects_accel_1_6_in_high_performance);
   RUN_TEST(test_begin_rejects_accel_416_in_low_power_normal);
   RUN_TEST(test_begin_rejects_gyro_1_6);
@@ -1386,11 +1509,13 @@ int main() {
   RUN_TEST(test_recover_failure_updates_health_once);
   RUN_TEST(test_recover_chip_id_mismatch_updates_health_once);
   RUN_TEST(test_recover_success_returns_ready);
+  RUN_TEST(test_runtime_in_progress_does_not_update_health);
   RUN_TEST(test_recover_reaches_offline_when_threshold_is_one);
   RUN_TEST(test_offline_read_all_raw_returns_busy_without_i2c);
   RUN_TEST(test_failed_recover_from_offline_keeps_latch_after_intermediate_success);
 
   RUN_TEST(test_read_all_raw_returns_data);
+  RUN_TEST(test_read_status_decodes_data_ready_bits);
   RUN_TEST(test_convert_accel_at_2g);
   RUN_TEST(test_convert_gyro_at_250dps);
   RUN_TEST(test_convert_temperature);

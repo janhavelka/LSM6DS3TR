@@ -6,7 +6,7 @@
 
 namespace LSM6DS3TR {
 
-/// Error codes for all LSM6DS3TR operations
+/// @brief Error codes for all LSM6DS3TR operations.
 enum class Err : uint8_t {
   OK = 0,                ///< Operation successful
   NOT_INITIALIZED,       ///< begin() not called
@@ -17,6 +17,7 @@ enum class Err : uint8_t {
   DEVICE_NOT_FOUND,      ///< Device not responding on I2C bus
   CHIP_ID_MISMATCH,      ///< WHO_AM_I != 0x6A
   MEASUREMENT_NOT_READY, ///< Sample not yet available
+  CONVERSION_NOT_READY = MEASUREMENT_NOT_READY, ///< Cross-library alias
   BUSY,                  ///< Device is busy
   IN_PROGRESS,           ///< Operation scheduled; call tick() to complete
   SELF_TEST_FAIL,        ///< Self-test result out of range
@@ -29,20 +30,35 @@ enum class Err : uint8_t {
   FIFO_EMPTY             ///< FIFO has no unread samples
 };
 
-/// Status structure returned by all fallible operations
+/// @brief Status structure returned by all fallible operations.
 struct Status {
-  Err code = Err::OK;
-  int32_t detail = 0;
-  const char* msg = "";
+  Err code = Err::OK;     ///< Status code.
+  int32_t detail = 0;     ///< Implementation-specific detail, such as transport error code.
+  const char* msg = "";   ///< Static message string.
 
   constexpr Status() = default;
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
 
+  /// @brief Check whether the operation succeeded.
+  /// @return true when code is OK.
   constexpr bool ok() const { return code == Err::OK; }
+
+  /// @brief Check whether the status matches an error code.
+  /// @return true when code equals @p err.
+  constexpr bool is(Err err) const { return code == err; }
+
+  /// @brief Check whether the operation is still pending.
+  /// @return true when code is IN_PROGRESS.
   constexpr bool inProgress() const { return code == Err::IN_PROGRESS; }
 
+  /// @brief Create a success status.
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }
 
+  /// @brief Create an error status.
+  /// @param err Error code.
+  /// @param message Static message string.
+  /// @param detailCode Optional implementation-specific detail.
+  /// @return Error status.
   static constexpr Status Error(Err err, const char* message, int32_t detailCode = 0) {
     return Status{err, detailCode, message};
   }

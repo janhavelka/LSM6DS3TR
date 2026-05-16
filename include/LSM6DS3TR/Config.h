@@ -9,19 +9,35 @@
 
 namespace LSM6DS3TR {
 
-/// I2C write callback signature
+/// @brief I2C write callback signature.
+/// @param addr I2C device address (7-bit).
+/// @param data Pointer to bytes to write.
+/// @param len Number of bytes to write.
+/// @param timeoutMs Transaction timeout in milliseconds.
+/// @param user User context pointer.
+/// @return Status indicating success or failure.
 using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
                               uint32_t timeoutMs, void* user);
 
-/// I2C write-then-read callback signature
+/// @brief I2C write-then-read callback signature.
+/// @param addr I2C device address (7-bit).
+/// @param txData Pointer to bytes to write before the read.
+/// @param txLen Number of bytes to write.
+/// @param rxData Output buffer for read bytes.
+/// @param rxLen Number of bytes to read.
+/// @param timeoutMs Transaction timeout in milliseconds.
+/// @param user User context pointer.
+/// @return Status indicating success or failure.
 using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
                                   uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
                                   void* user);
 
-/// Millisecond timestamp callback
+/// @brief Millisecond timestamp callback.
+/// @param user User context pointer.
+/// @return Current monotonic milliseconds.
 using NowMsFn = uint32_t (*)(void* user);
 
-/// Output data rate register encoding
+/// @brief Output data rate register encoding.
 enum class Odr : uint8_t {
   POWER_DOWN = 0,  ///< Sensor disabled
   HZ_12_5    = 1,  ///< 12.5 Hz
@@ -37,7 +53,7 @@ enum class Odr : uint8_t {
   HZ_1_6     = 11  ///< 1.6 Hz (accelerometer low-power only)
 };
 
-/// Accelerometer full-scale selection
+/// @brief Accelerometer full-scale selection.
 /// Register encoding is 00=2g, 01=16g, 10=4g, 11=8g
 enum class AccelFs : uint8_t {
   G_2  = 0, ///< +/-2 g
@@ -46,7 +62,7 @@ enum class AccelFs : uint8_t {
   G_8  = 3  ///< +/-8 g
 };
 
-/// Gyroscope full-scale selection
+/// @brief Gyroscope full-scale selection.
 enum class GyroFs : uint8_t {
   DPS_125  = 0xFF, ///< +/-125 dps, uses FS_125 bit
   DPS_250  = 0,    ///< +/-250 dps
@@ -55,82 +71,82 @@ enum class GyroFs : uint8_t {
   DPS_2000 = 3     ///< +/-2000 dps
 };
 
-/// Accelerometer power mode
+/// @brief Accelerometer power mode.
 enum class AccelPowerMode : uint8_t {
   HIGH_PERFORMANCE = 0, ///< High-performance mode
   LOW_POWER_NORMAL = 1  ///< Low-power / normal mode family
 };
 
-/// Gyroscope power mode
+/// @brief Gyroscope power mode.
 enum class GyroPowerMode : uint8_t {
   HIGH_PERFORMANCE = 0, ///< High-performance mode
   LOW_POWER_NORMAL = 1  ///< Low-power / normal mode family
 };
 
-/// Gyroscope high-pass filter cutoff
+/// @brief Gyroscope high-pass filter cutoff.
 enum class GyroHpfMode : uint8_t {
-  HZ_0_0081 = 0,
-  HZ_0_0324 = 1,
-  HZ_2_07   = 2,
-  HZ_16_32  = 3
+  HZ_0_0081 = 0, ///< 0.0081 Hz
+  HZ_0_0324 = 1, ///< 0.0324 Hz
+  HZ_2_07   = 2, ///< 2.07 Hz
+  HZ_16_32  = 3  ///< 16.32 Hz
 };
 
-/// FIFO operating mode
+/// @brief FIFO operating mode.
 enum class FifoMode : uint8_t {
-  BYPASS               = 0,
-  FIFO                 = 1,
-  CONTINUOUS_TO_FIFO   = 3,
-  BYPASS_TO_CONTINUOUS = 4,
-  CONTINUOUS           = 6
+  BYPASS               = 0, ///< FIFO disabled
+  FIFO                 = 1, ///< Stop when FIFO is full
+  CONTINUOUS_TO_FIFO   = 3, ///< Continuous until trigger, then FIFO
+  BYPASS_TO_CONTINUOUS = 4, ///< Bypass until trigger, then continuous
+  CONTINUOUS           = 6  ///< Continuous FIFO
 };
 
-/// FIFO decimation factor
+/// @brief FIFO decimation factor.
 #ifdef DISABLED
 #undef DISABLED
 #endif
 enum class FifoDecimation : uint8_t {
-  DISABLED = 0,
-  NONE     = 1,
-  DIV_2    = 2,
-  DIV_3    = 3,
-  DIV_4    = 4,
-  DIV_8    = 5,
-  DIV_16   = 6,
-  DIV_32   = 7
+  DISABLED = 0, ///< Do not store this source
+  NONE     = 1, ///< Store every sample
+  DIV_2    = 2, ///< Store every 2nd sample
+  DIV_3    = 3, ///< Store every 3rd sample
+  DIV_4    = 4, ///< Store every 4th sample
+  DIV_8    = 5, ///< Store every 8th sample
+  DIV_16   = 6, ///< Store every 16th sample
+  DIV_32   = 7  ///< Store every 32nd sample
 };
 
-/// Accelerometer user-offset register weight
+/// @brief Accelerometer user-offset register weight.
 enum class AccelOffsetWeight : uint8_t {
   MG_1  = 0, ///< About 1 mg/LSB
   MG_16 = 1  ///< About 15.6 mg/LSB
 };
 
-/// Configuration for LSM6DS3TR driver
+/// @brief Configuration for LSM6DS3TR driver.
 struct Config {
   // I2C transport
-  I2cWriteFn i2cWrite = nullptr;
-  I2cWriteReadFn i2cWriteRead = nullptr;
-  void* i2cUser = nullptr;
+  I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
+  I2cWriteReadFn i2cWriteRead = nullptr; ///< I2C write-read function pointer
+  void* i2cUser = nullptr;               ///< User context for I2C callbacks
 
   // Timing hooks
-  NowMsFn nowMs = nullptr;
-  void* timeUser = nullptr;
+  NowMsFn nowMs = nullptr;  ///< Monotonic millisecond source
+  void* timeUser = nullptr; ///< User context for timing hook
 
   // Device settings
-  uint8_t i2cAddress = 0x6A;
-  uint32_t i2cTimeoutMs = 50;
+  uint8_t i2cAddress = 0x6A;  ///< 0x6A (SA0=GND) or 0x6B (SA0=VDD)
+  uint32_t i2cTimeoutMs = 50; ///< I2C transaction timeout in milliseconds
 
   // Sensor configuration
-  Odr odrXl = Odr::HZ_104;
-  Odr odrG = Odr::HZ_104;
-  AccelFs fsXl = AccelFs::G_2;
-  GyroFs fsG = GyroFs::DPS_250;
-  AccelPowerMode accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
-  GyroPowerMode gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;
-  bool bdu = true;
+  Odr odrXl = Odr::HZ_104; ///< Accelerometer output data rate
+  Odr odrG = Odr::HZ_104;  ///< Gyroscope output data rate
+  AccelFs fsXl = AccelFs::G_2;     ///< Accelerometer full-scale range
+  GyroFs fsG = GyroFs::DPS_250;    ///< Gyroscope full-scale range
+  AccelPowerMode accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE; ///< Accelerometer power mode
+  GyroPowerMode gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;    ///< Gyroscope power mode
+  bool bdu = true; ///< Enable block data update for coherent multi-byte reads
 
   // Health tracking
-  uint8_t offlineThreshold = 5;
+  uint8_t offlineThreshold = 5; ///< Consecutive tracked failures before OFFLINE
 };
 
 }  // namespace LSM6DS3TR

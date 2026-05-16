@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `SettingsSnapshot`, `getSettings()`, `settings()`, `driverState()`, `hasSample()`, `sampleTimestampMs()`, and `sampleAgeMs()` for cache-only diagnostics.
+- `StatusReg` / `readStatus(StatusReg&)` and `SensorHubData` / `readSensorHub()` for decoded status and sensor-hub output readback.
+- `Err::CONVERSION_NOT_READY` alias and `Status::is(Err)` for cross-library status handling.
+- CLI commands for `begin`, `whoami` / `id`, `shub [N]`, decoded `status`, and expanded FIFO status output.
 - Native coverage proving latched `OFFLINE` blocks normal I2C operations without touching the bus while explicit recovery/reset paths remain available.
 - README documentation for the single-threaded, non-ISR driver contract and explicit recovery model.
 
@@ -16,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Doxyfile inputs now include the implementation manual while keeping extracted
   math-heavy design tips out of generated API docs.
+- Reference documentation now uses human-readable vendor PDF names and separates compact IMU notes from full PDF/application-note extractions under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
 - Explicit recovery/reset bypass internals now use the shared `ScopedOfflineI2cAllowance` / `_reassertOfflineLatch()` procedure so failed recovery attempts that begin from `OFFLINE` keep the latch asserted.
 - Hardened cached configuration setters so invalid enum values are rejected before I2C and cached state rolls back on failed writes.
+- `begin()` now clears stale health, config, feature, and sample state before validation, and normalizes `offlineThreshold = 0` to one.
+- `IN_PROGRESS` statuses are health-neutral.
 - Documented direct-register access bounds and bounded calibration/reset polling behavior.
 - Health behavior is now standardized on latched `OFFLINE`: normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch I2C until `recover()` succeeds.
 

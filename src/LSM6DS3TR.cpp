@@ -301,10 +301,12 @@ Status LSM6DS3TR::begin(const Config& config) {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
+  _allowOfflineI2c = false;
 
   _measurementRequested = false;
   _measurementReady = false;
   _hasSample = false;
+  _sampleTimestampMs = 0;
   _rawMeasurement = RawMeasurement{};
 
   _config = Config{};
@@ -432,6 +434,7 @@ void LSM6DS3TR::end() {
   _measurementRequested = false;
   _measurementReady = false;
   _hasSample = false;
+  _sampleTimestampMs = 0;
   _rawMeasurement = RawMeasurement{};
 }
 
@@ -609,6 +612,43 @@ Status LSM6DS3TR::readAllRaw(RawMeasurement& out) {
 
   _rawMeasurement = out;
   _hasSample = true;
+  _sampleTimestampMs = _nowMs();
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::getSettings(SettingsSnapshot& out) const {
+  out.initialized = _initialized;
+  out.state = _driverState;
+  out.i2cAddress = _config.i2cAddress;
+  out.i2cTimeoutMs = _config.i2cTimeoutMs;
+  out.offlineThreshold = _config.offlineThreshold;
+  out.hasNowMsHook = (_config.nowMs != nullptr);
+  out.odrXl = _config.odrXl;
+  out.odrG = _config.odrG;
+  out.fsXl = _config.fsXl;
+  out.fsG = _config.fsG;
+  out.bdu = _config.bdu;
+  out.accelPowerMode = _accelPowerMode;
+  out.gyroPowerMode = _gyroPowerMode;
+  out.gyroSleepEnabled = _gyroSleepEnabled;
+  out.accelFilter = _accelFilterConfig;
+  out.gyroFilter = _gyroFilterConfig;
+  out.timestampEnabled = _timestampEnabled;
+  out.timestampHighResolution = _timestampHighResolution;
+  out.pedometerEnabled = _pedometerEnabled;
+  out.significantMotionEnabled = _significantMotionEnabled;
+  out.tiltEnabled = _tiltEnabled;
+  out.wristTiltEnabled = _wristTiltEnabled;
+  out.accelOffsetWeight = _accelOffsetWeight;
+  out.accelUserOffset = _accelUserOffset;
+  out.fifo = _fifoConfig;
+  out.accelBias = _accelBias;
+  out.gyroBias = _gyroBias;
+  out.measurementPending = _measurementRequested && !_measurementReady;
+  out.measurementReady = _measurementReady;
+  out.hasSample = _hasSample;
+  out.sampleTimestampMs = _sampleTimestampMs;
+  out.rawMeasurement = _rawMeasurement;
   return Status::Ok();
 }
 
@@ -752,6 +792,20 @@ Status LSM6DS3TR::readStatusReg(uint8_t& status) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
   return readRegister(cmd::REG_STATUS_REG, status);
+}
+
+Status LSM6DS3TR::readStatus(StatusReg& out) {
+  uint8_t raw = 0;
+  Status st = readStatusReg(raw);
+  if (!st.ok()) {
+    return st;
+  }
+
+  out.raw = raw;
+  out.accelDataReady = (raw & cmd::MASK_XLDA) != 0;
+  out.gyroDataReady = (raw & cmd::MASK_GDA) != 0;
+  out.tempDataReady = (raw & cmd::MASK_TDA) != 0;
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::isAccelDataReady(bool& ready) {
@@ -1314,6 +1368,7 @@ Status LSM6DS3TR::softReset() {
     _measurementRequested = false;
     _measurementReady = false;
     _hasSample = false;
+    _sampleTimestampMs = 0;
 
     const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_SW_RESET | cmd::MASK_IF_INC |
                                                (_config.bdu ? cmd::MASK_BDU : 0));
@@ -1587,6 +1642,23 @@ Status LSM6DS3TR::readWristTiltStatus(uint8_t& value) {
   return readRegister(cmd::REG_WRIST_TILT_IA, value);
 }
 
+Status LSM6DS3TR::readSensorHub(SensorHubData& out, uint8_t count) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (count == 0u || count > 12u) {
+    return Status::Error(Err::INVALID_PARAM, "Sensor hub count must be 1..12");
+  }
+
+  out = SensorHubData{};
+  Status st = readRegs(cmd::REG_SENSORHUB1, out.bytes, count);
+  if (!st.ok()) {
+    return st;
+  }
+  out.count = count;
+  return Status::Ok();
+}
+
 Status LSM6DS3TR::_i2cWriteReadRaw(const uint8_t* txBuf, size_t txLen,
                                    uint8_t* rxBuf, size_t rxLen) {
   if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
@@ -1691,7 +1763,7 @@ Status LSM6DS3TR::_updateRegister(uint8_t reg, uint8_t mask, uint8_t value) {
 }
 
 Status LSM6DS3TR::_updateHealth(const Status& st) {
-  if (!_initialized) {
+  if (!_initialized || st.inProgress()) {
     return st;
   }
 
@@ -1836,6 +1908,7 @@ Status LSM6DS3TR::_readRawAll() {
   _rawMeasurement.accel.z =
       static_cast<int16_t>((static_cast<uint16_t>(data[13]) << 8) | data[12]);
   _hasSample = true;
+  _sampleTimestampMs = _nowMs();
   return Status::Ok();
 }
 
