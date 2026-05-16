@@ -1461,7 +1461,7 @@ void processCommand(const String& line) {
     if (!st.ok()) { printStatus(st); return; }
     printRegisterValue(cmd.c_str(), value);
   } else if (cmd == "shub") {
-    uint32_t countToRead = 12;
+    unsigned long countToRead = 12UL;
     if (count >= 2) {
       if (count < 2 || !parseUnsignedToken(tokens[1], 12UL, countToRead) || countToRead == 0UL) {
         Serial.println("  Expected shub [1..12]");
