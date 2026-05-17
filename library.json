@@ -1,6 +1,6 @@
 {
   "name": "LSM6DS3TR",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Production-grade LSM6DS3TR-C IMU driver (3D accelerometer + 3D gyroscope).",
   "keywords": [
     "lsm6ds3tr",

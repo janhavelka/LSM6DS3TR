@@ -34,6 +34,8 @@ The managed API covers the most practical runtime features of the chip:
 - timestamp enable, high-resolution mode, read, and reset
 - pedometer, significant motion, tilt, and wrist tilt enable
 - step counter read/reset and step timestamp read
+- decoded source-register constants for step, significant-motion, tilt, wrist-tilt,
+  sensor-hub, and slave-NACK diagnostics
 - accelerometer user offsets and offset weight selection
 - software bias calibration for accel (1-point, Z-up) and gyro (zero-rate-level) with at-rest capture
 - automatic bias correction in `getMeasurement()`; manual helpers `correctAccel()` / `correctGyro()`
@@ -57,6 +59,8 @@ The driver enforces several device constraints from the datasheet and applicatio
 - gyroscope `1.6 Hz` is rejected
 - embedded functions require accelerometer ODR `>= 26 Hz`
 - timestamp requires at least one active sensor
+- pedometer step events are short pulses unless interrupt latching/routing is
+  configured; the step counter is the durable pedometer readback
 - FIFO configuration requires BDU enabled
 - async combined measurements require BDU and matching active accel/gyro ODR
 - managed setters validate enum values before I2C and keep cached state unchanged if a write fails
@@ -172,7 +176,7 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 - full managed configuration coverage for ODR, full-scale, power modes, filters, timestamp, embedded functions, offsets, and FIFO
 - register read, write, and dump commands for advanced tuning
 - source-register inspection commands
-- async stress and mixed-operation stress commands
+- ODR-paced independent data-ready stress and mixed-operation stress commands
 - hardware self-test flow for accelerometer and gyroscope
 - software bias calibration and continuous streaming mode with one line per sample
 - converted CLI sample reads (`read`, `accel`, `gyro`, `stream`) that respect the currently configured software bias values
@@ -191,6 +195,8 @@ odrxl 104
 gpm lpn
 ts 1
 pedo 1
+steps
+funcsrc1
 offset -4 7 12
 cal 200
 biasxl
@@ -203,6 +209,8 @@ rreg 0x10
 wreg 0x58 0x8E
 dump 0x10 32
 selftest
+stress 100
+stress_mix 100
 ```
 
 ## Example Helpers
@@ -240,6 +248,12 @@ Cache-only diagnostics include `SettingsSnapshot`, `getSettings()`,
 `sampleAgeMs(nowMs)`. `StatusReg` and `readStatus(StatusReg&)` expose decoded
 accelerometer, gyroscope, and temperature data-ready flags without requiring
 callers to decode `STATUS_REG` manually.
+
+The bring-up CLI also decodes `FUNC_SRC1`, `FUNC_SRC2`, and `WRIST_TILT_IA`.
+`steps` prints pedometer enable state, accelerometer ODR, the step counter,
+step timestamp, and the relevant `FUNC_SRC1` step flags. A zero `FUNC_SRC1`
+with a changing step counter is valid: without latched/routed interrupts, step
+source bits can clear before a manual CLI read observes them.
 
 ## Building And Validation
 

@@ -290,7 +290,7 @@ public:
   /// @name Software Bias Calibration
   /// @brief Software-level bias compensation for accel and gyro.
   ///
-  /// The accelerometer hardware offset registers (0x73–0x75) provide coarse
+  /// The accelerometer hardware offset registers (0x73-0x75) provide coarse
   /// offset correction at 8-bit resolution.  Software bias extends this with
   /// float-precision offsets subtracted during conversion.
   ///
@@ -527,8 +527,13 @@ public:
   Status resetTimestamp();
 
   /// @brief Enable or disable pedometer function.
+  ///
+  /// Enabling requires accelerometer ODR >= 26 Hz. The driver sets the
+  /// required embedded-function gate together with the pedometer bit in
+  /// CTRL10_C.
   /// @param enabled true enables pedometer logic.
-  /// @return Status from register update.
+  /// @return OK on success; INVALID_PARAM when the current accel ODR is too low;
+  ///         otherwise a register-update status.
   Status setPedometerEnabled(bool enabled);
 
   /// @brief Get cached pedometer enable state.
@@ -537,8 +542,13 @@ public:
   Status getPedometerEnabled(bool& enabled) const;
 
   /// @brief Enable or disable significant-motion detection.
+  ///
+  /// Enabling requires accelerometer ODR >= 26 Hz. Threshold tuning is available
+  /// through raw register APIs for applications that need non-default
+  /// embedded-bank settings.
   /// @param enabled true enables significant-motion logic.
-  /// @return Status from register update.
+  /// @return OK on success; INVALID_PARAM when the current accel ODR is too low;
+  ///         otherwise a register-update status.
   Status setSignificantMotionEnabled(bool enabled);
 
   /// @brief Get cached significant-motion enable state.
@@ -547,8 +557,11 @@ public:
   Status getSignificantMotionEnabled(bool& enabled) const;
 
   /// @brief Enable or disable tilt detection.
+  ///
+  /// Enabling requires accelerometer ODR >= 26 Hz.
   /// @param enabled true enables tilt logic.
-  /// @return Status from register update.
+  /// @return OK on success; INVALID_PARAM when the current accel ODR is too low;
+  ///         otherwise a register-update status.
   Status setTiltEnabled(bool enabled);
 
   /// @brief Get cached tilt enable state.
@@ -557,8 +570,12 @@ public:
   Status getTiltEnabled(bool& enabled) const;
 
   /// @brief Enable or disable wrist-tilt detection.
+  ///
+  /// Enabling requires accelerometer ODR >= 26 Hz. Axis mask, threshold, and
+  /// latency tuning remain available through raw register access.
   /// @param enabled true enables wrist-tilt logic.
-  /// @return Status from register update.
+  /// @return OK on success; INVALID_PARAM when the current accel ODR is too low;
+  ///         otherwise a register-update status.
   Status setWristTiltEnabled(bool enabled);
 
   /// @brief Get cached wrist-tilt enable state.
@@ -566,17 +583,22 @@ public:
   /// @return OK on success.
   Status getWristTiltEnabled(bool& enabled) const;
 
-  /// @brief Read the step counter.
+  /// @brief Read the durable 16-bit pedometer step counter.
+  ///
+  /// The counter increments after the hardware pedometer debounce accepts a
+  /// walking sequence. The transient STEP_DETECTED source bit may already be
+  /// clear by the time software reads FUNC_SRC1 unless interrupt latching or
+  /// routing is configured.
   /// @param out Step counter value.
   /// @return Status from register read.
   Status readStepCounter(uint16_t& out);
 
-  /// @brief Read the step timestamp.
+  /// @brief Read the timestamp captured when the last step was detected.
   /// @param out Step timestamp value.
   /// @return Status from register read.
   Status readStepTimestamp(uint16_t& out);
 
-  /// @brief Reset the step counter.
+  /// @brief Reset the hardware step counter and clear PEDO_RST_STEP again.
   /// @return Status from register update.
   Status resetStepCounter();
 
@@ -663,16 +685,26 @@ public:
   Status read6dSource(uint8_t& value);
 
   /// @brief Read FUNC_SRC1.
+  ///
+  /// Use CommandTable masks such as `MASK_STEP_DETECTED`,
+  /// `MASK_STEP_COUNT_DELTA_IA`, `MASK_SIGN_MOTION_IA`, and `MASK_TILT_IA` to
+  /// decode the raw value. Some bits are pulsed unless latched/routed.
   /// @param value Raw register value.
   /// @return Status from register read.
   Status readFunctionSource1(uint8_t& value);
 
   /// @brief Read FUNC_SRC2.
+  ///
+  /// Use CommandTable masks such as `MASK_WRIST_TILT_IA` and
+  /// `MASK_SLAVE0_NACK` through `MASK_SLAVE3_NACK` to decode the raw value.
   /// @param value Raw register value.
   /// @return Status from register read.
   Status readFunctionSource2(uint8_t& value);
 
   /// @brief Read WRIST_TILT_IA.
+  ///
+  /// Use CommandTable masks such as `MASK_WRIST_TILT_XPOS` through
+  /// `MASK_WRIST_TILT_ZNEG` to decode the triggered axis/sign bits.
   /// @param value Raw register value.
   /// @return Status from register read.
   Status readWristTiltStatus(uint8_t& value);
