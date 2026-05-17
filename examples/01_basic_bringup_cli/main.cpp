@@ -767,6 +767,23 @@ bool isExampleOdrActive(LSM6DS3TR::Odr odr) {
   return odr != LSM6DS3TR::Odr::POWER_DOWN;
 }
 
+bool isAccelOdrAtLeast26Hz(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_26:
+    case LSM6DS3TR::Odr::HZ_52:
+    case LSM6DS3TR::Odr::HZ_104:
+    case LSM6DS3TR::Odr::HZ_208:
+    case LSM6DS3TR::Odr::HZ_416:
+    case LSM6DS3TR::Odr::HZ_833:
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void resetStressStats(int target) {
   stressStats = StressStats{};
   stressStats.active = true;
@@ -787,23 +804,12 @@ void noteStressError(const LSM6DS3TR::Status& st) {
 
 void updateStressStats(const LSM6DS3TR::Measurement& m, bool accelRead = true,
                        bool gyroRead = true, bool tempRead = true) {
-  if (!stressStats.hasSample) {
-    if (accelRead) {
+  if (accelRead) {
+    if (stressStats.accelSamples == 0U) {
       stressStats.minAx = stressStats.maxAx = m.accel.x;
       stressStats.minAy = stressStats.maxAy = m.accel.y;
       stressStats.minAz = stressStats.maxAz = m.accel.z;
-    }
-    if (gyroRead) {
-      stressStats.minGx = stressStats.maxGx = m.gyro.x;
-      stressStats.minGy = stressStats.maxGy = m.gyro.y;
-      stressStats.minGz = stressStats.maxGz = m.gyro.z;
-    }
-    if (tempRead) {
-      stressStats.minTemp = stressStats.maxTemp = m.temperatureC;
-    }
-    stressStats.hasSample = true;
-  } else {
-    if (accelRead) {
+    } else {
       if (m.accel.x < stressStats.minAx) stressStats.minAx = m.accel.x;
       if (m.accel.x > stressStats.maxAx) stressStats.maxAx = m.accel.x;
       if (m.accel.y < stressStats.minAy) stressStats.minAy = m.accel.y;
@@ -811,7 +817,13 @@ void updateStressStats(const LSM6DS3TR::Measurement& m, bool accelRead = true,
       if (m.accel.z < stressStats.minAz) stressStats.minAz = m.accel.z;
       if (m.accel.z > stressStats.maxAz) stressStats.maxAz = m.accel.z;
     }
-    if (gyroRead) {
+  }
+  if (gyroRead) {
+    if (stressStats.gyroSamples == 0U) {
+      stressStats.minGx = stressStats.maxGx = m.gyro.x;
+      stressStats.minGy = stressStats.maxGy = m.gyro.y;
+      stressStats.minGz = stressStats.maxGz = m.gyro.z;
+    } else {
       if (m.gyro.x < stressStats.minGx) stressStats.minGx = m.gyro.x;
       if (m.gyro.x > stressStats.maxGx) stressStats.maxGx = m.gyro.x;
       if (m.gyro.y < stressStats.minGy) stressStats.minGy = m.gyro.y;
@@ -819,10 +831,17 @@ void updateStressStats(const LSM6DS3TR::Measurement& m, bool accelRead = true,
       if (m.gyro.z < stressStats.minGz) stressStats.minGz = m.gyro.z;
       if (m.gyro.z > stressStats.maxGz) stressStats.maxGz = m.gyro.z;
     }
-    if (tempRead) {
+  }
+  if (tempRead) {
+    if (stressStats.tempSamples == 0U) {
+      stressStats.minTemp = stressStats.maxTemp = m.temperatureC;
+    } else {
       if (m.temperatureC < stressStats.minTemp) stressStats.minTemp = m.temperatureC;
       if (m.temperatureC > stressStats.maxTemp) stressStats.maxTemp = m.temperatureC;
     }
+  }
+  if (accelRead || gyroRead || tempRead) {
+    stressStats.hasSample = true;
   }
   if (accelRead) {
     stressStats.accelSamples++;
@@ -843,7 +862,7 @@ void finishStressStats() {
   const uint32_t successDelta = device.totalSuccess() - stressStats.successBefore;
   const uint32_t failDelta = device.totalFailures() - stressStats.failBefore;
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
-  const float successPct =
+  const float pollHitPct =
       (stressStats.attempts > 0)
           ? (100.0f * static_cast<float>(stressStats.success) /
              static_cast<float>(stressStats.attempts))
@@ -861,9 +880,9 @@ void finishStressStats() {
                 goodIfZeroColor(stressStats.errors),
                 static_cast<unsigned long>(stressStats.errors),
                 LOG_COLOR_RESET);
-  Serial.printf("  Success rate: %s%.2f%%%s\n",
-                successRateColor(successPct),
-                successPct,
+  Serial.printf("  Poll hit rate: %s%.2f%%%s\n",
+                successRateColor(pollHitPct),
+                pollHitPct,
                 LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
   if (durationMs > 0U) {
@@ -977,8 +996,8 @@ void runStressOdrPaced(int sampleCount) {
 
   uint32_t lastProgress = 0;
   uint32_t lastReadyMs = millis();
-  while ((!stressStats.includeAccel || stressStats.accelSamples < static_cast<uint32_t>(sampleCount)) &&
-         (!stressStats.includeGyro || stressStats.gyroSamples < static_cast<uint32_t>(sampleCount))) {
+  while ((stressStats.includeAccel && stressStats.accelSamples < static_cast<uint32_t>(sampleCount)) ||
+         (stressStats.includeGyro && stressStats.gyroSamples < static_cast<uint32_t>(sampleCount))) {
     LSM6DS3TR::StatusReg status;
     LSM6DS3TR::Status st = device.readStatus(status);
     stressStats.attempts++;
@@ -1444,6 +1463,38 @@ void printRegisterValue(const char* label, uint8_t value) {
   Serial.printf("  %s = 0x%02X\n", label, value);
 }
 
+void printSideFlag(const char* label, bool value) {
+  Serial.printf("    %-20s %s\n", label, log_bool_str(value));
+}
+
+void printFunctionSource1Details(uint8_t value) {
+  printSideFlag("step delta", (value & LSM6DS3TR::cmd::MASK_STEP_COUNT_DELTA_IA) != 0);
+  printSideFlag("significant motion", (value & LSM6DS3TR::cmd::MASK_SIGN_MOTION_IA) != 0);
+  printSideFlag("tilt", (value & LSM6DS3TR::cmd::MASK_TILT_IA) != 0);
+  printSideFlag("step detected", (value & LSM6DS3TR::cmd::MASK_STEP_DETECTED) != 0);
+  printSideFlag("step overflow", (value & LSM6DS3TR::cmd::MASK_STEP_OVERFLOW) != 0);
+  printSideFlag("hard/soft iron fail", (value & LSM6DS3TR::cmd::MASK_HI_FAIL) != 0);
+  printSideFlag("soft iron done", (value & LSM6DS3TR::cmd::MASK_SI_END_OP) != 0);
+  printSideFlag("sensor hub done", (value & LSM6DS3TR::cmd::MASK_SENSORHUB_END_OP) != 0);
+}
+
+void printFunctionSource2Details(uint8_t value) {
+  printSideFlag("slave3 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE3_NACK) != 0);
+  printSideFlag("slave2 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE2_NACK) != 0);
+  printSideFlag("slave1 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE1_NACK) != 0);
+  printSideFlag("slave0 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE0_NACK) != 0);
+  printSideFlag("wrist tilt", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_IA) != 0);
+}
+
+void printWristTiltDetails(uint8_t value) {
+  printSideFlag("x positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_XPOS) != 0);
+  printSideFlag("x negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_XNEG) != 0);
+  printSideFlag("y positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_YPOS) != 0);
+  printSideFlag("y negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_YNEG) != 0);
+  printSideFlag("z positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_ZPOS) != 0);
+  printSideFlag("z negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_ZNEG) != 0);
+}
+
 void printHelp() {
   Serial.println();
   cli::printHelpHeader("LSM6DS3TR-C CLI Help");
@@ -1630,12 +1681,34 @@ void processCommand(const String& line) {
   } else if (cmd == "steps") {
     uint16_t counter = 0;
     uint16_t stepTimestamp = 0;
-    LSM6DS3TR::Status st = device.readStepCounter(counter);
+    bool pedometer = false;
+    LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+    LSM6DS3TR::Status st = device.getPedometerEnabled(pedometer);
+    if (!st.ok()) { printStatus(st); return; }
+    st = device.getAccelOdr(odrXl);
+    if (!st.ok()) { printStatus(st); return; }
+    st = device.readStepCounter(counter);
     if (!st.ok()) { printStatus(st); return; }
     st = device.readStepTimestamp(stepTimestamp);
     if (!st.ok()) { printStatus(st); return; }
+    uint8_t funcSrc1 = 0;
+    st = device.readFunctionSource1(funcSrc1);
+    if (!st.ok()) { printStatus(st); return; }
+    Serial.printf("  Pedometer: %s\n", log_bool_str(pedometer));
+    Serial.printf("  Accel ODR: %s\n", odrToStr(odrXl));
     Serial.printf("  Steps: %u\n", counter);
     Serial.printf("  Step timestamp: %u\n", stepTimestamp);
+    Serial.printf("  FUNC_SRC1: 0x%02X\n", funcSrc1);
+    printSideFlag("step detected", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_DETECTED) != 0);
+    printSideFlag("step delta", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_COUNT_DELTA_IA) != 0);
+    printSideFlag("step overflow", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_OVERFLOW) != 0);
+    if (!pedometer) {
+      Serial.println("  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.");
+    } else if (!isAccelOdrAtLeast26Hz(odrXl)) {
+      Serial.println("  Note: pedometer requires accel ODR >= 26 Hz.");
+    } else if (counter == 0U) {
+      Serial.println("  Note: default debounce can require several consecutive real steps before the counter increments.");
+    }
   } else if (cmd == "fifo") {
     LSM6DS3TR::FifoConfig fifo;
     LSM6DS3TR::FifoStatus status;
@@ -1712,6 +1785,13 @@ void processCommand(const String& line) {
     else st = device.readWristTiltStatus(value);
     if (!st.ok()) { printStatus(st); return; }
     printRegisterValue(cmd.c_str(), value);
+    if (cmd == "funcsrc1") {
+      printFunctionSource1Details(value);
+    } else if (cmd == "funcsrc2") {
+      printFunctionSource2Details(value);
+    } else if (cmd == "wtstatus") {
+      printWristTiltDetails(value);
+    }
   } else if (cmd == "shub") {
     unsigned long countToRead = 12UL;
     if (count >= 2) {

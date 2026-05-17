@@ -1059,6 +1059,39 @@ void test_set_accel_odr_rejects_disabling_embedded_function_support() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 }
 
+void test_embedded_function_ctrl10_writes_match_datasheet() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.setTimestampEnabled(true).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x20, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.setTimestampEnabled(false).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00, bus.regs[cmd::REG_CTRL10_C]);
+
+  TEST_ASSERT_TRUE(dev.setPedometerEnabled(true).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x14, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.resetStepCounter().ok());
+  TEST_ASSERT_EQUAL_HEX8(0x14, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.setPedometerEnabled(false).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00, bus.regs[cmd::REG_CTRL10_C]);
+
+  TEST_ASSERT_TRUE(dev.setSignificantMotionEnabled(true).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x05, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.setSignificantMotionEnabled(false).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00, bus.regs[cmd::REG_CTRL10_C]);
+
+  TEST_ASSERT_TRUE(dev.setTiltEnabled(true).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x0C, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.setTiltEnabled(false).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00, bus.regs[cmd::REG_CTRL10_C]);
+
+  TEST_ASSERT_TRUE(dev.setWristTiltEnabled(true).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x84, bus.regs[cmd::REG_CTRL10_C]);
+  TEST_ASSERT_TRUE(dev.setWristTiltEnabled(false).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00, bus.regs[cmd::REG_CTRL10_C]);
+}
+
 void test_timestamp_helpers_work() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR dev;
@@ -1540,6 +1573,7 @@ int main() {
   RUN_TEST(test_timestamp_requires_active_sensor);
   RUN_TEST(test_embedded_functions_require_accel_odr_at_least_26hz);
   RUN_TEST(test_set_accel_odr_rejects_disabling_embedded_function_support);
+  RUN_TEST(test_embedded_function_ctrl10_writes_match_datasheet);
   RUN_TEST(test_timestamp_helpers_work);
   RUN_TEST(test_step_counter_helpers_work);
   RUN_TEST(test_offset_and_filter_helpers_work);
