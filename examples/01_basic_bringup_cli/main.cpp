@@ -37,6 +37,8 @@ struct StressStats {
   uint32_t errors = 0;
   bool hasFailure = false;
   bool hasSample = false;
+  bool includeAccel = true;
+  bool includeGyro = true;
   float minAx = 0.0f;
   float maxAx = 0.0f;
   float minAy = 0.0f;
@@ -202,6 +204,23 @@ const char* odrToStr(LSM6DS3TR::Odr odr) {
     case Odr::HZ_3330:    return "3330 Hz";
     case Odr::HZ_6660:    return "6660 Hz";
     default:              return "UNKNOWN";
+  }
+}
+
+bool isAccelLowPowerOnlyOdr(LSM6DS3TR::Odr odr) {
+  return odr == LSM6DS3TR::Odr::HZ_1_6;
+}
+
+bool isAccelHighPerformanceOnlyOdr(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_416:
+    case LSM6DS3TR::Odr::HZ_833:
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -661,6 +680,55 @@ LSM6DS3TR::Status performReadBlocking(LSM6DS3TR::Measurement& out) {
   return LSM6DS3TR::Status::Ok();
 }
 
+LSM6DS3TR::Status performReadConfiguredBlocking(LSM6DS3TR::Measurement& out) {
+  LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Status st = device.getAccelOdr(odrXl);
+  if (!st.ok()) {
+    return st;
+  }
+  st = device.getGyroOdr(odrG);
+  if (!st.ok()) {
+    return st;
+  }
+
+  const bool accelActive = odrXl != LSM6DS3TR::Odr::POWER_DOWN;
+  const bool gyroActive = odrG != LSM6DS3TR::Odr::POWER_DOWN;
+  if (!accelActive && !gyroActive) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "Both sensors powered down");
+  }
+
+  out = LSM6DS3TR::Measurement{};
+  int16_t tempRaw = 0;
+  st = device.readTemperatureRaw(tempRaw);
+  if (!st.ok()) {
+    return st;
+  }
+  out.temperatureC = device.convertTemperature(tempRaw);
+
+  if (accelActive) {
+    LSM6DS3TR::RawAxes raw;
+    st = device.readAccelRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    out.accel = device.convertAccel(raw);
+    device.correctAccel(out.accel);
+  }
+
+  if (gyroActive) {
+    LSM6DS3TR::RawAxes raw;
+    st = device.readGyroRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    out.gyro = device.convertGyro(raw);
+    device.correctGyro(out.gyro);
+  }
+
+  return LSM6DS3TR::Status::Ok();
+}
+
 uint32_t exampleOdrIntervalMs(LSM6DS3TR::Odr odr) {
   switch (odr) {
     case LSM6DS3TR::Odr::HZ_1_6:  return 625;
@@ -753,27 +821,35 @@ void noteStressError(const LSM6DS3TR::Status& st) {
 
 void updateStressStats(const LSM6DS3TR::Measurement& m) {
   if (!stressStats.hasSample) {
-    stressStats.minAx = stressStats.maxAx = m.accel.x;
-    stressStats.minAy = stressStats.maxAy = m.accel.y;
-    stressStats.minAz = stressStats.maxAz = m.accel.z;
-    stressStats.minGx = stressStats.maxGx = m.gyro.x;
-    stressStats.minGy = stressStats.maxGy = m.gyro.y;
-    stressStats.minGz = stressStats.maxGz = m.gyro.z;
+    if (stressStats.includeAccel) {
+      stressStats.minAx = stressStats.maxAx = m.accel.x;
+      stressStats.minAy = stressStats.maxAy = m.accel.y;
+      stressStats.minAz = stressStats.maxAz = m.accel.z;
+    }
+    if (stressStats.includeGyro) {
+      stressStats.minGx = stressStats.maxGx = m.gyro.x;
+      stressStats.minGy = stressStats.maxGy = m.gyro.y;
+      stressStats.minGz = stressStats.maxGz = m.gyro.z;
+    }
     stressStats.minTemp = stressStats.maxTemp = m.temperatureC;
     stressStats.hasSample = true;
   } else {
-    if (m.accel.x < stressStats.minAx) stressStats.minAx = m.accel.x;
-    if (m.accel.x > stressStats.maxAx) stressStats.maxAx = m.accel.x;
-    if (m.accel.y < stressStats.minAy) stressStats.minAy = m.accel.y;
-    if (m.accel.y > stressStats.maxAy) stressStats.maxAy = m.accel.y;
-    if (m.accel.z < stressStats.minAz) stressStats.minAz = m.accel.z;
-    if (m.accel.z > stressStats.maxAz) stressStats.maxAz = m.accel.z;
-    if (m.gyro.x < stressStats.minGx) stressStats.minGx = m.gyro.x;
-    if (m.gyro.x > stressStats.maxGx) stressStats.maxGx = m.gyro.x;
-    if (m.gyro.y < stressStats.minGy) stressStats.minGy = m.gyro.y;
-    if (m.gyro.y > stressStats.maxGy) stressStats.maxGy = m.gyro.y;
-    if (m.gyro.z < stressStats.minGz) stressStats.minGz = m.gyro.z;
-    if (m.gyro.z > stressStats.maxGz) stressStats.maxGz = m.gyro.z;
+    if (stressStats.includeAccel) {
+      if (m.accel.x < stressStats.minAx) stressStats.minAx = m.accel.x;
+      if (m.accel.x > stressStats.maxAx) stressStats.maxAx = m.accel.x;
+      if (m.accel.y < stressStats.minAy) stressStats.minAy = m.accel.y;
+      if (m.accel.y > stressStats.maxAy) stressStats.maxAy = m.accel.y;
+      if (m.accel.z < stressStats.minAz) stressStats.minAz = m.accel.z;
+      if (m.accel.z > stressStats.maxAz) stressStats.maxAz = m.accel.z;
+    }
+    if (stressStats.includeGyro) {
+      if (m.gyro.x < stressStats.minGx) stressStats.minGx = m.gyro.x;
+      if (m.gyro.x > stressStats.maxGx) stressStats.maxGx = m.gyro.x;
+      if (m.gyro.y < stressStats.minGy) stressStats.minGy = m.gyro.y;
+      if (m.gyro.y > stressStats.maxGy) stressStats.maxGy = m.gyro.y;
+      if (m.gyro.z < stressStats.minGz) stressStats.minGz = m.gyro.z;
+      if (m.gyro.z > stressStats.maxGz) stressStats.maxGz = m.gyro.z;
+    }
     if (m.temperatureC < stressStats.minTemp) stressStats.minTemp = m.temperatureC;
     if (m.temperatureC > stressStats.maxTemp) stressStats.maxTemp = m.temperatureC;
   }
@@ -792,9 +868,8 @@ void finishStressStats() {
           ? (100.0f * static_cast<float>(stressStats.success) /
              static_cast<float>(stressStats.attempts))
           : 0.0f;
-  yield();
-  delay(5);
-  Serial.printf("%s\n", "=== Stress Summary ===");
+  Serial.println();
+  Serial.println("=== Stress Summary ===");
   Serial.printf("  Target:   %d\n", stressStats.target);
   Serial.printf("  Attempts: %d\n", stressStats.attempts);
   Serial.printf("  Success:  %s%d%s\n",
@@ -827,14 +902,18 @@ void finishStressStats() {
                   stressStats.minTemp,
                   avgTemp,
                   stressStats.maxTemp);
-    Serial.printf("  Accel g:  x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
-                  stressStats.minAx, stressStats.maxAx,
-                  stressStats.minAy, stressStats.maxAy,
-                  stressStats.minAz, stressStats.maxAz);
-    Serial.printf("  Gyro dps: x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
-                  stressStats.minGx, stressStats.maxGx,
-                  stressStats.minGy, stressStats.maxGy,
-                  stressStats.minGz, stressStats.maxGz);
+    if (stressStats.includeAccel) {
+      Serial.printf("  Accel g:  x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                    stressStats.minAx, stressStats.maxAx,
+                    stressStats.minAy, stressStats.maxAy,
+                    stressStats.minAz, stressStats.maxAz);
+    }
+    if (stressStats.includeGyro) {
+      Serial.printf("  Gyro dps: x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                    stressStats.minGx, stressStats.maxGx,
+                    stressStats.minGy, stressStats.maxGy,
+                    stressStats.minGz, stressStats.maxGz);
+    }
   }
   if (stressStats.hasFailure) {
     Serial.println("  First failure:");
@@ -865,11 +944,24 @@ void failStressStart(const LSM6DS3TR::Status& st) {
 
 void runStressOdrPaced(int sampleCount) {
   resetStressStats(sampleCount);
+  LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Status setupStatus = device.getAccelOdr(odrXl);
+  if (setupStatus.ok()) {
+    setupStatus = device.getGyroOdr(odrG);
+  }
+  if (!setupStatus.ok()) {
+    failStressStart(setupStatus);
+    return;
+  }
+  stressStats.includeAccel = isExampleOdrActive(odrXl);
+  stressStats.includeGyro = isExampleOdrActive(odrG);
+
   for (int i = 0; i < sampleCount; ++i) {
     LSM6DS3TR::Measurement m;
     LSM6DS3TR::Status st = waitForConfiguredDataReady();
     if (st.ok()) {
-      st = performReadBlocking(m);
+      st = performReadConfiguredBlocking(m);
     }
     if (st.ok()) {
       updateStressStats(m);
@@ -1704,7 +1796,24 @@ void processCommand(const String& line) {
           Serial.println("  Invalid ODR token");
           return;
         }
-        st = (cmd == "odrxl") ? device.setAccelOdr(odr) : device.setGyroOdr(odr);
+        if (cmd == "odrxl") {
+          if (isAccelLowPowerOnlyOdr(odr)) {
+            st = device.setAccelOdr(LSM6DS3TR::Odr::HZ_208);
+            if (st.ok()) {
+              st = device.setAccelPowerMode(LSM6DS3TR::AccelPowerMode::LOW_POWER_NORMAL);
+            }
+          } else if (isAccelHighPerformanceOnlyOdr(odr)) {
+            st = device.setAccelOdr(LSM6DS3TR::Odr::HZ_208);
+            if (st.ok()) {
+              st = device.setAccelPowerMode(LSM6DS3TR::AccelPowerMode::HIGH_PERFORMANCE);
+            }
+          }
+          if (st.ok()) {
+            st = device.setAccelOdr(odr);
+          }
+        } else {
+          st = device.setGyroOdr(odr);
+        }
       }
     } else if (cmd == "fsxl" || cmd == "fsg") {
       if (count == 1) {
