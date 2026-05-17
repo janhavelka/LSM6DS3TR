@@ -1650,11 +1650,11 @@ void processCommand(const String& line) {
         if (cmd == "apm") {
           LSM6DS3TR::AccelPowerMode mode;
           st = device.getAccelPowerMode(mode);
-          if (st.ok()) Serial.printf("  Accel power: %s\n", accelPowerModeToStr(mode));
+          if (st.ok()) Serial.printf("  apm: %s\n", accelPowerModeToStr(mode));
         } else {
           LSM6DS3TR::GyroPowerMode mode;
           st = device.getGyroPowerMode(mode);
-          if (st.ok()) Serial.printf("  Gyro power: %s\n", gyroPowerModeToStr(mode));
+          if (st.ok()) Serial.printf("  gpm: %s\n", gyroPowerModeToStr(mode));
         }
       } else if (cmd == "apm") {
         LSM6DS3TR::AccelPowerMode mode;
@@ -1816,7 +1816,7 @@ void processCommand(const String& line) {
         }
       }
     }
-    if (!st.ok()) {
+    if (count > 1 || !st.ok()) {
       printStatus(st);
     }
   } else if (cmd == "rreg" || cmd == "wreg" || cmd == "dump") {

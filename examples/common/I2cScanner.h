@@ -16,11 +16,14 @@ namespace i2c_scanner {
 
 /**
  * @brief Attempt to recover a stuck I2C bus by toggling SCL.
+ * @param wire Wire instance to restore after bit-bang recovery.
  * @param sda SDA pin number
  * @param scl SCL pin number
+ * @param freqHz I2C clock frequency to restore.
+ * @param timeoutMs I2C timeout to restore.
  */
-inline void recoverBus(int sda, int scl) {
-  Wire.end();
+inline void recoverBus(TwoWire& wire, int sda, int scl, uint32_t freqHz, uint16_t timeoutMs) {
+  wire.end();
 
   pinMode(scl, OUTPUT);
   pinMode(sda, INPUT_PULLUP);
@@ -43,7 +46,31 @@ inline void recoverBus(int sda, int scl) {
   digitalWrite(sda, HIGH);
   delayMicroseconds(5);
 
-  Wire.begin(sda, scl);
+  wire.begin(sda, scl);
+  wire.setClock(freqHz);
+#if defined(ARDUINO_ARCH_ESP32)
+  wire.setTimeOut(timeoutMs);
+#else
+  (void)timeoutMs;
+#endif
+}
+
+struct ScanOptions {
+  uint16_t scanTimeoutMs = 50;
+  uint16_t restoreTimeoutMs = 50;
+  uint32_t restoreClockHz = 400000;
+  int sda = -1;
+  int scl = -1;
+  bool recoverOnTimeout = false;
+};
+
+inline void scan(TwoWire& wire, const ScanOptions& options);
+
+inline void restoreBusSettings(TwoWire& wire, const ScanOptions& options) {
+  wire.setClock(options.restoreClockHz);
+#if defined(ARDUINO_ARCH_ESP32)
+  wire.setTimeOut(options.restoreTimeoutMs);
+#endif
 }
 
 /**
@@ -52,20 +79,30 @@ inline void recoverBus(int sda, int scl) {
  * @param timeoutMs Timeout per address probe in milliseconds (default 50ms).
  */
 inline void scan(TwoWire& wire, uint16_t timeoutMs = 50) {
-  LOGI("Scanning I2C bus (timeout=%dms)...", timeoutMs);
-  LOG_SERIAL.flush();
+  ScanOptions options;
+  options.scanTimeoutMs = timeoutMs;
+  options.restoreTimeoutMs = timeoutMs;
+  scan(wire, options);
+}
+
+/**
+ * @brief Scan I2C bus and restore caller-provided Wire settings afterward.
+ * @param wire Reference to Wire object (must be initialized).
+ * @param options Scan and restore settings.
+ */
+inline void scan(TwoWire& wire, const ScanOptions& options) {
+  LOGI("Scanning I2C bus (timeout=%dms)...", options.scanTimeoutMs);
 
 #if defined(ARDUINO_ARCH_ESP32)
-  wire.setTimeOut(timeoutMs);
+  wire.setTimeOut(options.scanTimeoutMs);
 #endif
 
   LOGI("     0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
-  LOG_SERIAL.flush();
 
   uint8_t count = 0;
+  bool timedOut = false;
   for (uint8_t row = 0; row < 8; row++) {
     LOG_SERIAL.printf("%02X: ", row * 16);
-    LOG_SERIAL.flush();
 
     for (uint8_t col = 0; col < 16; col++) {
       uint8_t addr = row * 16 + col;
@@ -82,19 +119,32 @@ inline void scan(TwoWire& wire, uint16_t timeoutMs = 50) {
         count++;
       } else if (error == 5) {
         LOG_SERIAL.print("TO ");
+        timedOut = true;
       } else {
         LOG_SERIAL.print("-- ");
       }
 
       yield();
-      delay(1);
+      if (timedOut && options.recoverOnTimeout) {
+        break;
+      }
     }
     LOG_SERIAL.println();
-    LOG_SERIAL.flush();
+    yield();
+
+    if (timedOut && options.recoverOnTimeout) {
+      break;
+    }
+  }
+
+  if (timedOut && options.recoverOnTimeout && options.sda >= 0 && options.scl >= 0) {
+    LOGI("I2C timeout detected during scan; recovering bus and aborting scan.");
+    recoverBus(wire, options.sda, options.scl, options.restoreClockHz, options.restoreTimeoutMs);
+  } else {
+    restoreBusSettings(wire, options);
   }
 
   LOGI("Scan complete. Found %d device(s).", count);
-  LOG_SERIAL.flush();
 
   if (count > 0) {
     LOGI("Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280");
