@@ -784,6 +784,13 @@ void cancelPending() {
   }
 }
 
+void failStressStart(const LSM6DS3TR::Status& st) {
+  noteStressError(st);
+  stressStats.attempts++;
+  stressRemaining = 0;
+  finishStressStats();
+}
+
 LSM6DS3TR::Status scheduleMeasurement() {
   const LSM6DS3TR::Status st = device.requestMeasurement();
   if (st.inProgress()) {
@@ -1559,16 +1566,7 @@ void processCommand(const String& line) {
     stressRemaining = sampleCount;
     const LSM6DS3TR::Status st = scheduleMeasurement();
     if (!st.inProgress() && !st.ok()) {
-      noteStressError(st);
-      stressStats.attempts++;
-      stressRemaining--;
-      printStressProgress(static_cast<uint32_t>(stressStats.attempts),
-                          static_cast<uint32_t>(stressStats.target),
-                          static_cast<uint32_t>(stressStats.success),
-                          stressStats.errors);
-      if (stressRemaining == 0) {
-        finishStressStats();
-      }
+      failStressStart(st);
     }
   } else if (cmd == "stress_mix") {
     int sampleCount = DEFAULT_STRESS_COUNT;
@@ -1891,12 +1889,7 @@ void loop() {
   if (stressStats.active && stressRemaining > 0 && !pendingRead) {
     const LSM6DS3TR::Status st = scheduleMeasurement();
     if (!st.inProgress() && !st.ok()) {
-      noteStressError(st);
-      stressStats.attempts++;
-      stressRemaining--;
-      if (stressRemaining == 0) {
-        finishStressStats();
-      }
+      failStressStart(st);
     }
   }
 
@@ -1916,6 +1909,7 @@ void loop() {
 
   String line;
   if (cli_shell::readLine(line)) {
+    Serial.println();
     processCommand(line);
     cli::printPrompt();
   }
