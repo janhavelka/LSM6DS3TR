@@ -349,7 +349,8 @@ Status LSM6DS3TR::begin(const Config& config) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid gyro power mode");
   }
   if (!isValidAccelOdr(config.odrXl, config.accelPowerMode)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid accel ODR/power-mode combination");
+    return Status::Error(Err::INVALID_CONFIG,
+                         "Accel 1.6 Hz requires low-power/normal mode; high-performance supports 12.5 Hz+");
   }
   if (!isValidGyroOdr(config.odrG, config.gyroPowerMode)) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid gyro ODR/power-mode combination");
@@ -679,7 +680,8 @@ Status LSM6DS3TR::setAccelOdr(Odr odr) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
   if (!isValidAccelOdr(odr, _accelPowerMode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid accel ODR/power-mode combination");
+    return Status::Error(Err::INVALID_PARAM,
+                         "Accel 1.6 Hz requires low-power/normal mode; run 'apm lpn' first");
   }
   if ((_pedometerEnabled || _significantMotionEnabled || _tiltEnabled || _wristTiltEnabled) &&
       !requiresAccelOdrAtLeast26Hz(odr)) {
@@ -854,7 +856,8 @@ Status LSM6DS3TR::setAccelPowerMode(AccelPowerMode mode) {
     return Status::Error(Err::INVALID_PARAM, "Invalid accel power mode");
   }
   if (!isValidAccelOdr(_config.odrXl, mode)) {
-    return Status::Error(Err::INVALID_PARAM, "Current accel ODR is not valid in requested power mode");
+    return Status::Error(Err::INVALID_PARAM,
+                         "Current accel ODR is not valid in requested power mode; use 12.5 Hz+ for high-performance");
   }
 
   const AccelPowerMode oldMode = _accelPowerMode;

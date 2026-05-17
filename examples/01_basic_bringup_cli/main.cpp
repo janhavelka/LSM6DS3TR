@@ -174,12 +174,10 @@ void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, u
     return;
   }
   const float pct = (100.0f * static_cast<float>(completed)) / static_cast<float>(total);
-  Serial.printf("  Progress: %lu/%lu (%s%.0f%%%s, ok=%s%lu%s, fail=%s%lu%s)\n",
+  Serial.printf("  Progress: %lu/%lu (%.0f%%, ok=%s%lu%s, fail=%s%lu%s)\n",
                 static_cast<unsigned long>(completed),
                 static_cast<unsigned long>(total),
-                successRateColor(pct),
                 pct,
-                LOG_COLOR_RESET,
                 goodIfNonZeroColor(okCount),
                 static_cast<unsigned long>(okCount),
                 LOG_COLOR_RESET,
@@ -663,6 +661,78 @@ LSM6DS3TR::Status performReadBlocking(LSM6DS3TR::Measurement& out) {
   return LSM6DS3TR::Status::Ok();
 }
 
+uint32_t exampleOdrIntervalMs(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_1_6:  return 625;
+    case LSM6DS3TR::Odr::HZ_12_5: return 80;
+    case LSM6DS3TR::Odr::HZ_26:   return 39;
+    case LSM6DS3TR::Odr::HZ_52:   return 20;
+    case LSM6DS3TR::Odr::HZ_104:  return 10;
+    case LSM6DS3TR::Odr::HZ_208:  return 5;
+    case LSM6DS3TR::Odr::HZ_416:  return 3;
+    case LSM6DS3TR::Odr::HZ_833:  return 2;
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+bool isExampleOdrActive(LSM6DS3TR::Odr odr) {
+  return odr != LSM6DS3TR::Odr::POWER_DOWN;
+}
+
+LSM6DS3TR::Status waitForConfiguredDataReady() {
+  LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Status st = device.getAccelOdr(odrXl);
+  if (!st.ok()) {
+    return st;
+  }
+  st = device.getGyroOdr(odrG);
+  if (!st.ok()) {
+    return st;
+  }
+
+  const bool accelActive = isExampleOdrActive(odrXl);
+  const bool gyroActive = isExampleOdrActive(odrG);
+  if (!accelActive && !gyroActive) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "Both sensors powered down");
+  }
+
+  uint32_t waitMs = 0;
+  if (accelActive) {
+    waitMs = exampleOdrIntervalMs(odrXl);
+  }
+  if (gyroActive) {
+    const uint32_t gyroWaitMs = exampleOdrIntervalMs(odrG);
+    if (gyroWaitMs > waitMs) {
+      waitMs = gyroWaitMs;
+    }
+  }
+  const uint32_t timeoutMs = (waitMs * 3U) + 100U;
+  const uint32_t startMs = millis();
+
+  while ((millis() - startMs) <= timeoutMs) {
+    LSM6DS3TR::StatusReg status;
+    st = device.readStatus(status);
+    if (!st.ok()) {
+      return st;
+    }
+    const bool accelReady = !accelActive || status.accelDataReady;
+    const bool gyroReady = !gyroActive || status.gyroDataReady;
+    if (accelReady && gyroReady) {
+      return LSM6DS3TR::Status::Ok();
+    }
+    yield();
+    delay(1);
+  }
+
+  return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::TIMEOUT, "Data-ready timeout during stress");
+}
+
 void resetStressStats(int target) {
   stressStats = StressStats{};
   stressStats.active = true;
@@ -722,7 +792,9 @@ void finishStressStats() {
           ? (100.0f * static_cast<float>(stressStats.success) /
              static_cast<float>(stressStats.attempts))
           : 0.0f;
-  Serial.println("=== Stress Summary ===");
+  yield();
+  delay(5);
+  Serial.printf("%s\n", "=== Stress Summary ===");
   Serial.printf("  Target:   %d\n", stressStats.target);
   Serial.printf("  Attempts: %d\n", stressStats.attempts);
   Serial.printf("  Success:  %s%d%s\n",
@@ -788,6 +860,28 @@ void failStressStart(const LSM6DS3TR::Status& st) {
   noteStressError(st);
   stressStats.attempts++;
   stressRemaining = 0;
+  finishStressStats();
+}
+
+void runStressOdrPaced(int sampleCount) {
+  resetStressStats(sampleCount);
+  for (int i = 0; i < sampleCount; ++i) {
+    LSM6DS3TR::Measurement m;
+    LSM6DS3TR::Status st = waitForConfiguredDataReady();
+    if (st.ok()) {
+      st = performReadBlocking(m);
+    }
+    if (st.ok()) {
+      updateStressStats(m);
+    } else {
+      noteStressError(st);
+    }
+    stressStats.attempts++;
+    printStressProgress(static_cast<uint32_t>(stressStats.attempts),
+                        static_cast<uint32_t>(stressStats.target),
+                        static_cast<uint32_t>(stressStats.success),
+                        stressStats.errors);
+  }
   finishStressStats();
 }
 
@@ -1288,7 +1382,7 @@ void printHelp() {
   cli::printHelpItem("wtstatus", "Read WRIST_TILT_IA");
   cli::printHelpItem("shub [N]", "Read SENSORHUB1..12 output bytes");
   cli::printHelpItem("selftest", "Run accelerometer and gyroscope self-test");
-  cli::printHelpItem("stress [N]", "Async converted-sample stress test");
+  cli::printHelpItem("stress [N]", "ODR-paced converted-sample stress test");
   cli::printHelpItem("stress_mix [N]", "Blocking mixed-operation stress test");
 
   cli::printHelpSection("Registers");
@@ -1562,12 +1656,7 @@ void processCommand(const String& line) {
       }
       sampleCount = static_cast<int>(parsed);
     }
-    resetStressStats(sampleCount);
-    stressRemaining = sampleCount;
-    const LSM6DS3TR::Status st = scheduleMeasurement();
-    if (!st.inProgress() && !st.ok()) {
-      failStressStart(st);
-    }
+    runStressOdrPaced(sampleCount);
   } else if (cmd == "stress_mix") {
     int sampleCount = DEFAULT_STRESS_COUNT;
     if (count >= 2) {
