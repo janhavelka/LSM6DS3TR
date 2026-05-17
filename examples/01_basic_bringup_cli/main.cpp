@@ -686,29 +686,21 @@ LSM6DS3TR::Status performReadBlocking(LSM6DS3TR::Measurement& out) {
 bool isExampleOdrActive(LSM6DS3TR::Odr odr);
 
 LSM6DS3TR::Status performReadReadyChannels(const LSM6DS3TR::StatusReg& status,
-                                           LSM6DS3TR::Measurement& out,
-                                           bool& accelRead,
-                                           bool& gyroRead,
-                                           bool& tempRead) {
-  LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
-  LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
-  LSM6DS3TR::Status st = device.getAccelOdr(odrXl);
-  if (!st.ok()) {
-    return st;
-  }
-  st = device.getGyroOdr(odrG);
-  if (!st.ok()) {
-    return st;
-  }
-
+                                            LSM6DS3TR::Measurement& out,
+                                            bool& accelRead,
+                                            bool& gyroRead,
+                                            bool& tempRead,
+                                            bool wantAccel,
+                                            bool wantGyro,
+                                            bool wantTemp) {
   accelRead = false;
   gyroRead = false;
   tempRead = false;
   out = LSM6DS3TR::Measurement{};
 
-  if (status.tempDataReady) {
+  if (wantTemp && status.tempDataReady) {
     int16_t raw = 0;
-    st = device.readTemperatureRaw(raw);
+    LSM6DS3TR::Status st = device.readTemperatureRaw(raw);
     if (!st.ok()) {
       return st;
     }
@@ -716,9 +708,9 @@ LSM6DS3TR::Status performReadReadyChannels(const LSM6DS3TR::StatusReg& status,
     tempRead = true;
   }
 
-  if (isExampleOdrActive(odrXl) && status.accelDataReady) {
+  if (wantAccel && status.accelDataReady) {
     LSM6DS3TR::RawAxes raw;
-    st = device.readAccelRaw(raw);
+    LSM6DS3TR::Status st = device.readAccelRaw(raw);
     if (!st.ok()) {
       return st;
     }
@@ -727,9 +719,9 @@ LSM6DS3TR::Status performReadReadyChannels(const LSM6DS3TR::StatusReg& status,
     accelRead = true;
   }
 
-  if (isExampleOdrActive(odrG) && status.gyroDataReady) {
+  if (wantGyro && status.gyroDataReady) {
     LSM6DS3TR::RawAxes raw;
-    st = device.readGyroRaw(raw);
+    LSM6DS3TR::Status st = device.readGyroRaw(raw);
     if (!st.ok()) {
       return st;
     }
@@ -995,7 +987,7 @@ void runStressOdrPaced(int sampleCount) {
   const bool usePollDelay = fastestIntervalMs > 2U;
 
   uint32_t lastProgress = 0;
-  uint32_t lastReadyMs = millis();
+  uint32_t lastTargetReadyMs = millis();
   while ((stressStats.includeAccel && stressStats.accelSamples < static_cast<uint32_t>(sampleCount)) ||
          (stressStats.includeGyro && stressStats.gyroSamples < static_cast<uint32_t>(sampleCount))) {
     LSM6DS3TR::StatusReg status;
@@ -1006,32 +998,41 @@ void runStressOdrPaced(int sampleCount) {
       break;
     }
 
-    const bool accelReady = stressStats.includeAccel && status.accelDataReady;
-    const bool gyroReady = stressStats.includeGyro && status.gyroDataReady;
+    const bool needAccel = stressStats.includeAccel &&
+                           stressStats.accelSamples < static_cast<uint32_t>(sampleCount);
+    const bool needGyro = stressStats.includeGyro &&
+                          stressStats.gyroSamples < static_cast<uint32_t>(sampleCount);
+    const bool accelReady = needAccel && status.accelDataReady;
+    const bool gyroReady = needGyro && status.gyroDataReady;
     const bool tempReady = status.tempDataReady;
-    if (!accelReady && !gyroReady && !tempReady) {
-      if ((millis() - lastReadyMs) > timeoutMs) {
+    if (!accelReady && !gyroReady) {
+      if ((millis() - lastTargetReadyMs) > timeoutMs) {
         noteStressError(LSM6DS3TR::Status::Error(LSM6DS3TR::Err::TIMEOUT,
-                                                 "Data-ready timeout during stress"));
+                                                  "Data-ready timeout during stress"));
         break;
       }
-      yield();
-      if (usePollDelay) {
-        delay(1);
+      if (!tempReady) {
+        yield();
+        if (usePollDelay) {
+          delay(1);
+        }
+        continue;
       }
-      continue;
     }
-    lastReadyMs = millis();
 
     LSM6DS3TR::Measurement m;
     bool accelRead = false;
     bool gyroRead = false;
     bool tempRead = false;
-    st = performReadReadyChannels(status, m, accelRead, gyroRead, tempRead);
+    st = performReadReadyChannels(status, m, accelRead, gyroRead, tempRead,
+                                  needAccel, needGyro, true);
     if (!st.ok()) {
       noteStressError(st);
     } else {
       updateStressStats(m, accelRead, gyroRead, tempRead);
+      if (accelRead || gyroRead) {
+        lastTargetReadyMs = millis();
+      }
     }
 
     uint32_t completed = UINT32_MAX;
@@ -1047,7 +1048,7 @@ void runStressOdrPaced(int sampleCount) {
     if (completed != lastProgress) {
       printStressProgress(completed,
                           static_cast<uint32_t>(stressStats.target),
-                          stressStats.accelSamples + stressStats.gyroSamples,
+                          completed,
                           stressStats.errors);
       lastProgress = completed;
     }
