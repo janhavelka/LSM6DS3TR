@@ -194,12 +194,11 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 
 ## ESP-IDF Example
 
-[examples/idf/basic](examples/idf/basic) is a pure ESP-IDF project that compiles
-the same bringup CLI source as the Arduino example. Its example-local
-`Arduino.h` / `Wire.h` facade maps the CLI's small `Serial`, `String`, and
-`TwoWire` surface onto ESP-IDF, while the I2C operations use the v6
-`driver/i2c_master.h` API. The driver core remains framework-neutral and still
-receives transport callbacks through `Config`.
+[examples/idf/basic](examples/idf/basic) is a native ESP-IDF project with
+`app_main()`, fixed-buffer CLI input, and `driver/i2c_master.h` callbacks. It
+does not compile Arduino sources or provide Arduino compatibility facades. The
+driver core remains framework-neutral and receives transport/timing callbacks
+through `Config`.
 
 Representative commands:
 

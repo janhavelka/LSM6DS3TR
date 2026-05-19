@@ -5,8 +5,6 @@
 
 #include "LSM6DS3TR/LSM6DS3TR.h"
 
-#include "PlatformTime.h"
-
 #include <cstring>
 #include <limits>
 
@@ -1919,7 +1917,7 @@ uint32_t LSM6DS3TR::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
   }
-  return platform::nowMs();
+  return 0;
 }
 
 uint8_t LSM6DS3TR::_buildCtrl1Xl(Odr odr, AccelFs fs) {

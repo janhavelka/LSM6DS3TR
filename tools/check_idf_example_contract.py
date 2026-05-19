@@ -6,11 +6,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-
-ARDUINO_CLI = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
 IDF_MAIN_DIR = ROOT / "examples" / "idf" / "basic" / "main"
-IDF_CMAKE = IDF_MAIN_DIR / "CMakeLists.txt"
-IDF_README = ROOT / "examples" / "idf" / "basic" / "README.md"
 
 MANDATORY_COMMANDS = [
     "help",
@@ -18,6 +14,7 @@ MANDATORY_COMMANDS = [
     "ver",
     "scan",
     "begin",
+    "init",
     "drv",
     "drv1",
     "cfg",
@@ -94,66 +91,70 @@ MANDATORY_COMMANDS = [
     "dump",
 ]
 
+REQUIRED_IDF_TOKENS = [
+    'extern "C" void app_main',
+    '#include "driver/i2c_master.h"',
+    "i2c_new_master_bus",
+    "i2c_master_bus_add_device",
+    "i2c_master_probe",
+    "i2c_master_transmit",
+    "i2c_master_transmit_receive",
+    "esp_timer_get_time",
+    "vTaskDelay",
+    "getchar()",
+    "char input[",
+]
+
+FORBIDDEN_PATTERNS = [
+    r"ArduinoCompat",
+    r"IdfArduinoCompat",
+    r"Arduino\.h",
+    r"Wire\.h",
+    r"\bString\b",
+    r"\bSerial\b",
+    r"\bTwoWire\b",
+    r"01_basic_bringup_cli/main\.cpp",
+    r"driver/i2c\.h",
+    r"i2c_cmd_link",
+    r"i2c_driver_install",
+]
+
 
 def fail(message: str) -> None:
     print(f"IDF example contract FAILED: {message}")
     raise SystemExit(1)
 
 
-def require(path: pathlib.Path, label: str) -> str:
+def read(path: pathlib.Path, label: str) -> str:
     if not path.exists():
         fail(f"missing {label}: {path.as_posix()}")
     return path.read_text(encoding="utf-8", errors="replace")
 
 
 def main() -> int:
-    arduino_text = require(ARDUINO_CLI, "shared Arduino CLI source")
-    cmake_text = require(IDF_CMAKE, "IDF main CMake")
-    readme_text = require(IDF_README, "IDF README")
-    compat_text = require(IDF_MAIN_DIR / "ArduinoCompat.cpp", "IDF Arduino compatibility source")
-    require(IDF_MAIN_DIR / "Arduino.h", "IDF Arduino compatibility header")
-    require(IDF_MAIN_DIR / "Wire.h", "IDF Wire compatibility header")
+    main_text = read(IDF_MAIN_DIR / "main.cpp", "native ESP-IDF main")
+    cmake_text = read(IDF_MAIN_DIR / "CMakeLists.txt", "ESP-IDF main CMake")
+    combined = main_text + "\n" + cmake_text
 
-    if "../../../01_basic_bringup_cli/main.cpp" not in cmake_text:
-        fail("IDF example must compile the shared Arduino bringup CLI source")
+    for token in REQUIRED_IDF_TOKENS:
+      if token not in combined:
+        fail(f"required native ESP-IDF token missing: {token}")
 
-    required_components = [
-        "LSM6DS3TR",
-        "esp_driver_i2c",
-        "esp_driver_gpio",
-        "esp_timer",
-        "freertos",
-    ]
-    for component in required_components:
-        if component not in cmake_text:
+    for component in ("LSM6DS3TR", "esp_driver_i2c", "esp_timer", "freertos"):
+        if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"IDF CMake missing required component '{component}'")
 
-    required_i2c_symbols = [
-        "driver/i2c_master.h",
-        "i2c_new_master_bus",
-        "i2c_master_bus_add_device",
-        "i2c_master_transmit",
-        "i2c_master_transmit_receive",
-        "i2c_master_receive",
-        "i2c_master_probe",
-    ]
-    for symbol in required_i2c_symbols:
-        if symbol not in compat_text and symbol not in require(IDF_MAIN_DIR / "Wire.h", "IDF Wire header"):
-            fail(f"IDF I2C compatibility layer missing '{symbol}'")
+    for pattern in FORBIDDEN_PATTERNS:
+        if re.search(pattern, combined):
+            fail(f"forbidden Arduino/legacy token present: {pattern}")
+
+    for stale in ("ArduinoCompat.cpp", "Arduino.h", "Wire.h"):
+        if (IDF_MAIN_DIR / stale).exists():
+            fail(f"stale compatibility file remains: {stale}")
 
     for command in MANDATORY_COMMANDS:
-        if re.search(rf"\b{re.escape(command)}\b", arduino_text) is None:
-            fail(f"shared CLI source missing mandatory command '{command}'")
-
-    stale_phrases = [
-        " ".join(("minimal", "IDF", "example")),
-        " ".join(("minimal", "ESP-IDF", "example")),
-        " ".join(("periodic", "sampler")),
-    ]
-    combined_text = "\n".join([readme_text, cmake_text, compat_text])
-    for phrase in stale_phrases:
-        if phrase.lower() in combined_text.lower():
-            fail(f"stale wording still present: '{phrase}'")
+        if re.search(rf'"{re.escape(command)}"', main_text) is None:
+            fail(f"native CLI missing command '{command}'")
 
     print("IDF example contract PASSED")
     return 0
