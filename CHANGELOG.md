@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ESP-IDF component metadata (`CMakeLists.txt`, `idf_component.yml`) for the
+  framework-neutral driver core.
+- Pure ESP-IDF basic I2C example using the v6 `driver/i2c_master.h` API and
+  application-owned transport callbacks.
+- Private platform time shim so the core can compile under Arduino, ESP-IDF,
+  and native tests without including `Arduino.h` in the driver implementation.
+
+### Changed
+
+- `library.json` now advertises both Arduino and ESP-IDF framework support.
+- Core timing guard now allows Arduino timing only inside the private timing
+  shim instead of the main driver implementation.
+
 ## [1.1.0] - 2026-05-17
 
 ### Added

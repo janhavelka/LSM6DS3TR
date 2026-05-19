@@ -1,12 +1,13 @@
 # LSM6DS3TR-C Driver Library
 
-Production-grade LSM6DS3TR-C 6-axis IMU driver for ESP32-S2 / ESP32-S3 using the Arduino framework and PlatformIO.
+Production-grade LSM6DS3TR-C 6-axis IMU driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO or ESP-IDF.
 
 ## Overview
 
 This library follows the same managed synchronous pattern used by the stronger I2C libraries in this workspace:
 
 - injected I2C transport, no direct `Wire` dependency in library code
+- framework-neutral core with Arduino and ESP-IDF application-owned transports
 - explicit `Status` return values on every fallible operation
 - 4-state health tracking: `UNINIT`, `READY`, `DEGRADED`, `OFFLINE`
 - deterministic library behavior with bounded polling only
@@ -87,6 +88,14 @@ lib_deps =
 ### Manual
 
 Copy [include/LSM6DS3TR](include/LSM6DS3TR) and [src](src) into your project.
+
+### ESP-IDF
+
+Use this repository as an ESP-IDF component with `EXTRA_COMPONENT_DIRS` or the
+ESP Component Registry metadata in `idf_component.yml`. The component builds
+only [src/LSM6DS3TR.cpp](src/LSM6DS3TR.cpp) and public headers. Applications
+own the I2C bus and provide `Config::i2cWrite`, `Config::i2cWriteRead`, and
+optionally `Config::nowMs`.
 
 ## Quick Start
 
@@ -183,6 +192,14 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 - decoded `status` output, expanded FIFO flags, `begin`, `whoami` / `id`, and
   `shub [1..12]` for sensor-hub output bytes
 
+## ESP-IDF Example
+
+[examples/idf/basic](examples/idf/basic) is a pure ESP-IDF example using the
+v6 `driver/i2c_master.h` API. It configures the I2C bus in the application,
+maps ESP-IDF transfer results to `Status`, injects the callbacks into
+`Config`, and polls raw accel/gyro/temperature samples. The Arduino CLI example
+remains unchanged and continues to use [examples/common/I2cTransport.h](examples/common/I2cTransport.h).
+
 Representative commands:
 
 ```text
@@ -265,6 +282,16 @@ python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 ```
 
+When ESP-IDF is installed, build the IDF example from
+[examples/idf/basic](examples/idf/basic):
+
+```bash
+idf.py set-target esp32s3
+idf.py build
+idf.py set-target esp32s2
+idf.py build
+```
+
 ## Repository Notes
 
 - Public headers live in [include/LSM6DS3TR](include/LSM6DS3TR)
@@ -272,3 +299,4 @@ python tools/check_cli_contract.py
 - Version metadata is generated into [include/LSM6DS3TR/Version.h](include/LSM6DS3TR/Version.h) from [library.json](library.json)
 - `examples/common` is not installed as part of the library
 - The library never configures I2C pins or owns the bus
+- ESP-IDF I2C setup and GPIO choices live in examples/application code only
