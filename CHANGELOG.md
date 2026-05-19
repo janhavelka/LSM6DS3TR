@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ESP-IDF component metadata (`CMakeLists.txt`, `idf_component.yml`) for the
   framework-neutral driver core.
-- Pure ESP-IDF basic I2C example using the v6 `driver/i2c_master.h` API and
-  application-owned transport callbacks.
+- Pure ESP-IDF basic example that reuses the Arduino bringup CLI source through
+  an example-local `Serial` / `String` / `TwoWire` compatibility facade backed
+  by the v6 `driver/i2c_master.h` API.
+- IDF example contract check covering shared CLI source inclusion, required
+  ESP-IDF components, native I2C symbols, and stale example wording.
 - Private platform time shim so the core can compile under Arduino, ESP-IDF,
   and native tests without including `Arduino.h` in the driver implementation.
 

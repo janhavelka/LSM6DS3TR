@@ -194,11 +194,12 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 
 ## ESP-IDF Example
 
-[examples/idf/basic](examples/idf/basic) is a pure ESP-IDF example using the
-v6 `driver/i2c_master.h` API. It configures the I2C bus in the application,
-maps ESP-IDF transfer results to `Status`, injects the callbacks into
-`Config`, and polls raw accel/gyro/temperature samples. The Arduino CLI example
-remains unchanged and continues to use [examples/common/I2cTransport.h](examples/common/I2cTransport.h).
+[examples/idf/basic](examples/idf/basic) is a pure ESP-IDF project that compiles
+the same bringup CLI source as the Arduino example. Its example-local
+`Arduino.h` / `Wire.h` facade maps the CLI's small `Serial`, `String`, and
+`TwoWire` surface onto ESP-IDF, while the I2C operations use the v6
+`driver/i2c_master.h` API. The driver core remains framework-neutral and still
+receives transport callbacks through `Config`.
 
 Representative commands:
 
@@ -280,6 +281,7 @@ pio run -e esp32s3dev
 pio run -e esp32s2dev
 python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
 ```
 
 When ESP-IDF is installed, build the IDF example from
