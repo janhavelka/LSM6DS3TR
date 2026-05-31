@@ -450,7 +450,7 @@ void test_recover_after_failed_begin_retries_begin() {
                           static_cast<uint8_t>(dev.state()));
 }
 
-void test_now_ms_fallback_uses_millis_when_callback_missing() {
+void test_now_ms_missing_callback_uses_zero_timestamp() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR dev;
   Config cfg = makeConfig(bus);
@@ -461,7 +461,7 @@ void test_now_ms_fallback_uses_millis_when_callback_missing() {
   setMillis(4321);
   const Status st = dev.recover();
   TEST_ASSERT_TRUE(st.ok());
-  TEST_ASSERT_EQUAL_UINT32(4321u, dev.lastOkMs());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
 }
 
 // ==========================================================================
@@ -1536,7 +1536,7 @@ int main() {
   RUN_TEST(test_begin_detects_wrong_chip_id);
   RUN_TEST(test_probe_after_failed_begin_uses_stored_transport);
   RUN_TEST(test_recover_after_failed_begin_retries_begin);
-  RUN_TEST(test_now_ms_fallback_uses_millis_when_callback_missing);
+  RUN_TEST(test_now_ms_missing_callback_uses_zero_timestamp);
 
   RUN_TEST(test_probe_failure_does_not_update_health);
   RUN_TEST(test_recover_failure_updates_health_once);
