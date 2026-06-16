@@ -98,11 +98,17 @@ public:
   // Lifecycle
   Status begin(const Config& config);
   void tick(uint32_t nowMs);
+  Status poll(uint32_t nowMs, uint8_t maxInstructions = 1);
+  bool pollBusy() const;
+  Status lastPollStatus() const { return _lastPollStatus; }
   void end();
 
   // Diagnostics
   Status probe();
   Status recover();
+  Status startSoftReset();
+  Status startBoot();
+  Status startRefreshCachedConfig();
 
   // Driver state
   DriverState state() const { return _driverState; }
@@ -119,8 +125,15 @@ public:
   uint32_t totalFailures() const { return _totalFailures; }
   uint32_t totalSuccess() const { return _totalSuccess; }
 
+  /// True when cached configuration mirrors may differ from device registers.
+  ///
+  /// Set after failed cache-affecting writes or refresh validation failures.
+  /// Call refreshCachedConfig() or recover() to revalidate or reapply state.
+  bool cachedConfigDirty() const { return _cachedConfigDirty; }
+
   // Measurement API
   Status requestMeasurement();
+  Status requestMeasurement(bool checkReady);
   bool measurementReady() const { return _measurementReady; }
   Status getMeasurement(Measurement& out);
   Status getRawMeasurement(RawMeasurement& out) const;
@@ -168,11 +181,14 @@ public:
   /// Subtract current gyro bias from a converted Axes value in-place.
   void correctGyro(Axes& inout) const;
 
-  /// Capture accelerometer bias by averaging @p samples readings at rest.
+  /// Diagnostic helper: capture accelerometer bias by averaging @p samples
+  /// readings at rest.
   ///
   /// The sensor must be stationary with Z-axis pointing up (+1 g on Z).
   /// Blocks for approximately (samples / accelODR) seconds.
   /// Each sample waits for the XLDA data-ready flag with a bounded deadline.
+  /// This helper may perform many blocking I2C transactions and is not intended
+  /// for steady-path polling.
   ///
   /// On success the bias is auto-applied (equivalent to setAccelBias(out))
   /// and returned via @p out so the caller can persist it.
@@ -182,12 +198,16 @@ public:
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
   ///         NOT_INITIALIZED / I2C errors propagated from reads.
   Status captureAccelBias(uint16_t samples, Axes& out);
+  Status startAccelBiasCapture(uint16_t samples);
 
-  /// Capture gyroscope zero-rate bias by averaging @p samples readings at rest.
+  /// Diagnostic helper: capture gyroscope zero-rate bias by averaging @p samples
+  /// readings at rest.
   ///
   /// The sensor must be stationary (no rotation).
   /// Blocks for approximately (samples / gyroODR) seconds.
   /// Each sample waits for the GDA data-ready flag with a bounded deadline.
+  /// This helper may perform many blocking I2C transactions and is not intended
+  /// for steady-path polling.
   ///
   /// On success the bias is auto-applied (equivalent to setGyroBias(out))
   /// and returned via @p out so the caller can persist it.
@@ -197,6 +217,7 @@ public:
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
   ///         NOT_INITIALIZED / I2C errors propagated from reads.
   Status captureGyroBias(uint16_t samples, Axes& out);
+  Status startGyroBiasCapture(uint16_t samples);
 
   /// @}
 
@@ -261,6 +282,8 @@ public:
   Status getFifoConfig(FifoConfig& out) const;
   Status readFifoStatus(FifoStatus& out);
   Status readFifoWord(uint16_t& out);
+  Status startFifoDrain(uint16_t maxWords);
+  uint16_t fifoDrainWordsRead() const { return _fifoDrainWordsRead; }
 
   // Register and source access
   Status readRegisterValue(uint8_t reg, uint8_t& value);
@@ -297,6 +320,16 @@ private:
   // Internal helpers
   Status _applyConfig();
   Status _readRawAll();
+  Status _startPollJob(uint8_t job, const Status& busyStatus);
+  Status _finishPollJob(const Status& st);
+  Status _pollSampleStep();
+  Status _pollApplyConfigStep(uint8_t step, bool& done);
+  Status _pollRefreshStep(uint8_t step, bool& done);
+  Status _pollResetOrBootStep(bool bootJob);
+  Status _pollFifoDrainStep();
+  Status _pollCalibrationStep(bool accelJob);
+  Status _commitStagedCachedConfig();
+  Status _validateMeasurementRequest(bool checkReady) const;
   uint32_t _nowMs() const;
   static uint8_t _buildCtrl1Xl(Odr odr, AccelFs fs);
   static uint8_t _buildCtrl2G(Odr odr, GyroFs fs);
@@ -323,12 +356,55 @@ private:
   uint8_t _consecutiveFailures = 0;
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
+  bool _cachedConfigDirty = false;
 
   // Measurement state
   bool _measurementRequested = false;
   bool _measurementReady = false;
   bool _hasSample = false;
   RawMeasurement _rawMeasurement;
+
+  // Poll job state
+  enum class PollJob : uint8_t {
+    NONE,
+    SAMPLE,
+    SOFT_RESET,
+    BOOT,
+    REFRESH_CONFIG,
+    FIFO_DRAIN,
+    ACCEL_CALIBRATION,
+    GYRO_CALIBRATION
+  };
+  PollJob _pollJob = PollJob::NONE;
+  uint8_t _pollStep = 0;
+  uint16_t _pollCount = 0;
+  uint32_t _pollNowMs = 0;
+  uint32_t _pollDeadlineMs = 0;
+  bool _pollInstructionUsed = false;
+  Status _lastPollStatus = Status::Ok();
+  bool _pollSampleCheckReady = true;
+  bool _pollSampleReady = false;
+  uint8_t _pollWakeUpDur = 0;
+  uint16_t _fifoDrainMaxWords = 0;
+  uint16_t _fifoDrainWordsRead = 0;
+  uint16_t _fifoDrainWordsAvailable = 0;
+  uint8_t _refreshCtrl1 = 0;
+  uint8_t _refreshCtrl2 = 0;
+  uint8_t _refreshCtrl3 = 0;
+  uint8_t _refreshCtrl4 = 0;
+  uint8_t _refreshCtrl6 = 0;
+  uint8_t _refreshCtrl7 = 0;
+  uint8_t _refreshCtrl8 = 0;
+  uint8_t _refreshCtrl10 = 0;
+  uint8_t _refreshWakeUpDur = 0;
+  uint8_t _refreshOffsetData[3] = {};
+  uint8_t _refreshFifoCtrl[5] = {};
+  uint16_t _calibrationSamplesTarget = 0;
+  uint16_t _calibrationSamplesDone = 0;
+  uint16_t _calibrationPollsForSample = 0;
+  double _calibrationSumX = 0.0;
+  double _calibrationSumY = 0.0;
+  double _calibrationSumZ = 0.0;
 
   // Managed runtime configuration
   AccelPowerMode _accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;

@@ -17,6 +17,7 @@ static constexpr size_t MAX_WRITE_LEN = 16;
 static constexpr uint32_t RESET_TIMEOUT_MS = 25;
 static constexpr uint32_t BOOT_TIMEOUT_MS = 25;
 static constexpr uint16_t RESET_MAX_POLLS = 255;
+static constexpr uint16_t CALIBRATION_MAX_POLLS_PER_SAMPLE = 255;
 
 static bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
   return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
@@ -146,6 +147,44 @@ static bool isValidFifoOdr(Odr odr) {
   return odr == Odr::POWER_DOWN || isValidGyroOdr(odr, GyroPowerMode::HIGH_PERFORMANCE);
 }
 
+static bool isValidFifoMode(FifoMode mode) {
+  switch (mode) {
+    case FifoMode::BYPASS:
+    case FifoMode::FIFO:
+    case FifoMode::CONTINUOUS_TO_FIFO:
+    case FifoMode::BYPASS_TO_CONTINUOUS:
+    case FifoMode::CONTINUOUS:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool isCachedConfigRegister(uint8_t reg) {
+  switch (reg) {
+    case cmd::REG_CTRL1_XL:
+    case cmd::REG_CTRL2_G:
+    case cmd::REG_CTRL3_C:
+    case cmd::REG_CTRL4_C:
+    case cmd::REG_CTRL6_C:
+    case cmd::REG_CTRL7_G:
+    case cmd::REG_CTRL8_XL:
+    case cmd::REG_CTRL10_C:
+    case cmd::REG_WAKE_UP_DUR:
+    case cmd::REG_X_OFS_USR:
+    case cmd::REG_Y_OFS_USR:
+    case cmd::REG_Z_OFS_USR:
+    case cmd::REG_FIFO_CTRL1:
+    case cmd::REG_FIFO_CTRL2:
+    case cmd::REG_FIFO_CTRL3:
+    case cmd::REG_FIFO_CTRL4:
+    case cmd::REG_FIFO_CTRL5:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool requiresAccelOdrAtLeast26Hz(Odr odr) {
   switch (odr) {
     case Odr::HZ_26:
@@ -199,6 +238,110 @@ static uint8_t loByte(uint16_t value) {
   return static_cast<uint8_t>(value & 0xFFu);
 }
 
+static void decodeRawAll(const uint8_t* data, RawMeasurement& out) {
+  out.temperature = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
+  out.gyro.x = static_cast<int16_t>((static_cast<uint16_t>(data[3]) << 8) | data[2]);
+  out.gyro.y = static_cast<int16_t>((static_cast<uint16_t>(data[5]) << 8) | data[4]);
+  out.gyro.z = static_cast<int16_t>((static_cast<uint16_t>(data[7]) << 8) | data[6]);
+  out.accel.x = static_cast<int16_t>((static_cast<uint16_t>(data[9]) << 8) | data[8]);
+  out.accel.y = static_cast<int16_t>((static_cast<uint16_t>(data[11]) << 8) | data[10]);
+  out.accel.z = static_cast<int16_t>((static_cast<uint16_t>(data[13]) << 8) | data[12]);
+}
+
+static void decodeFifoStatus(const uint8_t* data, FifoStatus& out) {
+  out.unreadWords = static_cast<uint16_t>(data[0]) |
+                    (static_cast<uint16_t>(data[1] & cmd::MASK_DIFF_FIFO_HI) << 8);
+  out.watermark = (data[1] & cmd::MASK_FIFO_WATERM) != 0;
+  out.overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0;
+  out.fullSmart = (data[1] & cmd::MASK_FIFO_FULL_SMART) != 0;
+  out.empty = (data[1] & cmd::MASK_FIFO_EMPTY) != 0;
+  out.pattern = static_cast<uint16_t>(data[2]) |
+                (static_cast<uint16_t>(data[3] & 0x03u) << 8);
+}
+
+static uint8_t buildCtrl4CValue(bool gyroSleepEnabled, bool gyroLpf1Enabled) {
+  uint8_t value = 0;
+  if (gyroSleepEnabled) value |= cmd::MASK_SLEEP_G;
+  if (gyroLpf1Enabled) value |= cmd::MASK_LPF1_SEL_G;
+  return value;
+}
+
+static uint8_t buildCtrl6CValue(AccelPowerMode accelPowerMode,
+                                AccelOffsetWeight accelOffsetWeight) {
+  uint8_t value = 0;
+  if (accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_XL_HM_MODE;
+  if (accelOffsetWeight == AccelOffsetWeight::MG_16) value |= cmd::MASK_USR_OFF_W;
+  return value;
+}
+
+static uint8_t buildCtrl7GValue(GyroPowerMode gyroPowerMode,
+                                const GyroFilterConfig& gyroFilterConfig) {
+  uint8_t value = 0;
+  if (gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_G_HM_MODE;
+  if (gyroFilterConfig.highPassEnabled) value |= cmd::MASK_HP_EN_G;
+  value |= static_cast<uint8_t>(static_cast<uint8_t>(gyroFilterConfig.highPassMode)
+                                << cmd::BIT_HPM_G);
+  return value;
+}
+
+static uint8_t buildCtrl8XlValue(const AccelFilterConfig& accelFilterConfig) {
+  uint8_t value = 0;
+  if (accelFilterConfig.lpf2Enabled) value |= cmd::MASK_LPF2_XL_EN;
+  if (accelFilterConfig.highPassSlopeEnabled) value |= cmd::MASK_HP_SLOPE_XL_EN;
+  if (accelFilterConfig.lowPassOn6d) value |= cmd::MASK_LOW_PASS_ON_6D;
+  return value;
+}
+
+static uint8_t buildCtrl10CValue(bool wristTiltEnabled, bool timestampEnabled,
+                                 bool pedometerEnabled, bool tiltEnabled,
+                                 bool significantMotionEnabled) {
+  uint8_t value = 0;
+  if (wristTiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_WRIST_TILT_EN);
+  if (timestampEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_EN);
+  if (pedometerEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_PEDO_EN);
+  if (tiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TILT_EN);
+  if (significantMotionEnabled) {
+    value |= static_cast<uint8_t>(1u << cmd::BIT_SIGN_MOTION_EN);
+  }
+  if (pedometerEnabled || tiltEnabled || significantMotionEnabled || wristTiltEnabled) {
+    value |= static_cast<uint8_t>(1u << cmd::BIT_FUNC_EN);
+  }
+  return value;
+}
+
+static uint8_t buildWakeUpDurValue(bool timestampHighResolution) {
+  return timestampHighResolution ? cmd::MASK_TIMER_HR : 0;
+}
+
+static uint8_t buildFifoCtrl2Value(const FifoConfig& fifoConfig) {
+  uint8_t value = static_cast<uint8_t>((fifoConfig.threshold >> 8) &
+                                       cmd::MASK_FIFO_THRESHOLD_HI);
+  if (fifoConfig.storeTimestampStep) {
+    value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_PEDO_FIFO_EN);
+  }
+  if (fifoConfig.storeTemperature) value |= cmd::MASK_FIFO_TEMP_EN;
+  return value;
+}
+
+static uint8_t buildFifoCtrl3Value(const FifoConfig& fifoConfig) {
+  return static_cast<uint8_t>(
+      (static_cast<uint8_t>(fifoConfig.gyroDecimation) << cmd::BIT_DEC_FIFO_GYRO) |
+      (static_cast<uint8_t>(fifoConfig.accelDecimation) << cmd::BIT_DEC_FIFO_XL));
+}
+
+static uint8_t buildFifoCtrl4Value(const FifoConfig& fifoConfig) {
+  uint8_t value = 0;
+  if (fifoConfig.stopOnThreshold) value |= cmd::MASK_STOP_ON_FTH;
+  if (fifoConfig.onlyHighData) value |= cmd::MASK_ONLY_HIGH_DATA;
+  return value;
+}
+
+static uint8_t buildFifoCtrl5Value(const FifoConfig& fifoConfig) {
+  return static_cast<uint8_t>(
+      (static_cast<uint8_t>(fifoConfig.odr) << cmd::BIT_ODR_FIFO) |
+      static_cast<uint8_t>(fifoConfig.mode));
+}
+
 }  // namespace
 
 Status LSM6DS3TR::begin(const Config& config) {
@@ -211,11 +354,28 @@ Status LSM6DS3TR::begin(const Config& config) {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
+  _cachedConfigDirty = false;
 
   _measurementRequested = false;
   _measurementReady = false;
   _hasSample = false;
   _rawMeasurement = RawMeasurement{};
+  _pollJob = PollJob::NONE;
+  _pollStep = 0;
+  _pollCount = 0;
+  _pollDeadlineMs = 0;
+  _lastPollStatus = Status::Ok();
+  _pollSampleCheckReady = true;
+  _pollSampleReady = false;
+  _fifoDrainMaxWords = 0;
+  _fifoDrainWordsRead = 0;
+  _fifoDrainWordsAvailable = 0;
+  _calibrationSamplesTarget = 0;
+  _calibrationSamplesDone = 0;
+  _calibrationPollsForSample = 0;
+  _calibrationSumX = 0.0;
+  _calibrationSumY = 0.0;
+  _calibrationSumZ = 0.0;
 
   _config = Config{};
   _accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
@@ -267,7 +427,7 @@ Status LSM6DS3TR::begin(const Config& config) {
   uint8_t chipId = 0;
   Status st = _readRegisterRaw(cmd::REG_WHO_AM_I, chipId);
   if (!st.ok()) {
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return st;
   }
   if (chipId != cmd::WHO_AM_I_VALUE) {
     return Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId);
@@ -280,47 +440,12 @@ Status LSM6DS3TR::begin(const Config& config) {
 
   _initialized = true;
   _driverState = DriverState::READY;
+  _cachedConfigDirty = false;
   return Status::Ok();
 }
 
 void LSM6DS3TR::tick(uint32_t nowMs) {
-  (void)nowMs;
-
-  if (!_initialized || !_measurementRequested) {
-    return;
-  }
-  if (_driverState == DriverState::OFFLINE) {
-    _measurementRequested = false;
-    return;
-  }
-
-  uint8_t statusReg = 0;
-  Status st = readRegister(cmd::REG_STATUS_REG, statusReg);
-  if (!st.ok()) {
-    if (_driverState == DriverState::OFFLINE) {
-      _measurementRequested = false;
-    }
-    return;
-  }
-
-  const bool accelActive = isActiveOdr(_config.odrXl);
-  const bool gyroActive = isActiveOdr(_config.odrG);
-  const bool accelReady = !accelActive || ((statusReg & cmd::MASK_XLDA) != 0);
-  const bool gyroReady = !gyroActive || ((statusReg & cmd::MASK_GDA) != 0);
-  if (!accelReady || !gyroReady) {
-    return;
-  }
-
-  st = _readRawAll();
-  if (!st.ok()) {
-    if (_driverState == DriverState::OFFLINE) {
-      _measurementRequested = false;
-    }
-    return;
-  }
-
-  _measurementReady = true;
-  _measurementRequested = false;
+  (void)poll(nowMs, 1);
 }
 
 void LSM6DS3TR::end() {
@@ -337,6 +462,9 @@ void LSM6DS3TR::end() {
   _measurementReady = false;
   _hasSample = false;
   _rawMeasurement = RawMeasurement{};
+  _pollJob = PollJob::NONE;
+  _pollStep = 0;
+  _lastPollStatus = Status::Ok();
 }
 
 Status LSM6DS3TR::probe() {
@@ -347,7 +475,7 @@ Status LSM6DS3TR::probe() {
   uint8_t chipId = 0;
   Status st = _readRegisterRaw(cmd::REG_WHO_AM_I, chipId);
   if (!st.ok()) {
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return st;
   }
   if (chipId != cmd::WHO_AM_I_VALUE) {
     return Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId);
@@ -376,12 +504,16 @@ Status LSM6DS3TR::recover() {
   return _applyConfig();
 }
 
-Status LSM6DS3TR::requestMeasurement() {
+bool LSM6DS3TR::pollBusy() const {
+  return _pollJob != PollJob::NONE;
+}
+
+Status LSM6DS3TR::_validateMeasurementRequest(bool checkReady) const {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
   if (_driverState == DriverState::OFFLINE) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+    return Status::Error(Err::OFFLINE, "Driver is offline; call recover()");
   }
 
   const bool accelActive = isActiveOdr(_config.odrXl);
@@ -389,7 +521,7 @@ Status LSM6DS3TR::requestMeasurement() {
   if (!accelActive && !gyroActive) {
     return Status::Error(Err::INVALID_PARAM, "Both sensors powered down");
   }
-  if (accelActive && gyroActive) {
+  if (checkReady && accelActive && gyroActive) {
     if (!_config.bdu) {
       return Status::Error(Err::INVALID_PARAM, "Async combined measurement requires BDU");
     }
@@ -397,13 +529,646 @@ Status LSM6DS3TR::requestMeasurement() {
       return Status::Error(Err::INVALID_PARAM, "Async combined measurement requires matching ODR");
     }
   }
-  if (_measurementRequested && !_measurementReady) {
-    return Status::Error(Err::BUSY, "Measurement in progress");
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::requestMeasurement() {
+  return requestMeasurement(true);
+}
+
+Status LSM6DS3TR::requestMeasurement(bool checkReady) {
+  Status st = _validateMeasurementRequest(checkReady);
+  if (!st.ok()) {
+    return st;
+  }
+  if (pollBusy()) {
+    return Status::Error(Err::BUSY, "Poll job in progress");
   }
 
   _measurementReady = false;
   _measurementRequested = true;
+  _pollSampleCheckReady = checkReady;
+  _pollSampleReady = !checkReady;
+  _pollJob = PollJob::SAMPLE;
+  _pollStep = checkReady ? 0 : 1;
+  _pollCount = 0;
+  _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
   return Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
+}
+
+Status LSM6DS3TR::_startPollJob(uint8_t job, const Status& busyStatus) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (pollBusy()) {
+    return busyStatus;
+  }
+  _pollJob = static_cast<PollJob>(job);
+  _pollStep = 0;
+  _pollCount = 0;
+  _pollDeadlineMs = 0;
+  _pollSampleReady = false;
+  _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job scheduled");
+  return _lastPollStatus;
+}
+
+Status LSM6DS3TR::startSoftReset() {
+  _measurementRequested = false;
+  _measurementReady = false;
+  _hasSample = false;
+  return _startPollJob(static_cast<uint8_t>(PollJob::SOFT_RESET),
+                       Status::Error(Err::BUSY, "Poll job in progress"));
+}
+
+Status LSM6DS3TR::startBoot() {
+  return _startPollJob(static_cast<uint8_t>(PollJob::BOOT),
+                       Status::Error(Err::BUSY, "Poll job in progress"));
+}
+
+Status LSM6DS3TR::startRefreshCachedConfig() {
+  return _startPollJob(static_cast<uint8_t>(PollJob::REFRESH_CONFIG),
+                       Status::Error(Err::BUSY, "Poll job in progress"));
+}
+
+Status LSM6DS3TR::startFifoDrain(uint16_t maxWords) {
+  if (maxWords == 0) {
+    return Status::Error(Err::INVALID_PARAM, "maxWords must be > 0");
+  }
+  Status st = _startPollJob(static_cast<uint8_t>(PollJob::FIFO_DRAIN),
+                            Status::Error(Err::BUSY, "Poll job in progress"));
+  if (!st.ok() && !st.inProgress()) {
+    return st;
+  }
+  _fifoDrainMaxWords = maxWords;
+  _fifoDrainWordsRead = 0;
+  _fifoDrainWordsAvailable = 0;
+  return st;
+}
+
+Status LSM6DS3TR::startAccelBiasCapture(uint16_t samples) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (samples == 0 || samples > 10000) {
+    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
+  }
+  if (!isActiveOdr(_config.odrXl)) {
+    return Status::Error(Err::INVALID_PARAM, "Accel ODR is POWER_DOWN");
+  }
+  Status st = _startPollJob(static_cast<uint8_t>(PollJob::ACCEL_CALIBRATION),
+                            Status::Error(Err::BUSY, "Poll job in progress"));
+  if (!st.ok() && !st.inProgress()) {
+    return st;
+  }
+  _calibrationSamplesTarget = samples;
+  _calibrationSamplesDone = 0;
+  _calibrationPollsForSample = 0;
+  _calibrationSumX = 0.0;
+  _calibrationSumY = 0.0;
+  _calibrationSumZ = 0.0;
+  _pollDeadlineMs = 0;
+  return st;
+}
+
+Status LSM6DS3TR::startGyroBiasCapture(uint16_t samples) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (samples == 0 || samples > 10000) {
+    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
+  }
+  if (!isActiveOdr(_config.odrG)) {
+    return Status::Error(Err::INVALID_PARAM, "Gyro ODR is POWER_DOWN");
+  }
+  Status st = _startPollJob(static_cast<uint8_t>(PollJob::GYRO_CALIBRATION),
+                            Status::Error(Err::BUSY, "Poll job in progress"));
+  if (!st.ok() && !st.inProgress()) {
+    return st;
+  }
+  _calibrationSamplesTarget = samples;
+  _calibrationSamplesDone = 0;
+  _calibrationPollsForSample = 0;
+  _calibrationSumX = 0.0;
+  _calibrationSumY = 0.0;
+  _calibrationSumZ = 0.0;
+  _pollDeadlineMs = 0;
+  return st;
+}
+
+Status LSM6DS3TR::_finishPollJob(const Status& st) {
+  _lastPollStatus = st;
+  if (st.inProgress()) {
+    return st;
+  }
+  _pollJob = PollJob::NONE;
+  _pollStep = 0;
+  _pollCount = 0;
+  _pollDeadlineMs = 0;
+  _pollInstructionUsed = false;
+  return st;
+}
+
+Status LSM6DS3TR::poll(uint32_t nowMs, uint8_t maxInstructions) {
+  _pollNowMs = nowMs;
+  if (!pollBusy()) {
+    return _lastPollStatus;
+  }
+  if (maxInstructions == 0) {
+    _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job in progress");
+    return _lastPollStatus;
+  }
+
+  uint8_t instructions = 0;
+  while (pollBusy() && instructions < maxInstructions) {
+    _pollInstructionUsed = false;
+    Status st = Status::Ok();
+    switch (_pollJob) {
+      case PollJob::SAMPLE:
+        st = _pollSampleStep();
+        break;
+      case PollJob::SOFT_RESET:
+        st = _pollResetOrBootStep(false);
+        break;
+      case PollJob::BOOT:
+        st = _pollResetOrBootStep(true);
+        break;
+      case PollJob::REFRESH_CONFIG: {
+        bool done = false;
+        st = _pollRefreshStep(_pollStep, done);
+        if (st.ok() && done) {
+          st = _finishPollJob(Status::Ok());
+        }
+        break;
+      }
+      case PollJob::FIFO_DRAIN:
+        st = _pollFifoDrainStep();
+        break;
+      case PollJob::ACCEL_CALIBRATION:
+        st = _pollCalibrationStep(true);
+        break;
+      case PollJob::GYRO_CALIBRATION:
+        st = _pollCalibrationStep(false);
+        break;
+      case PollJob::NONE:
+      default:
+        return _lastPollStatus;
+    }
+
+    if (!st.ok()) {
+      if (st.inProgress()) {
+        _lastPollStatus = st;
+        if (_pollInstructionUsed) {
+          ++instructions;
+        }
+        break;
+      } else {
+        return _finishPollJob(st);
+      }
+    }
+    if (_pollInstructionUsed) {
+      ++instructions;
+    } else if (st.inProgress()) {
+      break;
+    }
+  }
+
+  if (pollBusy()) {
+    _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job in progress");
+    return _lastPollStatus;
+  }
+  return _lastPollStatus;
+}
+
+Status LSM6DS3TR::_pollSampleStep() {
+  if (!_initialized) {
+    _measurementRequested = false;
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_driverState == DriverState::OFFLINE) {
+    _measurementRequested = false;
+    return Status::Error(Err::OFFLINE, "Driver is offline; call recover()");
+  }
+
+  if (_pollStep == 0) {
+    uint8_t statusReg = 0;
+    _pollInstructionUsed = true;
+    Status st = readRegister(cmd::REG_STATUS_REG, statusReg);
+    if (!st.ok()) {
+      _measurementRequested = false;
+      return st;
+    }
+
+    const bool accelActive = isActiveOdr(_config.odrXl);
+    const bool gyroActive = isActiveOdr(_config.odrG);
+    const bool accelReady = !accelActive || ((statusReg & cmd::MASK_XLDA) != 0);
+    const bool gyroReady = !gyroActive || ((statusReg & cmd::MASK_GDA) != 0);
+    if (!accelReady || !gyroReady) {
+      return Status::Error(Err::IN_PROGRESS, "Measurement not ready");
+    }
+    _pollSampleReady = true;
+    _pollStep = 1;
+    return Status::Ok();
+  }
+
+  _pollInstructionUsed = true;
+  Status st = _readRawAll();
+  if (!st.ok()) {
+    _measurementRequested = false;
+    return st;
+  }
+  _measurementReady = true;
+  _measurementRequested = false;
+  return _finishPollJob(Status::Ok());
+}
+
+Status LSM6DS3TR::_pollApplyConfigStep(uint8_t step, bool& done) {
+  done = false;
+  Status st = Status::Ok();
+  _pollInstructionUsed = true;
+  switch (step) {
+    case 0:
+      st = writeRegister(
+          cmd::REG_CTRL3_C,
+          static_cast<uint8_t>(cmd::MASK_IF_INC | (_config.bdu ? cmd::MASK_BDU : 0)));
+      break;
+    case 1:
+      st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
+      break;
+    case 2:
+      st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
+      break;
+    case 3:
+      st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
+      break;
+    case 4:
+      st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
+      break;
+    case 5:
+      st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, _config.fsXl));
+      break;
+    case 6:
+      st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, _config.fsG));
+      break;
+    case 7:
+      st = readRegister(cmd::REG_WAKE_UP_DUR, _pollWakeUpDur);
+      break;
+    case 8:
+      _pollWakeUpDur = static_cast<uint8_t>(
+          (_pollWakeUpDur & static_cast<uint8_t>(~cmd::MASK_TIMER_HR)) |
+          (_buildWakeUpDur() & cmd::MASK_TIMER_HR));
+      st = writeRegister(cmd::REG_WAKE_UP_DUR, _pollWakeUpDur);
+      break;
+    case 9:
+      st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+      break;
+    case 10: {
+      const uint8_t offsets[3] = {
+          static_cast<uint8_t>(_accelUserOffset.x),
+          static_cast<uint8_t>(_accelUserOffset.y),
+          static_cast<uint8_t>(_accelUserOffset.z),
+      };
+      st = writeRegs(cmd::REG_X_OFS_USR, offsets, sizeof(offsets));
+      break;
+    }
+    case 11:
+      st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
+      break;
+    case 12:
+      st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
+      break;
+    case 13:
+      st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
+      break;
+    case 14:
+      st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
+      break;
+    case 15:
+      st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
+      break;
+    default:
+      _pollInstructionUsed = false;
+      _cachedConfigDirty = false;
+      done = true;
+      return Status::Ok();
+  }
+
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    done = true;
+    return st;
+  }
+  _pollStep = static_cast<uint8_t>(step + 1u);
+  if (_pollStep > 15u) {
+    _cachedConfigDirty = false;
+    done = true;
+  }
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_pollResetOrBootStep(bool bootJob) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+
+  if (_pollStep == 0) {
+    const uint8_t ctrl3 = static_cast<uint8_t>((bootJob ? cmd::MASK_BOOT : cmd::MASK_SW_RESET) |
+                                               cmd::MASK_IF_INC |
+                                               (_config.bdu ? cmd::MASK_BDU : 0));
+    _pollInstructionUsed = true;
+    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
+    if (!st.ok()) {
+      return st;
+    }
+    _pollDeadlineMs = _pollNowMs + (bootJob ? BOOT_TIMEOUT_MS : RESET_TIMEOUT_MS);
+    _pollCount = 0;
+    _pollStep = 1;
+    return Status::Ok();
+  }
+
+  if (_pollStep == 1) {
+    if (deadlineReached(_pollNowMs, _pollDeadlineMs)) {
+      return Status::Error(Err::TIMEOUT, bootJob ? "Boot timeout" : "Reset timeout");
+    }
+    if (_pollCount >= RESET_MAX_POLLS) {
+      return Status::Error(Err::TIMEOUT, bootJob ? "Boot polling limit" : "Reset polling limit",
+                           RESET_MAX_POLLS);
+    }
+
+    uint8_t ctrl3Read = 0;
+    _pollInstructionUsed = true;
+    ++_pollCount;
+    Status st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
+    if (!st.ok()) {
+      return st;
+    }
+    const uint8_t bit = bootJob ? cmd::MASK_BOOT : cmd::MASK_SW_RESET;
+    if ((ctrl3Read & bit) == 0) {
+      _pollStep = 2;
+      _pollCount = 0;
+    }
+    return Status::Ok();
+  }
+
+  if (bootJob) {
+    bool done = false;
+    const uint8_t refreshStep = static_cast<uint8_t>(_pollStep - 2u);
+    Status st = _pollRefreshStep(refreshStep, done);
+    if (st.ok() && done) {
+      return _finishPollJob(Status::Ok());
+    }
+    if (!st.ok()) {
+      return st;
+    }
+    _pollStep = static_cast<uint8_t>(refreshStep + 3u);
+    return Status::Ok();
+  }
+
+  bool done = false;
+  const uint8_t applyStep = static_cast<uint8_t>(_pollStep - 2u);
+  Status st = _pollApplyConfigStep(applyStep, done);
+  if (st.ok() && done) {
+    return _finishPollJob(Status::Ok());
+  }
+  if (!st.ok()) {
+    return st;
+  }
+  _pollStep = static_cast<uint8_t>(applyStep + 3u);
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_pollRefreshStep(uint8_t step, bool& done) {
+  done = false;
+  _pollInstructionUsed = true;
+  Status st = Status::Ok();
+  switch (step) {
+    case 0:
+      st = readRegister(cmd::REG_CTRL1_XL, _refreshCtrl1);
+      break;
+    case 1:
+      st = readRegister(cmd::REG_CTRL2_G, _refreshCtrl2);
+      break;
+    case 2:
+      st = readRegister(cmd::REG_CTRL3_C, _refreshCtrl3);
+      break;
+    case 3:
+      st = readRegister(cmd::REG_CTRL4_C, _refreshCtrl4);
+      break;
+    case 4:
+      st = readRegister(cmd::REG_CTRL6_C, _refreshCtrl6);
+      break;
+    case 5:
+      st = readRegister(cmd::REG_CTRL7_G, _refreshCtrl7);
+      break;
+    case 6:
+      st = readRegister(cmd::REG_CTRL8_XL, _refreshCtrl8);
+      break;
+    case 7:
+      st = readRegister(cmd::REG_CTRL10_C, _refreshCtrl10);
+      break;
+    case 8:
+      st = readRegister(cmd::REG_WAKE_UP_DUR, _refreshWakeUpDur);
+      break;
+    case 9:
+      st = readRegs(cmd::REG_X_OFS_USR, _refreshOffsetData, sizeof(_refreshOffsetData));
+      break;
+    case 10:
+      st = readRegs(cmd::REG_FIFO_CTRL1, _refreshFifoCtrl, sizeof(_refreshFifoCtrl));
+      break;
+    default:
+      _pollInstructionUsed = false;
+      done = true;
+      return _commitStagedCachedConfig();
+  }
+
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    done = true;
+    return st;
+  }
+  _pollStep = static_cast<uint8_t>(step + 1u);
+  if (_pollStep > 10u) {
+    done = true;
+    return _commitStagedCachedConfig();
+  }
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_commitStagedCachedConfig() {
+  const Odr odrXl = static_cast<Odr>((_refreshCtrl1 & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL);
+  const AccelFs fsXl = static_cast<AccelFs>((_refreshCtrl1 & cmd::MASK_FS_XL) >>
+                                            cmd::BIT_FS_XL);
+  const Odr odrG = static_cast<Odr>((_refreshCtrl2 & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
+  const GyroFs fsG = ((_refreshCtrl2 & cmd::MASK_FS_125) != 0)
+                         ? GyroFs::DPS_125
+                         : static_cast<GyroFs>((_refreshCtrl2 & cmd::MASK_FS_G) >>
+                                               cmd::BIT_FS_G);
+  const AccelPowerMode accelPowerMode = (_refreshCtrl6 & cmd::MASK_XL_HM_MODE) != 0
+                                            ? AccelPowerMode::LOW_POWER_NORMAL
+                                            : AccelPowerMode::HIGH_PERFORMANCE;
+  const GyroPowerMode gyroPowerMode = (_refreshCtrl7 & cmd::MASK_G_HM_MODE) != 0
+                                          ? GyroPowerMode::LOW_POWER_NORMAL
+                                          : GyroPowerMode::HIGH_PERFORMANCE;
+  const Odr fifoOdr = static_cast<Odr>((_refreshFifoCtrl[4] & cmd::MASK_ODR_FIFO) >>
+                                       cmd::BIT_ODR_FIFO);
+  const FifoMode fifoMode = static_cast<FifoMode>(_refreshFifoCtrl[4] & cmd::MASK_FIFO_MODE);
+
+  if (!isValidAccelFs(fsXl) || !isValidAccelOdr(odrXl, accelPowerMode) ||
+      !isValidGyroFs(fsG) || !isValidGyroOdr(odrG, gyroPowerMode) ||
+      !isValidFifoOdr(fifoOdr) || !isValidFifoMode(fifoMode)) {
+    _cachedConfigDirty = true;
+    return Status::Error(Err::INVALID_CONFIG, "Invalid cached register state");
+  }
+
+  _config.odrXl = odrXl;
+  _config.fsXl = fsXl;
+  _config.odrG = odrG;
+  _config.fsG = fsG;
+  _config.bdu = (_refreshCtrl3 & cmd::MASK_BDU) != 0;
+
+  _gyroSleepEnabled = (_refreshCtrl4 & cmd::MASK_SLEEP_G) != 0;
+  _gyroFilterConfig.lpf1Enabled = (_refreshCtrl4 & cmd::MASK_LPF1_SEL_G) != 0;
+
+  _accelPowerMode = accelPowerMode;
+  _accelOffsetWeight = (_refreshCtrl6 & cmd::MASK_USR_OFF_W) != 0
+                           ? AccelOffsetWeight::MG_16
+                           : AccelOffsetWeight::MG_1;
+
+  _gyroPowerMode = gyroPowerMode;
+  _gyroFilterConfig.highPassEnabled = (_refreshCtrl7 & cmd::MASK_HP_EN_G) != 0;
+  _gyroFilterConfig.highPassMode =
+      static_cast<GyroHpfMode>((_refreshCtrl7 & cmd::MASK_HPM_G) >> cmd::BIT_HPM_G);
+
+  _accelFilterConfig.lpf2Enabled = (_refreshCtrl8 & cmd::MASK_LPF2_XL_EN) != 0;
+  _accelFilterConfig.highPassSlopeEnabled = (_refreshCtrl8 & cmd::MASK_HP_SLOPE_XL_EN) != 0;
+  _accelFilterConfig.lowPassOn6d = (_refreshCtrl8 & cmd::MASK_LOW_PASS_ON_6D) != 0;
+
+  _timestampEnabled = (_refreshCtrl10 & (1u << cmd::BIT_TIMER_EN)) != 0;
+  _pedometerEnabled = (_refreshCtrl10 & (1u << cmd::BIT_PEDO_EN)) != 0;
+  _tiltEnabled = (_refreshCtrl10 & (1u << cmd::BIT_TILT_EN)) != 0;
+  _wristTiltEnabled = (_refreshCtrl10 & (1u << cmd::BIT_WRIST_TILT_EN)) != 0;
+  _significantMotionEnabled = (_refreshCtrl10 & (1u << cmd::BIT_SIGN_MOTION_EN)) != 0;
+  _timestampHighResolution = (_refreshWakeUpDur & cmd::MASK_TIMER_HR) != 0;
+
+  _accelUserOffset.x = static_cast<int8_t>(_refreshOffsetData[0]);
+  _accelUserOffset.y = static_cast<int8_t>(_refreshOffsetData[1]);
+  _accelUserOffset.z = static_cast<int8_t>(_refreshOffsetData[2]);
+
+  _fifoConfig.threshold = static_cast<uint16_t>(_refreshFifoCtrl[0]) |
+                          (static_cast<uint16_t>(_refreshFifoCtrl[1] &
+                                                 cmd::MASK_FIFO_THRESHOLD_HI) << 8);
+  _fifoConfig.storeTimestampStep =
+      (_refreshFifoCtrl[1] & (1u << cmd::BIT_TIMER_PEDO_FIFO_EN)) != 0;
+  _fifoConfig.storeTemperature = (_refreshFifoCtrl[1] & cmd::MASK_FIFO_TEMP_EN) != 0;
+  _fifoConfig.gyroDecimation =
+      static_cast<FifoDecimation>((_refreshFifoCtrl[2] & cmd::MASK_DEC_FIFO_GYRO) >>
+                                  cmd::BIT_DEC_FIFO_GYRO);
+  _fifoConfig.accelDecimation =
+      static_cast<FifoDecimation>((_refreshFifoCtrl[2] & cmd::MASK_DEC_FIFO_XL) >>
+                                  cmd::BIT_DEC_FIFO_XL);
+  _fifoConfig.stopOnThreshold = (_refreshFifoCtrl[3] & cmd::MASK_STOP_ON_FTH) != 0;
+  _fifoConfig.onlyHighData = (_refreshFifoCtrl[3] & cmd::MASK_ONLY_HIGH_DATA) != 0;
+  _fifoConfig.odr = fifoOdr;
+  _fifoConfig.mode = fifoMode;
+
+  _cachedConfigDirty = false;
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_pollFifoDrainStep() {
+  if (_pollStep == 0) {
+    uint8_t data[4] = {};
+    _pollInstructionUsed = true;
+    Status st = readRegs(cmd::REG_FIFO_STATUS1, data, sizeof(data));
+    if (!st.ok()) {
+      return st;
+    }
+    FifoStatus status;
+    decodeFifoStatus(data, status);
+    if (status.empty || status.unreadWords == 0u) {
+      _fifoDrainWordsAvailable = 0;
+      return _finishPollJob(Status::Ok());
+    }
+    _fifoDrainWordsAvailable = status.unreadWords;
+    _pollStep = 1;
+    return Status::Ok();
+  }
+
+  if (_fifoDrainWordsRead >= _fifoDrainMaxWords ||
+      _fifoDrainWordsRead >= _fifoDrainWordsAvailable) {
+    return _finishPollJob(Status::Ok());
+  }
+
+  uint8_t data[2] = {};
+  _pollInstructionUsed = true;
+  Status st = readRegs(cmd::REG_FIFO_DATA_OUT_L, data, sizeof(data));
+  if (!st.ok()) {
+    return st;
+  }
+  ++_fifoDrainWordsRead;
+  if (_fifoDrainWordsRead >= _fifoDrainMaxWords ||
+      _fifoDrainWordsRead >= _fifoDrainWordsAvailable) {
+    return _finishPollJob(Status::Ok());
+  }
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_pollCalibrationStep(bool accelJob) {
+  const Odr odr = accelJob ? _config.odrXl : _config.odrG;
+  if (_pollStep == 0) {
+    if (_pollDeadlineMs == 0) {
+      _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
+    }
+    bool ready = false;
+    Status st = accelJob ? isAccelDataReady(ready) : isGyroDataReady(ready);
+    _pollInstructionUsed = true;
+    if (!st.ok()) {
+      return st;
+    }
+    if (!ready) {
+      ++_calibrationPollsForSample;
+      if (deadlineReached(_pollNowMs, _pollDeadlineMs) ||
+          _calibrationPollsForSample >= CALIBRATION_MAX_POLLS_PER_SAMPLE) {
+        return Status::Error(Err::TIMEOUT,
+                             accelJob ? "Accel data-ready timeout during calibration"
+                                      : "Gyro data-ready timeout during calibration",
+                             _calibrationPollsForSample);
+      }
+      return Status::Error(Err::IN_PROGRESS, "Calibration sample not ready");
+    }
+    _pollStep = 1;
+    return Status::Ok();
+  }
+
+  RawAxes raw;
+  _pollInstructionUsed = true;
+  Status st = accelJob ? readAccelRaw(raw) : readGyroRaw(raw);
+  if (!st.ok()) {
+    return st;
+  }
+  const Axes phys = accelJob ? convertAccel(raw) : convertGyro(raw);
+  _calibrationSumX += static_cast<double>(phys.x);
+  _calibrationSumY += static_cast<double>(phys.y);
+  _calibrationSumZ += static_cast<double>(phys.z);
+  ++_calibrationSamplesDone;
+
+  if (_calibrationSamplesDone >= _calibrationSamplesTarget) {
+    const double n = static_cast<double>(_calibrationSamplesTarget);
+    Axes bias;
+    bias.x = static_cast<float>(_calibrationSumX / n);
+    bias.y = static_cast<float>(_calibrationSumY / n);
+    bias.z = static_cast<float>(_calibrationSumZ / n - (accelJob ? 1.0 : 0.0));
+    if (accelJob) {
+      _accelBias = bias;
+    } else {
+      _gyroBias = bias;
+    }
+    return _finishPollJob(Status::Ok());
+  }
+
+  _pollStep = 0;
+  _calibrationPollsForSample = 0;
+  _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getMeasurement(Measurement& out) {
@@ -547,6 +1312,7 @@ Status LSM6DS3TR::setAccelOdr(Odr odr) {
 
   Status st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(odr, _config.fsXl));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   _config.odrXl = odr;
@@ -566,6 +1332,7 @@ Status LSM6DS3TR::setGyroOdr(Odr odr) {
 
   Status st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(odr, _config.fsG));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   _config.odrG = odr;
@@ -582,6 +1349,7 @@ Status LSM6DS3TR::setAccelFs(AccelFs fs) {
 
   Status st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, fs));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   _config.fsXl = fs;
@@ -598,6 +1366,7 @@ Status LSM6DS3TR::setGyroFs(GyroFs fs) {
 
   Status st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, fs));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   _config.fsG = fs;
@@ -696,8 +1465,14 @@ Status LSM6DS3TR::setAccelPowerMode(AccelPowerMode mode) {
     return Status::Error(Err::INVALID_PARAM, "Current accel ODR is not valid in requested power mode");
   }
 
+  const uint8_t ctrl6 = buildCtrl6CValue(mode, _accelOffsetWeight);
+  Status st = writeRegister(cmd::REG_CTRL6_C, ctrl6);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _accelPowerMode = mode;
-  return writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getAccelPowerMode(AccelPowerMode& out) const {
@@ -716,8 +1491,14 @@ Status LSM6DS3TR::setGyroPowerMode(GyroPowerMode mode) {
     return Status::Error(Err::INVALID_PARAM, "Current gyro ODR is not valid in requested power mode");
   }
 
+  const uint8_t ctrl7 = buildCtrl7GValue(mode, _gyroFilterConfig);
+  Status st = writeRegister(cmd::REG_CTRL7_G, ctrl7);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _gyroPowerMode = mode;
-  return writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getGyroPowerMode(GyroPowerMode& out) const {
@@ -733,8 +1514,14 @@ Status LSM6DS3TR::setGyroSleepEnabled(bool enabled) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
+  const uint8_t ctrl4 = buildCtrl4CValue(enabled, _gyroFilterConfig.lpf1Enabled);
+  Status st = writeRegister(cmd::REG_CTRL4_C, ctrl4);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _gyroSleepEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getGyroSleepEnabled(bool& enabled) const {
@@ -750,8 +1537,14 @@ Status LSM6DS3TR::setAccelFilterConfig(const AccelFilterConfig& config) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
+  const uint8_t ctrl8 = buildCtrl8XlValue(config);
+  Status st = writeRegister(cmd::REG_CTRL8_XL, ctrl8);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _accelFilterConfig = config;
-  return writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getAccelFilterConfig(AccelFilterConfig& out) const {
@@ -767,12 +1560,19 @@ Status LSM6DS3TR::setGyroFilterConfig(const GyroFilterConfig& config) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  _gyroFilterConfig = config;
-  Status st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
+  Status st = writeRegister(cmd::REG_CTRL4_C,
+                            buildCtrl4CValue(_gyroSleepEnabled, config.lpf1Enabled));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
-  return writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
+  st = writeRegister(cmd::REG_CTRL7_G, buildCtrl7GValue(_gyroPowerMode, config));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
+  _gyroFilterConfig = config;
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getGyroFilterConfig(GyroFilterConfig& out) const {
@@ -791,8 +1591,15 @@ Status LSM6DS3TR::setTimestampEnabled(bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Timestamp requires at least one active sensor");
   }
 
+  const uint8_t ctrl10 = buildCtrl10CValue(_wristTiltEnabled, enabled, _pedometerEnabled,
+                                           _tiltEnabled, _significantMotionEnabled);
+  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _timestampEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getTimestampEnabled(bool& enabled) const {
@@ -808,14 +1615,20 @@ Status LSM6DS3TR::setTimestampHighResolution(bool enabled) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  _timestampHighResolution = enabled;
-  Status st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR, _buildWakeUpDur());
+  Status st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR,
+                              buildWakeUpDurValue(enabled));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   if (enabled) {
-    return resetTimestamp();
+    st = resetTimestamp();
+    if (!st.ok()) {
+      _cachedConfigDirty = true;
+      return st;
+    }
   }
+  _timestampHighResolution = enabled;
   return Status::Ok();
 }
 
@@ -859,8 +1672,15 @@ Status LSM6DS3TR::setPedometerEnabled(bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Pedometer requires accel ODR >= 26 Hz");
   }
 
+  const uint8_t ctrl10 = buildCtrl10CValue(_wristTiltEnabled, _timestampEnabled, enabled,
+                                           _tiltEnabled, _significantMotionEnabled);
+  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _pedometerEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getPedometerEnabled(bool& enabled) const {
@@ -879,8 +1699,15 @@ Status LSM6DS3TR::setSignificantMotionEnabled(bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Significant motion requires accel ODR >= 26 Hz");
   }
 
+  const uint8_t ctrl10 = buildCtrl10CValue(_wristTiltEnabled, _timestampEnabled,
+                                           _pedometerEnabled, _tiltEnabled, enabled);
+  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _significantMotionEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getSignificantMotionEnabled(bool& enabled) const {
@@ -899,8 +1726,16 @@ Status LSM6DS3TR::setTiltEnabled(bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Tilt detection requires accel ODR >= 26 Hz");
   }
 
+  const uint8_t ctrl10 = buildCtrl10CValue(_wristTiltEnabled, _timestampEnabled,
+                                           _pedometerEnabled, enabled,
+                                           _significantMotionEnabled);
+  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _tiltEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getTiltEnabled(bool& enabled) const {
@@ -919,8 +1754,15 @@ Status LSM6DS3TR::setWristTiltEnabled(bool enabled) {
     return Status::Error(Err::INVALID_PARAM, "Wrist tilt requires accel ODR >= 26 Hz");
   }
 
+  const uint8_t ctrl10 = buildCtrl10CValue(enabled, _timestampEnabled, _pedometerEnabled,
+                                           _tiltEnabled, _significantMotionEnabled);
+  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _wristTiltEnabled = enabled;
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getWristTiltEnabled(bool& enabled) const {
@@ -979,8 +1821,14 @@ Status LSM6DS3TR::setAccelOffsetWeight(AccelOffsetWeight weight) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
+  const uint8_t ctrl6 = buildCtrl6CValue(_accelPowerMode, weight);
+  Status st = writeRegister(cmd::REG_CTRL6_C, ctrl6);
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _accelOffsetWeight = weight;
-  return writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getAccelOffsetWeight(AccelOffsetWeight& out) const {
@@ -1003,6 +1851,7 @@ Status LSM6DS3TR::setAccelUserOffset(const AccelUserOffset& offset) {
   };
   Status st = writeRegs(cmd::REG_X_OFS_USR, data, sizeof(data));
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
   _accelUserOffset = offset;
@@ -1034,24 +1883,33 @@ Status LSM6DS3TR::configureFifo(const FifoConfig& config) {
     return Status::Error(Err::INVALID_PARAM, "FIFO requires BDU enabled");
   }
 
+  Status st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(config.threshold));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
+  st = writeRegister(cmd::REG_FIFO_CTRL2, buildFifoCtrl2Value(config));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
+  st = writeRegister(cmd::REG_FIFO_CTRL3, buildFifoCtrl3Value(config));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
+  st = writeRegister(cmd::REG_FIFO_CTRL4, buildFifoCtrl4Value(config));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
+  st = writeRegister(cmd::REG_FIFO_CTRL5, buildFifoCtrl5Value(config));
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+    return st;
+  }
   _fifoConfig = config;
-  Status st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-  if (!st.ok()) {
-    return st;
-  }
-  st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-  if (!st.ok()) {
-    return st;
-  }
-  st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-  if (!st.ok()) {
-    return st;
-  }
-  st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-  if (!st.ok()) {
-    return st;
-  }
-  return writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::getFifoConfig(FifoConfig& out) const {
@@ -1187,33 +2045,19 @@ Status LSM6DS3TR::writeRegisterValue(uint8_t reg, uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  const bool affectsCachedConfig = isCachedConfigRegister(reg);
   Status st = writeRegister(reg, value);
   if (!st.ok()) {
+    if (affectsCachedConfig) {
+      _cachedConfigDirty = true;
+    }
     return st;
   }
 
-  switch (reg) {
-    case cmd::REG_CTRL1_XL:
-    case cmd::REG_CTRL2_G:
-    case cmd::REG_CTRL3_C:
-    case cmd::REG_CTRL4_C:
-    case cmd::REG_CTRL6_C:
-    case cmd::REG_CTRL7_G:
-    case cmd::REG_CTRL8_XL:
-    case cmd::REG_CTRL10_C:
-    case cmd::REG_WAKE_UP_DUR:
-    case cmd::REG_X_OFS_USR:
-    case cmd::REG_Y_OFS_USR:
-    case cmd::REG_Z_OFS_USR:
-    case cmd::REG_FIFO_CTRL1:
-    case cmd::REG_FIFO_CTRL2:
-    case cmd::REG_FIFO_CTRL3:
-    case cmd::REG_FIFO_CTRL4:
-    case cmd::REG_FIFO_CTRL5:
-      return refreshCachedConfig();
-    default:
-      return Status::Ok();
+  if (affectsCachedConfig) {
+    return refreshCachedConfig();
   }
+  return Status::Ok();
 }
 
 Status LSM6DS3TR::readRegisterBlock(uint8_t startReg, uint8_t* buf, size_t len) {
@@ -1239,45 +2083,70 @@ Status LSM6DS3TR::refreshCachedConfig() {
   uint8_t wakeUpDur = 0;
 
   Status st = readRegister(cmd::REG_CTRL1_XL, ctrl1);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL2_G, ctrl2);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL3_C, ctrl3);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL4_C, ctrl4);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL6_C, ctrl6);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL7_G, ctrl7);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL8_XL, ctrl8);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_CTRL10_C, ctrl10);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
   st = readRegister(cmd::REG_WAKE_UP_DUR, wakeUpDur);
-  if (!st.ok()) return st;
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
 
-  _config.odrXl = static_cast<Odr>((ctrl1 & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL);
-  _config.fsXl = static_cast<AccelFs>((ctrl1 & cmd::MASK_FS_XL) >> cmd::BIT_FS_XL);
-  _config.odrG = static_cast<Odr>((ctrl2 & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
-  _config.fsG = ((ctrl2 & cmd::MASK_FS_125) != 0)
-                    ? GyroFs::DPS_125
-                    : static_cast<GyroFs>((ctrl2 & cmd::MASK_FS_G) >> cmd::BIT_FS_G);
+  uint8_t offsetData[3] = {};
+  st = readRegs(cmd::REG_X_OFS_USR, offsetData, sizeof(offsetData));
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
+
+  uint8_t fifoCtrl[5] = {};
+  st = readRegs(cmd::REG_FIFO_CTRL1, fifoCtrl, sizeof(fifoCtrl));
+  if (!st.ok()) { _cachedConfigDirty = true; return st; }
+
+  const Odr odrXl = static_cast<Odr>((ctrl1 & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL);
+  const AccelFs fsXl = static_cast<AccelFs>((ctrl1 & cmd::MASK_FS_XL) >> cmd::BIT_FS_XL);
+  const Odr odrG = static_cast<Odr>((ctrl2 & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
+  const GyroFs fsG = ((ctrl2 & cmd::MASK_FS_125) != 0)
+                         ? GyroFs::DPS_125
+                         : static_cast<GyroFs>((ctrl2 & cmd::MASK_FS_G) >> cmd::BIT_FS_G);
+  const AccelPowerMode accelPowerMode = (ctrl6 & cmd::MASK_XL_HM_MODE) != 0
+                                            ? AccelPowerMode::LOW_POWER_NORMAL
+                                            : AccelPowerMode::HIGH_PERFORMANCE;
+  const GyroPowerMode gyroPowerMode = (ctrl7 & cmd::MASK_G_HM_MODE) != 0
+                                          ? GyroPowerMode::LOW_POWER_NORMAL
+                                          : GyroPowerMode::HIGH_PERFORMANCE;
+  const Odr fifoOdr = static_cast<Odr>((fifoCtrl[4] & cmd::MASK_ODR_FIFO) >>
+                                       cmd::BIT_ODR_FIFO);
+  const FifoMode fifoMode = static_cast<FifoMode>(fifoCtrl[4] & cmd::MASK_FIFO_MODE);
+
+  if (!isValidAccelFs(fsXl) || !isValidAccelOdr(odrXl, accelPowerMode) ||
+      !isValidGyroFs(fsG) || !isValidGyroOdr(odrG, gyroPowerMode) ||
+      !isValidFifoOdr(fifoOdr) || !isValidFifoMode(fifoMode)) {
+    _cachedConfigDirty = true;
+    return Status::Error(Err::INVALID_CONFIG, "Invalid cached register state");
+  }
+
+  _config.odrXl = odrXl;
+  _config.fsXl = fsXl;
+  _config.odrG = odrG;
+  _config.fsG = fsG;
   _config.bdu = (ctrl3 & cmd::MASK_BDU) != 0;
 
   _gyroSleepEnabled = (ctrl4 & cmd::MASK_SLEEP_G) != 0;
   _gyroFilterConfig.lpf1Enabled = (ctrl4 & cmd::MASK_LPF1_SEL_G) != 0;
 
-  _accelPowerMode = (ctrl6 & cmd::MASK_XL_HM_MODE) != 0
-                        ? AccelPowerMode::LOW_POWER_NORMAL
-                        : AccelPowerMode::HIGH_PERFORMANCE;
+  _accelPowerMode = accelPowerMode;
   _accelOffsetWeight = (ctrl6 & cmd::MASK_USR_OFF_W) != 0
                            ? AccelOffsetWeight::MG_16
                            : AccelOffsetWeight::MG_1;
 
-  _gyroPowerMode = (ctrl7 & cmd::MASK_G_HM_MODE) != 0
-                       ? GyroPowerMode::LOW_POWER_NORMAL
-                       : GyroPowerMode::HIGH_PERFORMANCE;
+  _gyroPowerMode = gyroPowerMode;
   _gyroFilterConfig.highPassEnabled = (ctrl7 & cmd::MASK_HP_EN_G) != 0;
   _gyroFilterConfig.highPassMode =
       static_cast<GyroHpfMode>((ctrl7 & cmd::MASK_HPM_G) >> cmd::BIT_HPM_G);
@@ -1293,29 +2162,27 @@ Status LSM6DS3TR::refreshCachedConfig() {
   _significantMotionEnabled = (ctrl10 & (1u << cmd::BIT_SIGN_MOTION_EN)) != 0;
   _timestampHighResolution = (wakeUpDur & cmd::MASK_TIMER_HR) != 0;
 
-  uint8_t offsetData[3] = {};
-  st = readRegs(cmd::REG_X_OFS_USR, offsetData, sizeof(offsetData));
-  if (!st.ok()) return st;
   _accelUserOffset.x = static_cast<int8_t>(offsetData[0]);
   _accelUserOffset.y = static_cast<int8_t>(offsetData[1]);
   _accelUserOffset.z = static_cast<int8_t>(offsetData[2]);
 
-  uint8_t fifoCtrl[5] = {};
-  st = readRegs(cmd::REG_FIFO_CTRL1, fifoCtrl, sizeof(fifoCtrl));
-  if (!st.ok()) return st;
   _fifoConfig.threshold = static_cast<uint16_t>(fifoCtrl[0]) |
-                          (static_cast<uint16_t>(fifoCtrl[1] & cmd::MASK_FIFO_THRESHOLD_HI) << 8);
+                          (static_cast<uint16_t>(fifoCtrl[1] &
+                                                 cmd::MASK_FIFO_THRESHOLD_HI) << 8);
   _fifoConfig.storeTimestampStep = (fifoCtrl[1] & (1u << cmd::BIT_TIMER_PEDO_FIFO_EN)) != 0;
   _fifoConfig.storeTemperature = (fifoCtrl[1] & cmd::MASK_FIFO_TEMP_EN) != 0;
   _fifoConfig.gyroDecimation =
-      static_cast<FifoDecimation>((fifoCtrl[2] & cmd::MASK_DEC_FIFO_GYRO) >> cmd::BIT_DEC_FIFO_GYRO);
+      static_cast<FifoDecimation>((fifoCtrl[2] & cmd::MASK_DEC_FIFO_GYRO) >>
+                                  cmd::BIT_DEC_FIFO_GYRO);
   _fifoConfig.accelDecimation =
-      static_cast<FifoDecimation>((fifoCtrl[2] & cmd::MASK_DEC_FIFO_XL) >> cmd::BIT_DEC_FIFO_XL);
+      static_cast<FifoDecimation>((fifoCtrl[2] & cmd::MASK_DEC_FIFO_XL) >>
+                                  cmd::BIT_DEC_FIFO_XL);
   _fifoConfig.stopOnThreshold = (fifoCtrl[3] & cmd::MASK_STOP_ON_FTH) != 0;
   _fifoConfig.onlyHighData = (fifoCtrl[3] & cmd::MASK_ONLY_HIGH_DATA) != 0;
-  _fifoConfig.odr = static_cast<Odr>((fifoCtrl[4] & cmd::MASK_ODR_FIFO) >> cmd::BIT_ODR_FIFO);
-  _fifoConfig.mode = static_cast<FifoMode>(fifoCtrl[4] & cmd::MASK_FIFO_MODE);
+  _fifoConfig.odr = fifoOdr;
+  _fifoConfig.mode = fifoMode;
 
+  _cachedConfigDirty = false;
   return Status::Ok();
 }
 
@@ -1497,24 +2364,24 @@ Status LSM6DS3TR::_applyConfig() {
   Status st = writeRegister(
       cmd::REG_CTRL3_C,
       static_cast<uint8_t>(cmd::MASK_IF_INC | (_config.bdu ? cmd::MASK_BDU : 0)));
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
 
   st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, _config.fsXl));
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, _config.fsG));
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR, _buildWakeUpDur());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
 
   const uint8_t offsets[3] = {
       static_cast<uint8_t>(_accelUserOffset.x),
@@ -1522,19 +2389,20 @@ Status LSM6DS3TR::_applyConfig() {
       static_cast<uint8_t>(_accelUserOffset.z),
   };
   st = writeRegs(cmd::REG_X_OFS_USR, offsets, sizeof(offsets));
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
 
   st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
   st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
-  if (!st.ok()) return st;
+  if (!st.ok()) { if (_initialized) _cachedConfigDirty = true; return st; }
 
+  _cachedConfigDirty = false;
   return Status::Ok();
 }
 
@@ -1585,75 +2453,44 @@ uint8_t LSM6DS3TR::_buildCtrl2G(Odr odr, GyroFs fs) {
 }
 
 uint8_t LSM6DS3TR::_buildCtrl4C() const {
-  uint8_t value = 0;
-  if (_gyroSleepEnabled) value |= cmd::MASK_SLEEP_G;
-  if (_gyroFilterConfig.lpf1Enabled) value |= cmd::MASK_LPF1_SEL_G;
-  return value;
+  return buildCtrl4CValue(_gyroSleepEnabled, _gyroFilterConfig.lpf1Enabled);
 }
 
 uint8_t LSM6DS3TR::_buildCtrl6C() const {
-  uint8_t value = 0;
-  if (_accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_XL_HM_MODE;
-  if (_accelOffsetWeight == AccelOffsetWeight::MG_16) value |= cmd::MASK_USR_OFF_W;
-  return value;
+  return buildCtrl6CValue(_accelPowerMode, _accelOffsetWeight);
 }
 
 uint8_t LSM6DS3TR::_buildCtrl7G() const {
-  uint8_t value = 0;
-  if (_gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_G_HM_MODE;
-  if (_gyroFilterConfig.highPassEnabled) value |= cmd::MASK_HP_EN_G;
-  value |= static_cast<uint8_t>(static_cast<uint8_t>(_gyroFilterConfig.highPassMode)
-                                << cmd::BIT_HPM_G);
-  return value;
+  return buildCtrl7GValue(_gyroPowerMode, _gyroFilterConfig);
 }
 
 uint8_t LSM6DS3TR::_buildCtrl8Xl() const {
-  uint8_t value = 0;
-  if (_accelFilterConfig.lpf2Enabled) value |= cmd::MASK_LPF2_XL_EN;
-  if (_accelFilterConfig.highPassSlopeEnabled) value |= cmd::MASK_HP_SLOPE_XL_EN;
-  if (_accelFilterConfig.lowPassOn6d) value |= cmd::MASK_LOW_PASS_ON_6D;
-  return value;
+  return buildCtrl8XlValue(_accelFilterConfig);
 }
 
 uint8_t LSM6DS3TR::_buildCtrl10C() const {
-  uint8_t value = 0;
-  if (_wristTiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_WRIST_TILT_EN);
-  if (_timestampEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_EN);
-  if (_pedometerEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_PEDO_EN);
-  if (_tiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TILT_EN);
-  if (_significantMotionEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_SIGN_MOTION_EN);
-  if (_pedometerEnabled || _tiltEnabled || _significantMotionEnabled || _wristTiltEnabled) {
-    value |= static_cast<uint8_t>(1u << cmd::BIT_FUNC_EN);
-  }
-  return value;
+  return buildCtrl10CValue(_wristTiltEnabled, _timestampEnabled, _pedometerEnabled,
+                           _tiltEnabled, _significantMotionEnabled);
 }
 
 uint8_t LSM6DS3TR::_buildWakeUpDur() const {
-  return _timestampHighResolution ? cmd::MASK_TIMER_HR : 0;
+  return buildWakeUpDurValue(_timestampHighResolution);
 }
 
 uint8_t LSM6DS3TR::_buildFifoCtrl2() const {
-  uint8_t value = static_cast<uint8_t>((_fifoConfig.threshold >> 8) & cmd::MASK_FIFO_THRESHOLD_HI);
-  if (_fifoConfig.storeTimestampStep) value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_PEDO_FIFO_EN);
-  if (_fifoConfig.storeTemperature) value |= cmd::MASK_FIFO_TEMP_EN;
-  return value;
+  return buildFifoCtrl2Value(_fifoConfig);
 }
 
 uint8_t LSM6DS3TR::_buildFifoCtrl3() const {
-  return static_cast<uint8_t>((static_cast<uint8_t>(_fifoConfig.gyroDecimation) << cmd::BIT_DEC_FIFO_GYRO) |
-                              (static_cast<uint8_t>(_fifoConfig.accelDecimation) << cmd::BIT_DEC_FIFO_XL));
+  return buildFifoCtrl3Value(_fifoConfig);
 }
 
 uint8_t LSM6DS3TR::_buildFifoCtrl4() const {
-  uint8_t value = 0;
-  if (_fifoConfig.stopOnThreshold) value |= cmd::MASK_STOP_ON_FTH;
-  if (_fifoConfig.onlyHighData) value |= cmd::MASK_ONLY_HIGH_DATA;
-  return value;
+  return buildFifoCtrl4Value(_fifoConfig);
 }
 
 uint8_t LSM6DS3TR::_buildFifoCtrl5() const {
-  return static_cast<uint8_t>((static_cast<uint8_t>(_fifoConfig.odr) << cmd::BIT_ODR_FIFO) |
-                              static_cast<uint8_t>(_fifoConfig.mode));
+  return buildFifoCtrl5Value(_fifoConfig);
 }
 
 // ---------------------------------------------------------------------------
@@ -1708,13 +2545,20 @@ Status LSM6DS3TR::captureAccelBias(uint16_t samples, Axes& out) {
     // Wait for fresh accel data
     const uint32_t deadline = _nowMs() + sampleTimeoutMs;
     bool ready = false;
+    uint16_t polls = 0;
     while (!ready) {
       Status st = isAccelDataReady(ready);
       if (!st.ok()) {
         return st;
       }
-      if (!ready && _nowMs() >= deadline) {
-        return Status::Error(Err::TIMEOUT, "Accel data-ready timeout during calibration");
+      if (ready) {
+        break;
+      }
+      ++polls;
+      if (deadlineReached(_nowMs(), deadline) ||
+          polls >= CALIBRATION_MAX_POLLS_PER_SAMPLE) {
+        return Status::Error(Err::TIMEOUT, "Accel data-ready timeout during calibration",
+                             polls);
       }
     }
 
@@ -1758,13 +2602,20 @@ Status LSM6DS3TR::captureGyroBias(uint16_t samples, Axes& out) {
     // Wait for fresh gyro data
     const uint32_t deadline = _nowMs() + sampleTimeoutMs;
     bool ready = false;
+    uint16_t polls = 0;
     while (!ready) {
       Status st = isGyroDataReady(ready);
       if (!st.ok()) {
         return st;
       }
-      if (!ready && _nowMs() >= deadline) {
-        return Status::Error(Err::TIMEOUT, "Gyro data-ready timeout during calibration");
+      if (ready) {
+        break;
+      }
+      ++polls;
+      if (deadlineReached(_nowMs(), deadline) ||
+          polls >= CALIBRATION_MAX_POLLS_PER_SAMPLE) {
+        return Status::Error(Err::TIMEOUT, "Gyro data-ready timeout during calibration",
+                             polls);
       }
     }
 

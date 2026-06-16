@@ -209,8 +209,34 @@ Use the raw register APIs when you need chip features that are intentionally lef
 - `writeRegisterValue()`
 - `readRegisterBlock()`
 - `refreshCachedConfig()`
+- `cachedConfigDirty()`
 
 This is the intended path for interrupt routing, threshold registers, advanced tap/wake/free-fall setup, and sensor-hub experimentation.
+If a cache-affecting write or refresh fails, `cachedConfigDirty()` reports that local configuration mirrors may not match the chip until `refreshCachedConfig()` or `recover()` succeeds.
+
+## Poll-Chunked Execution
+
+`poll(nowMs, maxInstructions)` advances at most the requested number of I2C
+instructions. One register read, register write, or contiguous burst read counts
+as one instruction. CPU decode and conversion work does not count.
+
+- `requestMeasurement()` schedules a status-gated sample job.
+- `requestMeasurement(false)` schedules a direct raw burst without a status read.
+- `tick(nowMs)` delegates to `poll(nowMs, 1)`.
+- `pollBusy()` reports active sample, reset, boot, refresh, FIFO-drain, or staged
+  calibration jobs.
+- `lastPollStatus()` reports the latest poll progress or terminal error.
+- `startSoftReset()`, `startBoot()`, `startRefreshCachedConfig()`,
+  `startFifoDrain(maxWords)`, `startAccelBiasCapture(samples)`, and
+  `startGyroBiasCapture(samples)` schedule chunked diagnostic/configuration jobs.
+
+With `maxInstructions = 1`, a ready status-gated sample takes two polls: status
+read first, raw burst second. With `maxInstructions >= 2`, both can complete in
+one `poll()` call when data is ready.
+
+## TunnelMonitor Fit
+
+See [docs/tunnelmonitor_fit_report.md](docs/tunnelmonitor_fit_report.md) for the API classification and status taxonomy decisions used when integrating behind a queue-owned I2C task.
 
 ## Building And Validation
 

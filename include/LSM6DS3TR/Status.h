@@ -26,7 +26,8 @@ enum class Err : uint8_t {
   I2C_NACK_DATA,         ///< I2C data byte not acknowledged
   I2C_TIMEOUT,           ///< I2C transaction timeout
   I2C_BUS,               ///< I2C bus error
-  FIFO_EMPTY             ///< FIFO has no unread samples
+  FIFO_EMPTY,            ///< FIFO has no unread samples
+  OFFLINE                ///< Driver is offline; call recover()
 };
 
 /// Status structure returned by all fallible operations
