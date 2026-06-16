@@ -5,6 +5,7 @@
 - Accelerometer and gyroscope ODR fields select both output data rate and operating mode. `0000` powers down the selected sensor. Source: datasheet, pp. 61-62.
 - Accelerometer `XL_HM_MODE=1` disables high-performance mode; gyroscope `G_HM_MODE=1` disables high-performance mode. Source: datasheet, pp. 66-67.
 - Gyroscope sleep mode is controlled by `CTRL4_C.SLEEP`. Source: datasheet, p. 64.
+- After ODR or power-mode changes, discard or mask early samples according to the AN5130 settling guidance; the gyroscope power-down wake path can require about 70 ms before data are usable. Source: AN5130, section 3.2.
 
 ## Status Bits
 
@@ -16,6 +17,14 @@
 | `FIFO_STATUS2.WaterM` | FIFO level reached or exceeded watermark. | Datasheet, p. 80 |
 | `FIFO_STATUS2.OVER_RUN` | FIFO completely filled. | Datasheet, p. 80 |
 | `FIFO_STATUS2.FIFO_EMPTY` | FIFO contains no data when set. | Datasheet, p. 80 |
+
+## Source And Fault Registers
+
+| Register | Role | Source |
+|---|---|---|
+| `WAKE_UP_SRC`, `TAP_SRC`, `D6D_SRC` | Wake/free-fall, tap, and 6D orientation event sources. | Datasheet, pp. 70-71 |
+| `FUNC_SRC1`, `FUNC_SRC2`, `WRIST_TILT_IA` | Embedded-function, sensor-hub, and wrist-tilt event source flags. | Datasheet, pp. 86-87 |
+| `SENS_SYNC_SPI_ERROR_CODE` | Sensor-sync SPI error code. | Datasheet, p. 93 |
 
 ## Interrupt Routing
 
@@ -31,6 +40,7 @@
 - FIFO threshold is 11 bits across `FIFO_CTRL1.FTH[7:0]` and `FIFO_CTRL2.FTH[10:8]`; minimum resolution is 1 word = 2 bytes. Source: datasheet, pp. 54-55.
 - FIFO can include gyro, accelerometer, third/fourth data sets, and optionally temperature. Source: datasheet, pp. 55-58.
 - For proper FIFO status/data reads, the datasheet recommends setting `CTRL3_C.BDU=1`. Source: datasheet, pp. 79-81.
+- FIFO data are untagged; use `FIFO_PATTERN` and the configured decimation/order to identify stream position. Do not change FIFO configuration while unread data remain, do not read when `FIFO_EMPTY` is set, and drain fast enough to free slots before overflow. Source: AN5130, FIFO reading procedure.
 
 ## Self-Test
 

@@ -85,8 +85,17 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      - name: Check generated version header
+        run: python scripts/generate_version.py check
+
       - name: Enforce example CLI contract
         run: python tools/check_cli_contract.py
+
+      - name: Enforce IDF example contract
+        run: python tools/check_idf_example_contract.py
+
+      - name: Enforce chip documentation coverage
+        run: python tools/check_chip_docs_coverage.py
 
       - name: Validate library package
         run: pio pkg pack

@@ -17,12 +17,18 @@
 | Software reset | `CTRL3_C.SW_RESET` | Set to 1; bit automatically clears. | Datasheet, p. 63 |
 | Reboot memory content | `CTRL3_C.BOOT` | Reboots memory content; normal state is 0. | Datasheet, p. 63 |
 
+- Do not set `BOOT` and `SW_RESET` in the same write; run the flows serially. Source: AN5130, reset procedure.
+- After `BOOT`, registers may be inaccessible for about 15 ms. Source: AN5130, reset procedure.
+- After `SW_RESET`, wait at least the documented short reset interval or poll until `SW_RESET` clears. Source: AN5130, reset procedure.
+
 ## Output Handling
 
 - Gyro and accel axis outputs are two's-complement 16-bit values. Source: datasheet, pp. 73-76.
 - Default endian places LSB at the lower address (`CTRL3_C.BLE=0`). Source: datasheet, p. 63.
 - Apply sensitivity constants from `03_electrical_and_timing.md` based on configured full-scale range. Source: datasheet, p. 21.
 - Temperature conversion uses the datasheet temperature sensitivity of 256 LSB/degC and typ. 0 LSB at 25 degC. Source: datasheet, p. 25.
+- Burst-read all bytes for a ready output group after DRDY. BDU protects each LSB/MSB pair, but slow per-axis reads must not be treated as one atomic XYZ sample. Source: AN5130, data-ready and BDU notes.
+- Latched data-ready flags clear when the corresponding high output byte is read; pulsed DRDY mode does not change the `STATUS_REG.XLDA` and `STATUS_REG.GDA` latch behavior. Source: AN5130, data-ready notes.
 
 ## Feature Notes
 

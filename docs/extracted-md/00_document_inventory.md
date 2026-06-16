@@ -2,6 +2,8 @@
 
 Compact notes in `docs/extracted-md/` summarize LSM6DS3TR-C register, bus, timing, FIFO, interrupt, and scale facts. Raw PDF text lives in `docs/pdf-extracted-md/`.
 
+The compact notes are a curated index, not a replacement for the PDF tables. They must keep stable anchors for library-relevant registers and features so edits do not lose important datasheet coverage; `tools/check_chip_docs_coverage.py` enforces those anchors in CI.
+
 | Source PDF | Raw extract | Role | Revision / date | Pages | Notes |
 |---|---|---|---|---:|---|
 | `docs/LSM6DS3TR-C_datasheet.pdf` | `docs/pdf-extracted-md/LSM6DS3TR-C_datasheet.md` | Primary datasheet | Rev. 3, May 2017 | 114 | Electrical specs, pinout, I2C/SPI protocol, register map, FIFO, interrupts, embedded functions. |

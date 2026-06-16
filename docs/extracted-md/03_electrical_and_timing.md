@@ -40,3 +40,9 @@
 | I2C master mode | Fast Mode only; max 400 kHz and source table gives 116.3 kHz min generated SCL. | Datasheet, p. 28 |
 
 Operating temperature range is -40 to +85 degC. Source: datasheet, pp. 22, 24-25.
+
+## Board And Bus Design Boundaries
+
+- This compact note is not sufficient for board layout or absolute maximum design limits. Use the datasheet absolute maximum and package/land-pattern tables before PCB work. Source: datasheet, pp. 29, 105-111.
+- I2C lines require external pull-up resistors connected to `Vdd_IO`; pull-up sizing belongs to the board design and bus capacitance budget. Source: datasheet, p. 39.
+- The source tables include detailed SPI setup/hold timing and I2C setup/hold/bus-free timing beyond the max bus-rate summary above. Source: datasheet, pp. 26-28.

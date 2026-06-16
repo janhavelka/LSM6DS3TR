@@ -21,7 +21,7 @@ LSM6DS3TR-C exposes 7-bit register addresses over I2C and SPI. The register map 
 | Bus role | SPI slave. | Datasheet, p. 41 |
 | Lines | 4-wire uses `CS`, `SPC`, `SDI`, `SDO`; 3-wire uses `SDA` as serial data output. | Datasheet, pp. 20, 41, 44 |
 | Clocking | `SDI` and `SDO` are driven on falling edge of `SPC` and captured on rising edge. | Datasheet, p. 41 |
-| Control byte | Bit 0 in datasheet description is the read/write bit; `0` write, `1` read; address field is AD[6:0]. | Datasheet, p. 41 |
+| Control byte | The first transmitted control bit is the read/write bit; `0` write, `1` read; address field is AD[6:0]. In byte-oriented MSB-first code, use `0x80 | addr` for reads and `addr & 0x7F` for writes. | Datasheet, p. 41 |
 | Multi-byte access | Add 8 clocks per extra byte; address stays same when `IF_INC=0` and increments when `IF_INC=1`. | Datasheet, p. 41 |
 | 3-wire mode | Set `CTRL3_C.SIM` (`0x12[3]`) to 1. | Datasheet, pp. 44, 63 |
 
@@ -35,4 +35,5 @@ LSM6DS3TR-C exposes 7-bit register addresses over I2C and SPI. The register map 
 ## Reserved And Access Notes
 
 - The datasheet's register map marks many holes between `0x00` and `0x7F`; only documented user-interface addresses in Table 19 have defined behavior. Source: datasheet, pp. 49-52.
+- Reserved bits must be written as the datasheet defines, normally `0`, and read-modify-write helpers must preserve documented bits rather than writing broad literals over adjacent fields. Source: datasheet, pp. 53-96.
 - Embedded function bank A/B registers are visible through `FUNC_CFG_ACCESS` (`0x01`); boot-loaded registers in those banks are marked as content not to be changed. Source: datasheet, pp. 53, 97-98.
