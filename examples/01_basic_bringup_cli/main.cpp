@@ -11,6 +11,7 @@
 #include "examples/common/BusDiag.h"
 #include "examples/common/CliShell.h"
 #include "examples/common/HealthView.h"
+#include "examples/common/CliStyle.h"
 #include "examples/common/Log.h"
 #include "examples/common/TransportAdapter.h"
 
@@ -36,6 +37,11 @@ struct StressStats {
   uint32_t errors = 0;
   bool hasFailure = false;
   bool hasSample = false;
+  bool includeAccel = true;
+  bool includeGyro = true;
+  uint32_t accelSamples = 0;
+  uint32_t gyroSamples = 0;
+  uint32_t tempSamples = 0;
   float minAx = 0.0f;
   float maxAx = 0.0f;
   float minAy = 0.0f;
@@ -77,6 +83,23 @@ constexpr uint8_t SELF_TEST_CTRL5_G_POS = 0x04;
 
 uint32_t exampleNowMs(void*) {
   return millis();
+}
+
+Config makeDefaultConfig() {
+  Config cfg;
+  cfg.i2cWrite = transport_adapter::wireWrite;
+  cfg.i2cWriteRead = transport_adapter::wireWriteRead;
+  cfg.i2cUser = &Wire;
+  cfg.i2cAddress = 0x6A;
+  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
+  cfg.nowMs = exampleNowMs;
+  cfg.offlineThreshold = 5;
+  cfg.odrXl = Odr::HZ_104;
+  cfg.odrG = Odr::HZ_104;
+  cfg.fsXl = AccelFs::G_2;
+  cfg.fsG = GyroFs::DPS_250;
+  cfg.bdu = true;
+  return cfg;
 }
 
 const char* errToStr(LSM6DS3TR::Err err) {
@@ -156,12 +179,10 @@ void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, u
     return;
   }
   const float pct = (100.0f * static_cast<float>(completed)) / static_cast<float>(total);
-  Serial.printf("  Progress: %lu/%lu (%s%.0f%%%s, ok=%s%lu%s, fail=%s%lu%s)\n",
+  Serial.printf("  Progress: %lu/%lu (%.0f%%, ok=%s%lu%s, fail=%s%lu%s)\n",
                 static_cast<unsigned long>(completed),
                 static_cast<unsigned long>(total),
-                successRateColor(pct),
                 pct,
-                LOG_COLOR_RESET,
                 goodIfNonZeroColor(okCount),
                 static_cast<unsigned long>(okCount),
                 LOG_COLOR_RESET,
@@ -186,6 +207,23 @@ const char* odrToStr(LSM6DS3TR::Odr odr) {
     case Odr::HZ_3330:    return "3330 Hz";
     case Odr::HZ_6660:    return "6660 Hz";
     default:              return "UNKNOWN";
+  }
+}
+
+bool isAccelLowPowerOnlyOdr(LSM6DS3TR::Odr odr) {
+  return odr == LSM6DS3TR::Odr::HZ_1_6;
+}
+
+bool isAccelHighPerformanceOnlyOdr(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_416:
+    case LSM6DS3TR::Odr::HZ_833:
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -534,6 +572,29 @@ void printHexDump(uint8_t startReg, const uint8_t* data, size_t len) {
 }
 
 void printSettings() {
+  LSM6DS3TR::SettingsSnapshot snap;
+  LSM6DS3TR::Status snapStatus = device.getSettings(snap);
+  if (!snapStatus.ok()) {
+    printStatus(snapStatus);
+    return;
+  }
+
+  Serial.println("=== Current Settings ===");
+  Serial.printf("  Initialized:        %s\n", log_bool_str(snap.initialized));
+  Serial.printf("  Driver state:       %s\n", stateToStr(snap.state));
+  Serial.printf("  I2C address:        0x%02X\n", snap.i2cAddress);
+  Serial.printf("  I2C timeout:        %lu ms\n", static_cast<unsigned long>(snap.i2cTimeoutMs));
+  Serial.printf("  Offline threshold:  %u\n", static_cast<unsigned>(snap.offlineThreshold));
+  Serial.printf("  Measurement ready:  %s\n", log_bool_str(snap.measurementReady));
+  Serial.printf("  Has sample:         %s\n", log_bool_str(snap.hasSample));
+  Serial.printf("  sampleTimestampMs:  %lu\n",
+                static_cast<unsigned long>(snap.sampleTimestampMs));
+  Serial.printf("  sampleAgeMs:        %lu\n",
+                static_cast<unsigned long>(device.sampleAgeMs(millis())));
+  if (!snap.initialized) {
+    return;
+  }
+
   LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
   LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
   LSM6DS3TR::AccelFs fsXl = LSM6DS3TR::AccelFs::G_2;
@@ -576,7 +637,6 @@ void printSettings() {
   (void)device.getAccelUserOffset(offset);
   (void)device.getFifoConfig(fifo);
 
-  Serial.println("=== Current Settings ===");
   Serial.printf("  Accel ODR:          %s\n", odrToStr(odrXl));
   Serial.printf("  Gyro ODR:           %s\n", odrToStr(odrG));
   Serial.printf("  Accel FS:           %s\n", accelFsToStr(fsXl));
@@ -623,6 +683,99 @@ LSM6DS3TR::Status performReadBlocking(LSM6DS3TR::Measurement& out) {
   return LSM6DS3TR::Status::Ok();
 }
 
+bool isExampleOdrActive(LSM6DS3TR::Odr odr);
+
+LSM6DS3TR::Status performReadReadyChannels(const LSM6DS3TR::StatusReg& status,
+                                            LSM6DS3TR::Measurement& out,
+                                            bool& accelRead,
+                                            bool& gyroRead,
+                                            bool& tempRead,
+                                            bool wantAccel,
+                                            bool wantGyro,
+                                            bool wantTemp) {
+  accelRead = false;
+  gyroRead = false;
+  tempRead = false;
+  out = LSM6DS3TR::Measurement{};
+
+  if (wantTemp && status.tempDataReady) {
+    int16_t raw = 0;
+    LSM6DS3TR::Status st = device.readTemperatureRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    out.temperatureC = device.convertTemperature(raw);
+    tempRead = true;
+  }
+
+  if (wantAccel && status.accelDataReady) {
+    LSM6DS3TR::RawAxes raw;
+    LSM6DS3TR::Status st = device.readAccelRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    out.accel = device.convertAccel(raw);
+    device.correctAccel(out.accel);
+    accelRead = true;
+  }
+
+  if (wantGyro && status.gyroDataReady) {
+    LSM6DS3TR::RawAxes raw;
+    LSM6DS3TR::Status st = device.readGyroRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    out.gyro = device.convertGyro(raw);
+    device.correctGyro(out.gyro);
+    gyroRead = true;
+  }
+
+  if (!accelRead && !gyroRead && !tempRead) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::MEASUREMENT_NOT_READY, "No ready channel");
+  }
+  return LSM6DS3TR::Status::Ok();
+}
+
+uint32_t exampleOdrIntervalMs(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_1_6:  return 625;
+    case LSM6DS3TR::Odr::HZ_12_5: return 80;
+    case LSM6DS3TR::Odr::HZ_26:   return 39;
+    case LSM6DS3TR::Odr::HZ_52:   return 20;
+    case LSM6DS3TR::Odr::HZ_104:  return 10;
+    case LSM6DS3TR::Odr::HZ_208:  return 5;
+    case LSM6DS3TR::Odr::HZ_416:  return 3;
+    case LSM6DS3TR::Odr::HZ_833:  return 2;
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+bool isExampleOdrActive(LSM6DS3TR::Odr odr) {
+  return odr != LSM6DS3TR::Odr::POWER_DOWN;
+}
+
+bool isAccelOdrAtLeast26Hz(LSM6DS3TR::Odr odr) {
+  switch (odr) {
+    case LSM6DS3TR::Odr::HZ_26:
+    case LSM6DS3TR::Odr::HZ_52:
+    case LSM6DS3TR::Odr::HZ_104:
+    case LSM6DS3TR::Odr::HZ_208:
+    case LSM6DS3TR::Odr::HZ_416:
+    case LSM6DS3TR::Odr::HZ_833:
+    case LSM6DS3TR::Odr::HZ_1660:
+    case LSM6DS3TR::Odr::HZ_3330:
+    case LSM6DS3TR::Odr::HZ_6660:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void resetStressStats(int target) {
   stressStats = StressStats{};
   stressStats.active = true;
@@ -641,33 +794,57 @@ void noteStressError(const LSM6DS3TR::Status& st) {
   stressStats.lastError = st;
 }
 
-void updateStressStats(const LSM6DS3TR::Measurement& m) {
-  if (!stressStats.hasSample) {
-    stressStats.minAx = stressStats.maxAx = m.accel.x;
-    stressStats.minAy = stressStats.maxAy = m.accel.y;
-    stressStats.minAz = stressStats.maxAz = m.accel.z;
-    stressStats.minGx = stressStats.maxGx = m.gyro.x;
-    stressStats.minGy = stressStats.maxGy = m.gyro.y;
-    stressStats.minGz = stressStats.maxGz = m.gyro.z;
-    stressStats.minTemp = stressStats.maxTemp = m.temperatureC;
-    stressStats.hasSample = true;
-  } else {
-    if (m.accel.x < stressStats.minAx) stressStats.minAx = m.accel.x;
-    if (m.accel.x > stressStats.maxAx) stressStats.maxAx = m.accel.x;
-    if (m.accel.y < stressStats.minAy) stressStats.minAy = m.accel.y;
-    if (m.accel.y > stressStats.maxAy) stressStats.maxAy = m.accel.y;
-    if (m.accel.z < stressStats.minAz) stressStats.minAz = m.accel.z;
-    if (m.accel.z > stressStats.maxAz) stressStats.maxAz = m.accel.z;
-    if (m.gyro.x < stressStats.minGx) stressStats.minGx = m.gyro.x;
-    if (m.gyro.x > stressStats.maxGx) stressStats.maxGx = m.gyro.x;
-    if (m.gyro.y < stressStats.minGy) stressStats.minGy = m.gyro.y;
-    if (m.gyro.y > stressStats.maxGy) stressStats.maxGy = m.gyro.y;
-    if (m.gyro.z < stressStats.minGz) stressStats.minGz = m.gyro.z;
-    if (m.gyro.z > stressStats.maxGz) stressStats.maxGz = m.gyro.z;
-    if (m.temperatureC < stressStats.minTemp) stressStats.minTemp = m.temperatureC;
-    if (m.temperatureC > stressStats.maxTemp) stressStats.maxTemp = m.temperatureC;
+void updateStressStats(const LSM6DS3TR::Measurement& m, bool accelRead = true,
+                       bool gyroRead = true, bool tempRead = true) {
+  if (accelRead) {
+    if (stressStats.accelSamples == 0U) {
+      stressStats.minAx = stressStats.maxAx = m.accel.x;
+      stressStats.minAy = stressStats.maxAy = m.accel.y;
+      stressStats.minAz = stressStats.maxAz = m.accel.z;
+    } else {
+      if (m.accel.x < stressStats.minAx) stressStats.minAx = m.accel.x;
+      if (m.accel.x > stressStats.maxAx) stressStats.maxAx = m.accel.x;
+      if (m.accel.y < stressStats.minAy) stressStats.minAy = m.accel.y;
+      if (m.accel.y > stressStats.maxAy) stressStats.maxAy = m.accel.y;
+      if (m.accel.z < stressStats.minAz) stressStats.minAz = m.accel.z;
+      if (m.accel.z > stressStats.maxAz) stressStats.maxAz = m.accel.z;
+    }
   }
-  stressStats.sumTemp += m.temperatureC;
+  if (gyroRead) {
+    if (stressStats.gyroSamples == 0U) {
+      stressStats.minGx = stressStats.maxGx = m.gyro.x;
+      stressStats.minGy = stressStats.maxGy = m.gyro.y;
+      stressStats.minGz = stressStats.maxGz = m.gyro.z;
+    } else {
+      if (m.gyro.x < stressStats.minGx) stressStats.minGx = m.gyro.x;
+      if (m.gyro.x > stressStats.maxGx) stressStats.maxGx = m.gyro.x;
+      if (m.gyro.y < stressStats.minGy) stressStats.minGy = m.gyro.y;
+      if (m.gyro.y > stressStats.maxGy) stressStats.maxGy = m.gyro.y;
+      if (m.gyro.z < stressStats.minGz) stressStats.minGz = m.gyro.z;
+      if (m.gyro.z > stressStats.maxGz) stressStats.maxGz = m.gyro.z;
+    }
+  }
+  if (tempRead) {
+    if (stressStats.tempSamples == 0U) {
+      stressStats.minTemp = stressStats.maxTemp = m.temperatureC;
+    } else {
+      if (m.temperatureC < stressStats.minTemp) stressStats.minTemp = m.temperatureC;
+      if (m.temperatureC > stressStats.maxTemp) stressStats.maxTemp = m.temperatureC;
+    }
+  }
+  if (accelRead || gyroRead || tempRead) {
+    stressStats.hasSample = true;
+  }
+  if (accelRead) {
+    stressStats.accelSamples++;
+  }
+  if (gyroRead) {
+    stressStats.gyroSamples++;
+  }
+  if (tempRead) {
+    stressStats.tempSamples++;
+    stressStats.sumTemp += m.temperatureC;
+  }
   stressStats.success++;
 }
 
@@ -677,15 +854,17 @@ void finishStressStats() {
   const uint32_t successDelta = device.totalSuccess() - stressStats.successBefore;
   const uint32_t failDelta = device.totalFailures() - stressStats.failBefore;
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
-  const float successPct =
+  const float pollHitPct =
       (stressStats.attempts > 0)
           ? (100.0f * static_cast<float>(stressStats.success) /
              static_cast<float>(stressStats.attempts))
           : 0.0f;
+  Serial.println();
   Serial.println("=== Stress Summary ===");
-  Serial.printf("  Target:   %d\n", stressStats.target);
-  Serial.printf("  Attempts: %d\n", stressStats.attempts);
-  Serial.printf("  Success:  %s%d%s\n",
+  Serial.println("  Mode:     independent data-ready polling");
+  Serial.printf("  Target:   %d per active accel/gyro channel\n", stressStats.target);
+  Serial.printf("  Polls:    %d\n", stressStats.attempts);
+  Serial.printf("  Reads:    %s%d%s\n",
                 goodIfNonZeroColor(static_cast<uint32_t>(stressStats.success)),
                 stressStats.success,
                 LOG_COLOR_RESET);
@@ -693,14 +872,29 @@ void finishStressStats() {
                 goodIfZeroColor(stressStats.errors),
                 static_cast<unsigned long>(stressStats.errors),
                 LOG_COLOR_RESET);
-  Serial.printf("  Success rate: %s%.2f%%%s\n",
-                successRateColor(successPct),
-                successPct,
+  Serial.printf("  Poll hit rate: %s%.2f%%%s\n",
+                successRateColor(pollHitPct),
+                pollHitPct,
                 LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
   if (durationMs > 0U) {
-    Serial.printf("  Rate:     %.2f samples/s\n",
+    Serial.printf("  Poll rate: %.2f polls/s\n",
                   1000.0f * static_cast<float>(stressStats.attempts) / static_cast<float>(durationMs));
+    if (stressStats.includeAccel) {
+      Serial.printf("  Accel samples: %lu (%.2f/s)\n",
+                    static_cast<unsigned long>(stressStats.accelSamples),
+                    1000.0f * static_cast<float>(stressStats.accelSamples) / static_cast<float>(durationMs));
+    }
+    if (stressStats.includeGyro) {
+      Serial.printf("  Gyro samples:  %lu (%.2f/s)\n",
+                    static_cast<unsigned long>(stressStats.gyroSamples),
+                    1000.0f * static_cast<float>(stressStats.gyroSamples) / static_cast<float>(durationMs));
+    }
+    if (stressStats.tempSamples > 0U) {
+      Serial.printf("  Temp samples:  %lu (%.2f/s)\n",
+                    static_cast<unsigned long>(stressStats.tempSamples),
+                    1000.0f * static_cast<float>(stressStats.tempSamples) / static_cast<float>(durationMs));
+    }
   }
   Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
                 goodIfNonZeroColor(successDelta),
@@ -710,19 +904,25 @@ void finishStressStats() {
                 static_cast<unsigned long>(failDelta),
                 LOG_COLOR_RESET);
   if (stressStats.success > 0 && stressStats.hasSample) {
-    const float avgTemp = static_cast<float>(stressStats.sumTemp / stressStats.success);
-    Serial.printf("  Temp C:   min=%.2f avg=%.2f max=%.2f\n",
-                  stressStats.minTemp,
-                  avgTemp,
-                  stressStats.maxTemp);
-    Serial.printf("  Accel g:  x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
-                  stressStats.minAx, stressStats.maxAx,
-                  stressStats.minAy, stressStats.maxAy,
-                  stressStats.minAz, stressStats.maxAz);
-    Serial.printf("  Gyro dps: x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
-                  stressStats.minGx, stressStats.maxGx,
-                  stressStats.minGy, stressStats.maxGy,
-                  stressStats.minGz, stressStats.maxGz);
+    if (stressStats.tempSamples > 0U) {
+      const float avgTemp = static_cast<float>(stressStats.sumTemp / stressStats.tempSamples);
+      Serial.printf("  Temp C:   min=%.2f avg=%.2f max=%.2f\n",
+                    stressStats.minTemp,
+                    avgTemp,
+                    stressStats.maxTemp);
+    }
+    if (stressStats.includeAccel) {
+      Serial.printf("  Accel g:  x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                    stressStats.minAx, stressStats.maxAx,
+                    stressStats.minAy, stressStats.maxAy,
+                    stressStats.minAz, stressStats.maxAz);
+    }
+    if (stressStats.includeGyro) {
+      Serial.printf("  Gyro dps: x[%.3f, %.3f] y[%.3f, %.3f] z[%.3f, %.3f]\n",
+                    stressStats.minGx, stressStats.maxGx,
+                    stressStats.minGy, stressStats.maxGy,
+                    stressStats.minGz, stressStats.maxGz);
+    }
   }
   if (stressStats.hasFailure) {
     Serial.println("  First failure:");
@@ -742,6 +942,118 @@ void cancelPending() {
     stressStats.active = false;
     Serial.println("  Cancelled.");
   }
+}
+
+void failStressStart(const LSM6DS3TR::Status& st) {
+  noteStressError(st);
+  stressStats.attempts++;
+  stressRemaining = 0;
+  finishStressStats();
+}
+
+void runStressOdrPaced(int sampleCount) {
+  resetStressStats(sampleCount);
+  LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Odr odrG = LSM6DS3TR::Odr::POWER_DOWN;
+  LSM6DS3TR::Status setupStatus = device.getAccelOdr(odrXl);
+  if (setupStatus.ok()) {
+    setupStatus = device.getGyroOdr(odrG);
+  }
+  if (!setupStatus.ok()) {
+    failStressStart(setupStatus);
+    return;
+  }
+  stressStats.includeAccel = isExampleOdrActive(odrXl);
+  stressStats.includeGyro = isExampleOdrActive(odrG);
+  if (!stressStats.includeAccel && !stressStats.includeGyro) {
+    failStressStart(LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM,
+                                             "Both sensors powered down"));
+    return;
+  }
+
+  uint32_t slowestIntervalMs = 0;
+  uint32_t fastestIntervalMs = UINT32_MAX;
+  if (stressStats.includeAccel) {
+    const uint32_t intervalMs = exampleOdrIntervalMs(odrXl);
+    if (intervalMs > slowestIntervalMs) slowestIntervalMs = intervalMs;
+    if (intervalMs < fastestIntervalMs) fastestIntervalMs = intervalMs;
+  }
+  if (stressStats.includeGyro) {
+    const uint32_t intervalMs = exampleOdrIntervalMs(odrG);
+    if (intervalMs > slowestIntervalMs) slowestIntervalMs = intervalMs;
+    if (intervalMs < fastestIntervalMs) fastestIntervalMs = intervalMs;
+  }
+  const uint32_t timeoutMs = (slowestIntervalMs * 3U) + 100U;
+  const bool usePollDelay = fastestIntervalMs > 2U;
+
+  uint32_t lastProgress = 0;
+  uint32_t lastTargetReadyMs = millis();
+  while ((stressStats.includeAccel && stressStats.accelSamples < static_cast<uint32_t>(sampleCount)) ||
+         (stressStats.includeGyro && stressStats.gyroSamples < static_cast<uint32_t>(sampleCount))) {
+    LSM6DS3TR::StatusReg status;
+    LSM6DS3TR::Status st = device.readStatus(status);
+    stressStats.attempts++;
+    if (!st.ok()) {
+      noteStressError(st);
+      break;
+    }
+
+    const bool needAccel = stressStats.includeAccel &&
+                           stressStats.accelSamples < static_cast<uint32_t>(sampleCount);
+    const bool needGyro = stressStats.includeGyro &&
+                          stressStats.gyroSamples < static_cast<uint32_t>(sampleCount);
+    const bool accelReady = needAccel && status.accelDataReady;
+    const bool gyroReady = needGyro && status.gyroDataReady;
+    const bool tempReady = status.tempDataReady;
+    if (!accelReady && !gyroReady) {
+      if ((millis() - lastTargetReadyMs) > timeoutMs) {
+        noteStressError(LSM6DS3TR::Status::Error(LSM6DS3TR::Err::TIMEOUT,
+                                                  "Data-ready timeout during stress"));
+        break;
+      }
+      if (!tempReady) {
+        yield();
+        if (usePollDelay) {
+          delay(1);
+        }
+        continue;
+      }
+    }
+
+    LSM6DS3TR::Measurement m;
+    bool accelRead = false;
+    bool gyroRead = false;
+    bool tempRead = false;
+    st = performReadReadyChannels(status, m, accelRead, gyroRead, tempRead,
+                                  needAccel, needGyro, true);
+    if (!st.ok()) {
+      noteStressError(st);
+    } else {
+      updateStressStats(m, accelRead, gyroRead, tempRead);
+      if (accelRead || gyroRead) {
+        lastTargetReadyMs = millis();
+      }
+    }
+
+    uint32_t completed = UINT32_MAX;
+    if (stressStats.includeAccel && stressStats.accelSamples < completed) {
+      completed = stressStats.accelSamples;
+    }
+    if (stressStats.includeGyro && stressStats.gyroSamples < completed) {
+      completed = stressStats.gyroSamples;
+    }
+    if (completed == UINT32_MAX) {
+      completed = 0;
+    }
+    if (completed != lastProgress) {
+      printStressProgress(completed,
+                          static_cast<uint32_t>(stressStats.target),
+                          completed,
+                          stressStats.errors);
+      lastProgress = completed;
+    }
+  }
+  finishStressStats();
 }
 
 LSM6DS3TR::Status scheduleMeasurement() {
@@ -1152,107 +1464,134 @@ void printRegisterValue(const char* label, uint8_t value) {
   Serial.printf("  %s = 0x%02X\n", label, value);
 }
 
-void printHelp() {
-  auto helpSection = [](const char* title) {
-    Serial.printf("\n%s[%s]%s\n", LOG_COLOR_GREEN, title, LOG_COLOR_RESET);
-  };
-  auto helpItem = [](const char* cmd, const char* desc) {
-    Serial.printf("  %s%-24s%s - %s\n", LOG_COLOR_CYAN, cmd, LOG_COLOR_RESET, desc);
-  };
+void printSideFlag(const char* label, bool value) {
+  Serial.printf("    %-20s %s\n", label, log_bool_str(value));
+}
 
+void printFunctionSource1Details(uint8_t value) {
+  printSideFlag("step delta", (value & LSM6DS3TR::cmd::MASK_STEP_COUNT_DELTA_IA) != 0);
+  printSideFlag("significant motion", (value & LSM6DS3TR::cmd::MASK_SIGN_MOTION_IA) != 0);
+  printSideFlag("tilt", (value & LSM6DS3TR::cmd::MASK_TILT_IA) != 0);
+  printSideFlag("step detected", (value & LSM6DS3TR::cmd::MASK_STEP_DETECTED) != 0);
+  printSideFlag("step overflow", (value & LSM6DS3TR::cmd::MASK_STEP_OVERFLOW) != 0);
+  printSideFlag("hard/soft iron fail", (value & LSM6DS3TR::cmd::MASK_HI_FAIL) != 0);
+  printSideFlag("soft iron done", (value & LSM6DS3TR::cmd::MASK_SI_END_OP) != 0);
+  printSideFlag("sensor hub done", (value & LSM6DS3TR::cmd::MASK_SENSORHUB_END_OP) != 0);
+}
+
+void printFunctionSource2Details(uint8_t value) {
+  printSideFlag("slave3 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE3_NACK) != 0);
+  printSideFlag("slave2 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE2_NACK) != 0);
+  printSideFlag("slave1 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE1_NACK) != 0);
+  printSideFlag("slave0 nack", (value & LSM6DS3TR::cmd::MASK_SLAVE0_NACK) != 0);
+  printSideFlag("wrist tilt", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_IA) != 0);
+}
+
+void printWristTiltDetails(uint8_t value) {
+  printSideFlag("x positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_XPOS) != 0);
+  printSideFlag("x negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_XNEG) != 0);
+  printSideFlag("y positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_YPOS) != 0);
+  printSideFlag("y negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_YNEG) != 0);
+  printSideFlag("z positive", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_ZPOS) != 0);
+  printSideFlag("z negative", (value & LSM6DS3TR::cmd::MASK_WRIST_TILT_ZNEG) != 0);
+}
+
+void printHelp() {
   Serial.println();
-  Serial.printf("%s=== LSM6DS3TR-C CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
+  cli::printHelpHeader("LSM6DS3TR-C CLI Help");
   Serial.printf("Version: %s\n", LSM6DS3TR::VERSION_FULL);
 
-  helpSection("Common");
-  helpItem("help / ?", "Show this help");
-  helpItem("version / ver", "Print version and build metadata");
-  helpItem("scan", "Scan I2C bus");
-  helpItem("drv", "Show driver health");
-  helpItem("drv1", "Show one-line health view");
-  helpItem("cfg / settings", "Show current cached configuration");
-  helpItem("refresh", "Refresh cached config from device registers");
-  helpItem("verbose [0|1]", "Toggle or set verbose mode");
+  cli::printHelpSection("Common");
+  cli::printHelpItem("help / ?", "Show this help");
+  cli::printHelpItem("version / ver", "Print version and build metadata");
+  cli::printHelpItem("scan", "Scan I2C bus");
+  cli::printHelpItem("begin", "Initialize/reinitialize device");
+  cli::printHelpItem("drv", "Show driver health");
+  cli::printHelpItem("drv1", "Show one-line health view");
+  cli::printHelpItem("cfg / settings", "Show current cached configuration");
+  cli::printHelpItem("refresh", "Refresh cached config from device registers");
+  cli::printHelpItem("verbose [0|1]", "Toggle or set verbose mode");
 
-  helpSection("Measurement");
-  helpItem("read", "Read accel + gyro + temp (converted)");
-  helpItem("raw", "Read accel + gyro + temp (raw)");
-  helpItem("accel", "Read accelerometer only");
-  helpItem("gyro", "Read gyroscope only");
-  helpItem("temp", "Read temperature only");
-  helpItem("status", "Read STATUS_REG with decoded data-ready bits");
-  helpItem("tsread", "Read timestamp counter");
-  helpItem("steps", "Read step counter and step timestamp");
-  helpItem("fifo", "Read FIFO config and status");
-  helpItem("fifo_read [N]", "Read up to N FIFO words");
-  helpItem("stream", "Toggle continuous output (one line per sample at sensor ODR)");
+  cli::printHelpSection("Measurement");
+  cli::printHelpItem("read", "Read accel + gyro + temp (converted)");
+  cli::printHelpItem("raw", "Read accel + gyro + temp (raw)");
+  cli::printHelpItem("accel", "Read accelerometer only");
+  cli::printHelpItem("gyro", "Read gyroscope only");
+  cli::printHelpItem("temp", "Read temperature only");
+  cli::printHelpItem("status", "Read STATUS_REG with decoded data-ready bits");
+  cli::printHelpItem("tsread", "Read timestamp counter");
+  cli::printHelpItem("steps", "Read step counter and step timestamp");
+  cli::printHelpItem("fifo", "Read FIFO config and status");
+  cli::printHelpItem("fifo_read [N]", "Read up to N FIFO words");
+  cli::printHelpItem("stream", "Toggle continuous output (one line per sample at sensor ODR)");
 
-  helpSection("Core Config");
-  helpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
-  helpItem("odrg [hz]", "Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)");
-  helpItem("fsxl [g]", "Get/set accel full-scale (2|4|8|16)");
-  helpItem("fsg [dps]", "Get/set gyro full-scale (125|250|500|1000|2000)");
-  helpItem("apm [hp|lpn]", "Get/set accel power mode");
-  helpItem("gpm [hp|lpn]", "Get/set gyro power mode");
-  helpItem("gsleep [0|1]", "Get/set gyro sleep");
-  helpItem("reset", "Software reset and re-apply cached config");
-  helpItem("boot", "Issue boot command and refresh cached config");
+  cli::printHelpSection("Core Config");
+  cli::printHelpItem("odrxl [hz]", "Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  cli::printHelpItem("odrg [hz]", "Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)");
+  cli::printHelpItem("fsxl [g]", "Get/set accel full-scale (2|4|8|16)");
+  cli::printHelpItem("fsg [dps]", "Get/set gyro full-scale (125|250|500|1000|2000)");
+  cli::printHelpItem("apm [hp|lpn]", "Get/set accel power mode");
+  cli::printHelpItem("gpm [hp|lpn]", "Get/set gyro power mode");
+  cli::printHelpItem("gsleep [0|1]", "Get/set gyro sleep");
+  cli::printHelpItem("reset", "Software reset and re-apply cached config");
+  cli::printHelpItem("boot", "Issue boot command and refresh cached config");
 
-  helpSection("Filters And Embedded");
-  helpItem("alpf2 [0|1]", "Get/set accel LPF2");
-  helpItem("aslope [0|1]", "Get/set accel high-pass/slope");
-  helpItem("a6d [0|1]", "Get/set accel low-pass on 6D");
-  helpItem("glpf1 [0|1]", "Get/set gyro LPF1");
-  helpItem("ghpf [0|1]", "Get/set gyro HPF");
-  helpItem("ghpfmode [0..3]", "Get/set gyro HPF cutoff");
-  helpItem("ts [0|1]", "Get/set timestamp enable");
-  helpItem("tshr [0|1]", "Get/set timestamp high resolution");
-  helpItem("tsreset", "Reset timestamp counter");
-  helpItem("pedo [0|1]", "Get/set pedometer");
-  helpItem("sigmot [0|1]", "Get/set significant motion");
-  helpItem("tilt [0|1]", "Get/set tilt detection");
-  helpItem("wtilt [0|1]", "Get/set wrist tilt");
-  helpItem("stepreset", "Reset step counter");
+  cli::printHelpSection("Filters And Embedded");
+  cli::printHelpItem("alpf2 [0|1]", "Get/set accel LPF2");
+  cli::printHelpItem("aslope [0|1]", "Get/set accel high-pass/slope");
+  cli::printHelpItem("a6d [0|1]", "Get/set accel low-pass on 6D");
+  cli::printHelpItem("glpf1 [0|1]", "Get/set gyro LPF1");
+  cli::printHelpItem("ghpf [0|1]", "Get/set gyro HPF");
+  cli::printHelpItem("ghpfmode [0..3]", "Get/set gyro HPF cutoff");
+  cli::printHelpItem("ts [0|1]", "Get/set timestamp enable");
+  cli::printHelpItem("tshr [0|1]", "Get/set timestamp high resolution");
+  cli::printHelpItem("tsreset", "Reset timestamp counter");
+  cli::printHelpItem("pedo [0|1]", "Get/set pedometer");
+  cli::printHelpItem("sigmot [0|1]", "Get/set significant motion");
+  cli::printHelpItem("tilt [0|1]", "Get/set tilt detection");
+  cli::printHelpItem("wtilt [0|1]", "Get/set wrist tilt");
+  cli::printHelpItem("stepreset", "Reset step counter");
 
-  helpSection("Offsets And FIFO");
-  helpItem("ofswt [1|16]", "Get/set accel offset weight");
-  helpItem("offset [x y z]", "Get/set accel user offsets");
-  helpItem("fifo_mode [mode]", "Get/set FIFO mode");
-  helpItem("fifo_odr [hz]", "Get/set FIFO ODR");
-  helpItem("fifo_xl [off|1|2|3|4|8|16|32]", "Get/set FIFO accel decimation");
-  helpItem("fifo_g [off|1|2|3|4|8|16|32]", "Get/set FIFO gyro decimation");
-  helpItem("fifo_th [N]", "Get/set FIFO threshold (0..2047)");
-  helpItem("fifo_temp [0|1]", "Get/set FIFO temperature storage");
-  helpItem("fifo_step [0|1]", "Get/set FIFO step/timestamp storage");
-  helpItem("fifo_stop [0|1]", "Get/set FIFO stop on threshold");
-  helpItem("fifo_high [0|1]", "Get/set FIFO high-byte-only mode");
+  cli::printHelpSection("Offsets And FIFO");
+  cli::printHelpItem("ofswt [1|16]", "Get/set accel offset weight");
+  cli::printHelpItem("offset [x y z]", "Get/set accel user offsets");
+  cli::printHelpItem("fifo_mode [mode]", "Get/set FIFO mode");
+  cli::printHelpItem("fifo_odr [hz]", "Get/set FIFO ODR");
+  cli::printHelpItem("fifo_xl [off|1|2|3|4|8|16|32]", "Get/set FIFO accel decimation");
+  cli::printHelpItem("fifo_g [off|1|2|3|4|8|16|32]", "Get/set FIFO gyro decimation");
+  cli::printHelpItem("fifo_th [N]", "Get/set FIFO threshold (0..2047)");
+  cli::printHelpItem("fifo_temp [0|1]", "Get/set FIFO temperature storage");
+  cli::printHelpItem("fifo_step [0|1]", "Get/set FIFO step/timestamp storage");
+  cli::printHelpItem("fifo_stop [0|1]", "Get/set FIFO stop on threshold");
+  cli::printHelpItem("fifo_high [0|1]", "Get/set FIFO high-byte-only mode");
 
-  helpSection("Calibration");
-  helpItem("cal [N]", "Calibrate accel+gyro at rest (Z-up, default 100 samples)");
-  helpItem("calxl [N]", "Calibrate accel only (Z-up, default 100 samples)");
-  helpItem("calg [N]", "Calibrate gyro only (stationary, default 100 samples)");
-  helpItem("biasxl [x y z]", "Get/set accel software bias (g)");
-  helpItem("biasg [x y z]", "Get/set gyro software bias (dps)");
-  helpItem("biasreset", "Clear all software biases to zero");
+  cli::printHelpSection("Calibration");
+  cli::printHelpItem("cal [N]", "Calibrate accel+gyro at rest (Z-up, default 100 samples)");
+  cli::printHelpItem("calxl [N]", "Calibrate accel only (Z-up, default 100 samples)");
+  cli::printHelpItem("calg [N]", "Calibrate gyro only (stationary, default 100 samples)");
+  cli::printHelpItem("biasxl [x y z]", "Get/set accel software bias (g)");
+  cli::printHelpItem("biasg [x y z]", "Get/set gyro software bias (dps)");
+  cli::printHelpItem("biasreset", "Clear all software biases to zero");
 
-  helpSection("Diagnostics");
-  helpItem("probe", "Probe WHO_AM_I without health tracking");
-  helpItem("recover", "Retry initialization/recovery");
-  helpItem("whoami", "Read WHO_AM_I register");
-  helpItem("wusrc", "Read WAKE_UP_SRC");
-  helpItem("tapsrc", "Read TAP_SRC");
-  helpItem("6dsrc", "Read D6D_SRC");
-  helpItem("funcsrc1", "Read FUNC_SRC1");
-  helpItem("funcsrc2", "Read FUNC_SRC2");
-  helpItem("wtstatus", "Read WRIST_TILT_IA");
-  helpItem("selftest", "Run accelerometer and gyroscope self-test");
-  helpItem("stress [N]", "Async converted-sample stress test");
-  helpItem("stress_mix [N]", "Blocking mixed-operation stress test");
+  cli::printHelpSection("Diagnostics");
+  cli::printHelpItem("probe", "Probe WHO_AM_I without health tracking");
+  cli::printHelpItem("recover", "Retry initialization/recovery");
+  cli::printHelpItem("whoami / id", "Read WHO_AM_I register");
+  cli::printHelpItem("wusrc", "Read WAKE_UP_SRC");
+  cli::printHelpItem("tapsrc", "Read TAP_SRC");
+  cli::printHelpItem("6dsrc", "Read D6D_SRC");
+  cli::printHelpItem("funcsrc1", "Read FUNC_SRC1");
+  cli::printHelpItem("funcsrc2", "Read FUNC_SRC2");
+  cli::printHelpItem("wtstatus", "Read WRIST_TILT_IA");
+  cli::printHelpItem("shub [N]", "Read SENSORHUB1..12 output bytes");
+  cli::printHelpItem("selftest", "Run accelerometer and gyroscope self-test");
+  cli::printHelpItem("stress [N]", "ODR-paced converted-sample stress test");
+  cli::printHelpItem("stress_mix [N]", "Blocking mixed-operation stress test");
 
-  helpSection("Registers");
-  helpItem("rreg <addr>", "Read register byte (reserved 0x43-0x48 blocked)");
-  helpItem("wreg <addr> <val>", "Write register byte and refresh cache when needed");
-  helpItem("dump [addr len]", "Hex dump register range outside 0x43-0x48");
+  cli::printHelpSection("Registers");
+  cli::printHelpItem("rreg <addr>", "Read register byte (reserved 0x43-0x48 blocked)");
+  cli::printHelpItem("wreg <addr> <val>", "Write register byte and refresh cache when needed");
+  cli::printHelpItem("dump [addr len]", "Hex dump register range outside 0x43-0x48");
 }
 
 void processCommand(const String& line) {
@@ -1271,6 +1610,16 @@ void processCommand(const String& line) {
     printVersionInfo();
   } else if (cmd == "scan") {
     bus_diag::scan();
+  } else if (cmd == "begin") {
+    LOGI("Initializing LSM6DS3TR-C...");
+    continuousMode = false;
+    pendingRead = false;
+    device.end();
+    const LSM6DS3TR::Status st = device.begin(makeDefaultConfig());
+    printStatus(st);
+    if (st.ok()) {
+      printDriverHealth();
+    }
   } else if (cmd == "drv") {
     printDriverHealth();
   } else if (cmd == "drv1") {
@@ -1317,14 +1666,14 @@ void processCommand(const String& line) {
     if (!st.ok()) { printStatus(st); return; }
     Serial.printf("Temp: %.2f C (raw: %d)\n", device.convertTemperature(raw), raw);
   } else if (cmd == "status") {
-    uint8_t statusReg = 0;
-    const LSM6DS3TR::Status st = device.readStatusReg(statusReg);
+    LSM6DS3TR::StatusReg statusReg;
+    const LSM6DS3TR::Status st = device.readStatus(statusReg);
     if (!st.ok()) { printStatus(st); return; }
     Serial.printf("  STATUS_REG = 0x%02X (XLDA=%d GDA=%d TDA=%d)\n",
-                  statusReg,
-                  (statusReg & LSM6DS3TR::cmd::MASK_XLDA) ? 1 : 0,
-                  (statusReg & LSM6DS3TR::cmd::MASK_GDA) ? 1 : 0,
-                  (statusReg & LSM6DS3TR::cmd::MASK_TDA) ? 1 : 0);
+                  statusReg.raw,
+                  statusReg.accelDataReady ? 1 : 0,
+                  statusReg.gyroDataReady ? 1 : 0,
+                  statusReg.tempDataReady ? 1 : 0);
   } else if (cmd == "tsread") {
     uint32_t timestamp = 0;
     const LSM6DS3TR::Status st = device.readTimestamp(timestamp);
@@ -1333,12 +1682,34 @@ void processCommand(const String& line) {
   } else if (cmd == "steps") {
     uint16_t counter = 0;
     uint16_t stepTimestamp = 0;
-    LSM6DS3TR::Status st = device.readStepCounter(counter);
+    bool pedometer = false;
+    LSM6DS3TR::Odr odrXl = LSM6DS3TR::Odr::POWER_DOWN;
+    LSM6DS3TR::Status st = device.getPedometerEnabled(pedometer);
+    if (!st.ok()) { printStatus(st); return; }
+    st = device.getAccelOdr(odrXl);
+    if (!st.ok()) { printStatus(st); return; }
+    st = device.readStepCounter(counter);
     if (!st.ok()) { printStatus(st); return; }
     st = device.readStepTimestamp(stepTimestamp);
     if (!st.ok()) { printStatus(st); return; }
+    uint8_t funcSrc1 = 0;
+    st = device.readFunctionSource1(funcSrc1);
+    if (!st.ok()) { printStatus(st); return; }
+    Serial.printf("  Pedometer: %s\n", log_bool_str(pedometer));
+    Serial.printf("  Accel ODR: %s\n", odrToStr(odrXl));
     Serial.printf("  Steps: %u\n", counter);
     Serial.printf("  Step timestamp: %u\n", stepTimestamp);
+    Serial.printf("  FUNC_SRC1: 0x%02X\n", funcSrc1);
+    printSideFlag("step detected", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_DETECTED) != 0);
+    printSideFlag("step delta", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_COUNT_DELTA_IA) != 0);
+    printSideFlag("step overflow", (funcSrc1 & LSM6DS3TR::cmd::MASK_STEP_OVERFLOW) != 0);
+    if (!pedometer) {
+      Serial.println("  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.");
+    } else if (!isAccelOdrAtLeast26Hz(odrXl)) {
+      Serial.println("  Note: pedometer requires accel ODR >= 26 Hz.");
+    } else if (counter == 0U) {
+      Serial.println("  Note: default debounce can require several consecutive real steps before the counter increments.");
+    }
   } else if (cmd == "fifo") {
     LSM6DS3TR::FifoConfig fifo;
     LSM6DS3TR::FifoStatus status;
@@ -1352,6 +1723,9 @@ void processCommand(const String& line) {
     Serial.printf("  Threshold: %u\n", fifo.threshold);
     Serial.printf("  Unread words: %u\n", status.unreadWords);
     Serial.printf("  Pattern: %u\n", status.pattern);
+    Serial.printf("  Watermark: %s\n", log_bool_str(status.watermark));
+    Serial.printf("  Overrun: %s\n", log_bool_str(status.overrun));
+    Serial.printf("  Full smart: %s\n", log_bool_str(status.fullSmart));
     Serial.printf("  Empty: %s\n", log_bool_str(status.empty));
   } else if (cmd == "fifo_read") {
     int countToRead = 1;
@@ -1389,11 +1763,17 @@ void processCommand(const String& line) {
     Serial.println("  Health changes:");
     printHealthDiff(before, after);
     printDriverHealth();
-  } else if (cmd == "whoami") {
+  } else if (cmd == "whoami" || cmd == "id") {
     uint8_t id = 0;
     const LSM6DS3TR::Status st = device.readWhoAmI(id);
     if (!st.ok()) { printStatus(st); return; }
-    Serial.printf("  WHO_AM_I = 0x%02X\n", id);
+    const bool match = id == LSM6DS3TR::cmd::WHO_AM_I_VALUE;
+    Serial.printf("  WHO_AM_I = 0x%02X expected=0x%02X match=%s%s%s\n",
+                  id,
+                  LSM6DS3TR::cmd::WHO_AM_I_VALUE,
+                  cli::yesNoColor(match),
+                  match ? "YES" : "NO",
+                  LOG_COLOR_RESET);
   } else if (cmd == "wusrc" || cmd == "tapsrc" || cmd == "6dsrc" ||
              cmd == "funcsrc1" || cmd == "funcsrc2" || cmd == "wtstatus") {
     uint8_t value = 0;
@@ -1406,6 +1786,25 @@ void processCommand(const String& line) {
     else st = device.readWristTiltStatus(value);
     if (!st.ok()) { printStatus(st); return; }
     printRegisterValue(cmd.c_str(), value);
+    if (cmd == "funcsrc1") {
+      printFunctionSource1Details(value);
+    } else if (cmd == "funcsrc2") {
+      printFunctionSource2Details(value);
+    } else if (cmd == "wtstatus") {
+      printWristTiltDetails(value);
+    }
+  } else if (cmd == "shub") {
+    unsigned long countToRead = 12UL;
+    if (count >= 2) {
+      if (count < 2 || !parseUnsignedToken(tokens[1], 12UL, countToRead) || countToRead == 0UL) {
+        Serial.println("  Expected shub [1..12]");
+        return;
+      }
+    }
+    LSM6DS3TR::SensorHubData data;
+    const LSM6DS3TR::Status st = device.readSensorHub(data, static_cast<uint8_t>(countToRead));
+    if (!st.ok()) { printStatus(st); return; }
+    printHexDump(LSM6DS3TR::cmd::REG_SENSORHUB1, data.bytes, data.count);
   } else if (cmd == "stream") {
     continuousMode = !continuousMode;
     Serial.printf("  Continuous output: %s\n", continuousMode ? "ON (send 'stream' to stop)" : "OFF");
@@ -1489,21 +1888,7 @@ void processCommand(const String& line) {
       }
       sampleCount = static_cast<int>(parsed);
     }
-    resetStressStats(sampleCount);
-    stressRemaining = sampleCount;
-    const LSM6DS3TR::Status st = scheduleMeasurement();
-    if (!st.inProgress() && !st.ok()) {
-      noteStressError(st);
-      stressStats.attempts++;
-      stressRemaining--;
-      printStressProgress(static_cast<uint32_t>(stressStats.attempts),
-                          static_cast<uint32_t>(stressStats.target),
-                          static_cast<uint32_t>(stressStats.success),
-                          stressStats.errors);
-      if (stressRemaining == 0) {
-        finishStressStats();
-      }
-    }
+    runStressOdrPaced(sampleCount);
   } else if (cmd == "stress_mix") {
     int sampleCount = DEFAULT_STRESS_COUNT;
     if (count >= 2) {
@@ -1551,7 +1936,24 @@ void processCommand(const String& line) {
           Serial.println("  Invalid ODR token");
           return;
         }
-        st = (cmd == "odrxl") ? device.setAccelOdr(odr) : device.setGyroOdr(odr);
+        if (cmd == "odrxl") {
+          if (isAccelLowPowerOnlyOdr(odr)) {
+            st = device.setAccelOdr(LSM6DS3TR::Odr::HZ_208);
+            if (st.ok()) {
+              st = device.setAccelPowerMode(LSM6DS3TR::AccelPowerMode::LOW_POWER_NORMAL);
+            }
+          } else if (isAccelHighPerformanceOnlyOdr(odr)) {
+            st = device.setAccelOdr(LSM6DS3TR::Odr::HZ_208);
+            if (st.ok()) {
+              st = device.setAccelPowerMode(LSM6DS3TR::AccelPowerMode::HIGH_PERFORMANCE);
+            }
+          }
+          if (st.ok()) {
+            st = device.setAccelOdr(odr);
+          }
+        } else {
+          st = device.setGyroOdr(odr);
+        }
       }
     } else if (cmd == "fsxl" || cmd == "fsg") {
       if (count == 1) {
@@ -1584,11 +1986,11 @@ void processCommand(const String& line) {
         if (cmd == "apm") {
           LSM6DS3TR::AccelPowerMode mode;
           st = device.getAccelPowerMode(mode);
-          if (st.ok()) Serial.printf("  Accel power: %s\n", accelPowerModeToStr(mode));
+          if (st.ok()) Serial.printf("  apm: %s\n", accelPowerModeToStr(mode));
         } else {
           LSM6DS3TR::GyroPowerMode mode;
           st = device.getGyroPowerMode(mode);
-          if (st.ok()) Serial.printf("  Gyro power: %s\n", gyroPowerModeToStr(mode));
+          if (st.ok()) Serial.printf("  gpm: %s\n", gyroPowerModeToStr(mode));
         }
       } else if (cmd == "apm") {
         LSM6DS3TR::AccelPowerMode mode;
@@ -1750,7 +2152,7 @@ void processCommand(const String& line) {
         }
       }
     }
-    if (!st.ok()) {
+    if (count > 1 || !st.ok()) {
       printStatus(st);
     }
   } else if (cmd == "rreg" || cmd == "wreg" || cmd == "dump") {
@@ -1805,21 +2207,7 @@ void setup() {
   LOGI("I2C initialized (SDA=%d, SCL=%d)", board::I2C_SDA, board::I2C_SCL);
   bus_diag::scan();
 
-  LSM6DS3TR::Config cfg;
-  cfg.i2cWrite = transport_adapter::wireWrite;
-  cfg.i2cWriteRead = transport_adapter::wireWriteRead;
-  cfg.i2cUser = &Wire;
-  cfg.i2cAddress = 0x6A;
-  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
-  cfg.nowMs = exampleNowMs;
-  cfg.offlineThreshold = 5;
-  cfg.odrXl = LSM6DS3TR::Odr::HZ_104;
-  cfg.odrG = LSM6DS3TR::Odr::HZ_104;
-  cfg.fsXl = LSM6DS3TR::AccelFs::G_2;
-  cfg.fsG = LSM6DS3TR::GyroFs::DPS_250;
-  cfg.bdu = true;
-
-  const LSM6DS3TR::Status st = device.begin(cfg);
+  const LSM6DS3TR::Status st = device.begin(makeDefaultConfig());
   if (!st.ok()) {
     LOGE("Device initialization failed; CLI remains available for probe/recover");
     printStatus(st);
@@ -1830,7 +2218,7 @@ void setup() {
 
   Serial.println();
   Serial.println("Type 'help' for commands");
-  Serial.print("> ");
+  cli::printPrompt();
 }
 
 void loop() {
@@ -1839,12 +2227,7 @@ void loop() {
   if (stressStats.active && stressRemaining > 0 && !pendingRead) {
     const LSM6DS3TR::Status st = scheduleMeasurement();
     if (!st.inProgress() && !st.ok()) {
-      noteStressError(st);
-      stressStats.attempts++;
-      stressRemaining--;
-      if (stressRemaining == 0) {
-        finishStressStats();
-      }
+      failStressStart(st);
     }
   }
 
@@ -1864,7 +2247,8 @@ void loop() {
 
   String line;
   if (cli_shell::readLine(line)) {
+    Serial.println();
     processCommand(line);
-    Serial.print("> ");
+    cli::printPrompt();
   }
 }

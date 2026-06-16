@@ -37,13 +37,22 @@ inline LSM6DS3TR::Status mapWireResult(uint8_t result, const char* context) {
   }
 }
 
+inline void applyTimeout(TwoWire& wire, uint32_t timeoutMs) {
+#if defined(ARDUINO_ARCH_ESP32)
+  if (timeoutMs > 0U && timeoutMs <= UINT16_MAX) {
+    wire.setTimeOut(static_cast<uint16_t>(timeoutMs));
+  }
+#else
+  (void)wire;
+  (void)timeoutMs;
+#endif
+}
+
 /**
  * @brief Wire-based I2C write implementation.
  */
 inline LSM6DS3TR::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
                                    uint32_t timeoutMs, void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_CONFIG, "Wire instance is null");
@@ -56,6 +65,7 @@ inline LSM6DS3TR::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
                                     static_cast<int32_t>(len));
   }
 
+  applyTimeout(*wire, timeoutMs);
   wire->beginTransmission(addr);
   size_t written = wire->write(data, len);
   if (written != len) {
@@ -73,8 +83,6 @@ inline LSM6DS3TR::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
 inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
                                        uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
                                        void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_CONFIG, "Wire instance is null");
@@ -89,6 +97,7 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
     return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "I2C read exceeds buffer");
   }
 
+  applyTimeout(*wire, timeoutMs);
   wire->beginTransmission(addr);
   size_t written = wire->write(tx, txLen);
   if (written != txLen) {

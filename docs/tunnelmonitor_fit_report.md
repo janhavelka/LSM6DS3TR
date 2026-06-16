@@ -46,9 +46,11 @@
   status (`I2C_TIMEOUT`, `I2C_BUS`, `I2C_NACK_ADDR`, `I2C_NACK_DATA`, or
   `I2C_ERROR`) and `detail`. Only a successful read with the wrong ID returns
   `CHIP_ID_MISMATCH`.
-- `Err::OFFLINE` is appended for explicit offline precondition failures. The current
-  explicit offline path is `requestMeasurement()`, which now returns `OFFLINE`
-  instead of overloading `BUSY`.
+- `Err::OFFLINE` is appended for diagnostics, but normal public I2C precondition
+  failures keep the existing family choice and return `BUSY` with
+  "Driver is offline; call recover()". This preserves the synced offline/recovery
+  contract while making the offline state explicit through `driverState()` and
+  `SettingsSnapshot::state`.
 - Cache-affecting setters commit local mirrors only after successful writes. Partial
   multi-register failures and failed direct writes to managed registers set
   `cachedConfigDirty()`, signalling that the application should refresh or recover

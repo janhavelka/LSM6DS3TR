@@ -210,14 +210,13 @@ static constexpr uint8_t MASK_LOW_PASS_ON_6D = 0x01;
 
 // CTRL10_C
 static constexpr uint8_t BIT_WRIST_TILT_EN = 7;
-static constexpr uint8_t BIT_TIMER_EN = 6;
-static constexpr uint8_t BIT_PEDO_EN = 5;
-static constexpr uint8_t BIT_TILT_EN = 4;
-static constexpr uint8_t BIT_FUNC_EN = 3;
-static constexpr uint8_t BIT_PEDO_RST_STEP = 2;
-static constexpr uint8_t BIT_SIGN_MOTION_EN = 1;
-static constexpr uint8_t BIT_MASTER_ON = 0;
-static constexpr uint8_t MASK_FUNC_EN = 0x08;
+static constexpr uint8_t BIT_TIMER_EN = 5;
+static constexpr uint8_t BIT_PEDO_EN = 4;
+static constexpr uint8_t BIT_TILT_EN = 3;
+static constexpr uint8_t BIT_FUNC_EN = 2;
+static constexpr uint8_t BIT_PEDO_RST_STEP = 1;
+static constexpr uint8_t BIT_SIGN_MOTION_EN = 0;
+static constexpr uint8_t MASK_FUNC_EN = 0x04;
 
 // STATUS_REG
 static constexpr uint8_t BIT_TDA = 2;
@@ -298,6 +297,31 @@ static constexpr uint8_t MASK_WU_IA = 0x08;
 static constexpr uint8_t MASK_X_WU = 0x04;
 static constexpr uint8_t MASK_Y_WU = 0x02;
 static constexpr uint8_t MASK_Z_WU = 0x01;
+
+// FUNC_SRC1
+static constexpr uint8_t MASK_STEP_COUNT_DELTA_IA = 0x80;
+static constexpr uint8_t MASK_SIGN_MOTION_IA = 0x40;
+static constexpr uint8_t MASK_TILT_IA = 0x20;
+static constexpr uint8_t MASK_STEP_DETECTED = 0x10;
+static constexpr uint8_t MASK_STEP_OVERFLOW = 0x08;
+static constexpr uint8_t MASK_HI_FAIL = 0x04;
+static constexpr uint8_t MASK_SI_END_OP = 0x02;
+static constexpr uint8_t MASK_SENSORHUB_END_OP = 0x01;
+
+// FUNC_SRC2
+static constexpr uint8_t MASK_SLAVE3_NACK = 0x80;
+static constexpr uint8_t MASK_SLAVE2_NACK = 0x40;
+static constexpr uint8_t MASK_SLAVE1_NACK = 0x20;
+static constexpr uint8_t MASK_SLAVE0_NACK = 0x10;
+static constexpr uint8_t MASK_WRIST_TILT_IA = 0x08;
+
+// WRIST_TILT_IA
+static constexpr uint8_t MASK_WRIST_TILT_XPOS = 0x80;
+static constexpr uint8_t MASK_WRIST_TILT_XNEG = 0x40;
+static constexpr uint8_t MASK_WRIST_TILT_YPOS = 0x20;
+static constexpr uint8_t MASK_WRIST_TILT_YNEG = 0x10;
+static constexpr uint8_t MASK_WRIST_TILT_ZPOS = 0x08;
+static constexpr uint8_t MASK_WRIST_TILT_ZNEG = 0x04;
 
 // Timestamp reset
 static constexpr uint8_t TIMESTAMP_RESET_VALUE = 0xAA;

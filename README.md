@@ -1,12 +1,13 @@
 # LSM6DS3TR-C Driver Library
 
-Production-grade LSM6DS3TR-C 6-axis IMU driver for ESP32-S2 / ESP32-S3 using the Arduino framework and PlatformIO.
+Production-grade LSM6DS3TR-C 6-axis IMU driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO or ESP-IDF.
 
 ## Overview
 
 This library follows the same managed synchronous pattern used by the stronger I2C libraries in this workspace:
 
 - injected I2C transport, no direct `Wire` dependency in library code
+- framework-neutral core with Arduino and ESP-IDF application-owned transports
 - explicit `Status` return values on every fallible operation
 - 4-state health tracking: `UNINIT`, `READY`, `DEGRADED`, `OFFLINE`
 - deterministic library behavior with bounded polling only
@@ -16,8 +17,8 @@ This library follows the same managed synchronous pattern used by the stronger I
 The implementation is cross-checked against the repository's device documentation:
 
 - [LSM6DS3TR_imu_implementation_manual.md](LSM6DS3TR_imu_implementation_manual.md)
-- [docs/datasheet_LSM6DS3TR-C.pdf](docs/datasheet_LSM6DS3TR-C.pdf)
-- [docs/application_note.pdf](docs/application_note.pdf)
+- [docs/LSM6DS3TR-C_datasheet.pdf](docs/LSM6DS3TR-C_datasheet.pdf)
+- [docs/LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf](docs/LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf)
 
 ## Managed Feature Coverage
 
@@ -34,6 +35,8 @@ The managed API covers the most practical runtime features of the chip:
 - timestamp enable, high-resolution mode, read, and reset
 - pedometer, significant motion, tilt, and wrist tilt enable
 - step counter read/reset and step timestamp read
+- decoded source-register constants for step, significant-motion, tilt, wrist-tilt,
+  sensor-hub, and slave-NACK diagnostics
 - accelerometer user offsets and offset weight selection
 - software bias calibration for accel (1-point, Z-up) and gyro (zero-rate-level) with at-rest capture
 - automatic bias correction in `getMeasurement()`; manual helpers `correctAccel()` / `correctGyro()`
@@ -42,7 +45,10 @@ The managed API covers the most practical runtime features of the chip:
 - direct single-register and block register access for advanced diagnostics
 - source register reads for wake-up, tap, 6D, embedded function, and wrist-tilt status
 
-Advanced interrupt routing, threshold tuning, tap/wake/free-fall configuration, and sensor-hub flows remain available through the raw register APIs and the CLI register commands rather than dedicated managed wrappers.
+Advanced interrupt routing, threshold tuning, tap/wake/free-fall configuration,
+and deeper sensor-hub setup remain available through the raw register APIs and
+the CLI register commands. Basic sensor-hub output readback is available through
+`SensorHubData` and `readSensorHub()`.
 
 ## Important Runtime Rules
 
@@ -54,8 +60,21 @@ The driver enforces several device constraints from the datasheet and applicatio
 - gyroscope `1.6 Hz` is rejected
 - embedded functions require accelerometer ODR `>= 26 Hz`
 - timestamp requires at least one active sensor
+- pedometer step events are short pulses unless interrupt latching/routing is
+  configured; the step counter is the durable pedometer readback
 - FIFO configuration requires BDU enabled
 - async combined measurements require BDU and matching active accel/gyro ODR
+- managed setters validate enum values before I2C and keep cached state unchanged if a write fails
+- `Config::offlineThreshold = 0` is normalized to one; failed `begin()` clears
+  cached config, feature flags, samples, and health before validation.
+- software-reset, boot, and calibration waits use bounded polling; transport failures during raw reset/boot polling are recorded in driver health
+
+## Thread, ISR, And Recovery Model
+
+- The driver is single-threaded: call public APIs from one task or loop context, or serialize access externally.
+- Do not call I2C-backed APIs from ISRs. Use an interrupt only to set an application flag, then call the driver from normal task context.
+- `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch the bus.
+- `probe()` remains a raw diagnostic check and does not update health counters. `recover()`, `softReset()`, and `boot()` are explicit recovery/reset paths and may access I2C while offline.
 
 ## Installation
 
@@ -69,6 +88,14 @@ lib_deps =
 ### Manual
 
 Copy [include/LSM6DS3TR](include/LSM6DS3TR) and [src](src) into your project.
+
+### ESP-IDF
+
+Use this repository as an ESP-IDF component with `EXTRA_COMPONENT_DIRS` or the
+ESP Component Registry metadata in `idf_component.yml`. The component builds
+only [src/LSM6DS3TR.cpp](src/LSM6DS3TR.cpp) and public headers. Applications
+own the I2C bus and provide `Config::i2cWrite`, `Config::i2cWriteRead`, and
+optionally `Config::nowMs`.
 
 ## Quick Start
 
@@ -158,20 +185,35 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 - full managed configuration coverage for ODR, full-scale, power modes, filters, timestamp, embedded functions, offsets, and FIFO
 - register read, write, and dump commands for advanced tuning
 - source-register inspection commands
-- async stress and mixed-operation stress commands
+- ODR-paced independent data-ready stress and mixed-operation stress commands
 - hardware self-test flow for accelerometer and gyroscope
 - software bias calibration and continuous streaming mode with one line per sample
 - converted CLI sample reads (`read`, `accel`, `gyro`, `stream`) that respect the currently configured software bias values
+- decoded `status` output, expanded FIFO flags, `begin`, `whoami` / `id`, and
+  `shub [1..12]` for sensor-hub output bytes
+
+## ESP-IDF Example
+
+[examples/idf/basic](examples/idf/basic) is a native ESP-IDF project with
+`app_main()`, fixed-buffer CLI input, and `driver/i2c_master.h` callbacks. It
+does not compile Arduino sources or provide Arduino compatibility facades. The
+driver core remains framework-neutral and receives transport/timing callbacks
+through `Config`.
 
 Representative commands:
 
 ```text
 probe
 cfg
+status
+whoami
+shub 12
 odrxl 104
 gpm lpn
 ts 1
 pedo 1
+steps
+funcsrc1
 offset -4 7 12
 cal 200
 biasxl
@@ -184,6 +226,8 @@ rreg 0x10
 wreg 0x58 0x8E
 dump 0x10 32
 selftest
+stress 100
+stress_mix 100
 ```
 
 ## Example Helpers
@@ -210,6 +254,8 @@ Use the raw register APIs when you need chip features that are intentionally lef
 - `readRegisterBlock()`
 - `refreshCachedConfig()`
 - `cachedConfigDirty()`
+
+Public raw access is limited to the main user-register window through `Z_OFS_USR`; zero-length, oversized, and wrapping block reads are rejected before the bus is touched. Writes to managed configuration registers refresh the cached configuration after the write succeeds.
 
 This is the intended path for interrupt routing, threshold registers, advanced tap/wake/free-fall setup, and sensor-hub experimentation.
 If a cache-affecting write or refresh fails, `cachedConfigDirty()` reports that local configuration mirrors may not match the chip until `refreshCachedConfig()` or `recover()` succeeds.
@@ -238,6 +284,20 @@ one `poll()` call when data is ready.
 
 See [docs/tunnelmonitor_fit_report.md](docs/tunnelmonitor_fit_report.md) for the API classification and status taxonomy decisions used when integrating behind a queue-owned I2C task.
 
+## Diagnostics And Snapshots
+
+Cache-only diagnostics include `SettingsSnapshot`, `getSettings()`,
+`settings()`, `driverState()`, `hasSample()`, `sampleTimestampMs()`, and
+`sampleAgeMs(nowMs)`. `StatusReg` and `readStatus(StatusReg&)` expose decoded
+accelerometer, gyroscope, and temperature data-ready flags without requiring
+callers to decode `STATUS_REG` manually.
+
+The bring-up CLI also decodes `FUNC_SRC1`, `FUNC_SRC2`, and `WRIST_TILT_IA`.
+`steps` prints pedometer enable state, accelerometer ODR, the step counter,
+step timestamp, and the relevant `FUNC_SRC1` step flags. A zero `FUNC_SRC1`
+with a changing step counter is valid: without latched/routed interrupts, step
+source bits can clear before a manual CLI read observes them.
+
 ## Building And Validation
 
 ```bash
@@ -246,6 +306,17 @@ pio run -e esp32s3dev
 pio run -e esp32s2dev
 python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
+```
+
+When ESP-IDF is installed, build the IDF example from
+[examples/idf/basic](examples/idf/basic):
+
+```bash
+idf.py set-target esp32s3
+idf.py build
+idf.py set-target esp32s2
+idf.py build
 ```
 
 ## Repository Notes
@@ -255,3 +326,4 @@ python tools/check_cli_contract.py
 - Version metadata is generated into [include/LSM6DS3TR/Version.h](include/LSM6DS3TR/Version.h) from [library.json](library.json)
 - `examples/common` is not installed as part of the library
 - The library never configures I2C pins or owns the bus
+- ESP-IDF I2C setup and GPIO choices live in examples/application code only
