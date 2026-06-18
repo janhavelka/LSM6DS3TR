@@ -67,7 +67,7 @@ The driver enforces several device constraints from the datasheet and applicatio
 - managed setters validate enum values before I2C and keep cached state unchanged if a write fails
 - `Config::offlineThreshold = 0` is normalized to one; failed `begin()` clears
   cached config, feature flags, samples, and health before validation.
-- software-reset, boot, and calibration waits use bounded polling; transport failures during raw reset/boot polling are recorded in driver health
+- software-reset, boot, and calibration waits use bounded polling; reset/boot timeouts and transport failures during raw polling are recorded in driver health
 
 ## Thread, ISR, And Recovery Model
 
@@ -307,6 +307,7 @@ pio run -e esp32s2dev
 python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
+python tools/hil_smoke.py --dry-run --parser-self-test
 ```
 
 When ESP-IDF is installed, build the IDF example from
@@ -318,6 +319,17 @@ idf.py build
 idf.py set-target esp32s2
 idf.py build
 ```
+
+## Hardware-In-Loop Smoke
+
+`tools/hil_smoke.py` drives the maintained serial CLI; it does not add fake devices or simulated buses to production paths. The default command set covers `version`, `scan`, `probe`, `settings`, `health`, `whoami`, `status`, `raw`, `fifo`, and `selftest`.
+
+```bash
+python tools/hil_smoke.py --dry-run --parser-self-test
+python tools/hil_smoke.py --port COM7
+```
+
+The runner classifies visible status/error tokens such as `I2C_TIMEOUT`, `I2C_NACK_ADDR`, `DEVICE_NOT_FOUND`, `CHIP_ID_MISMATCH`, `SELF_TEST_FAIL`, `FIFO_EMPTY`, and `OFFLINE`. A live self-test still requires a suitable stationary fixture before making field-readiness claims.
 
 ## Repository Notes
 

@@ -38,14 +38,11 @@ inline LSM6DS3TR::Status mapWireResult(uint8_t result, const char* context) {
 }
 
 inline void applyTimeout(TwoWire& wire, uint32_t timeoutMs) {
-#if defined(ARDUINO_ARCH_ESP32)
-  if (timeoutMs > 0U && timeoutMs <= UINT16_MAX) {
-    wire.setTimeOut(static_cast<uint16_t>(timeoutMs));
+  if (timeoutMs > 0U) {
+    const uint16_t boundedTimeout =
+        timeoutMs > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(timeoutMs);
+    wire.setTimeOut(boundedTimeout);
   }
-#else
-  (void)wire;
-  (void)timeoutMs;
-#endif
 }
 
 /**

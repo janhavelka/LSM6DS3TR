@@ -2,6 +2,7 @@
 /// @brief Native ESP-IDF bring-up CLI for LSM6DS3TR-C.
 
 #include <cctype>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -24,6 +25,9 @@ constexpr uint8_t I2C_ADDRESS = 0x6A;
 constexpr uint32_t I2C_FREQ_HZ = 400000;
 constexpr uint32_t I2C_TIMEOUT_MS = 50;
 constexpr size_t INPUT_MAX = 160;
+constexpr uint32_t FIFO_READ_MAX = 256;
+constexpr uint32_t STRESS_COUNT_MAX = 10000;
+constexpr uint16_t CALIBRATION_SAMPLE_MAX = 10000;
 
 struct I2cContext {
   i2c_master_bus_handle_t bus = nullptr;
@@ -35,6 +39,10 @@ LSM6DS3TR::LSM6DS3TR device;
 I2cContext i2c;
 bool verboseMode = false;
 bool streamMode = false;
+
+bool timeReached(uint32_t now, uint32_t deadline) {
+  return static_cast<int32_t>(now - deadline) >= 0;
+}
 
 uint32_t nowMs(void*) {
   return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
@@ -117,6 +125,7 @@ const char* errToStr(LSM6DS3TR::Err err) {
     case LSM6DS3TR::Err::I2C_TIMEOUT: return "I2C_TIMEOUT";
     case LSM6DS3TR::Err::I2C_BUS: return "I2C_BUS";
     case LSM6DS3TR::Err::FIFO_EMPTY: return "FIFO_EMPTY";
+    case LSM6DS3TR::Err::OFFLINE: return "OFFLINE";
     default: return "UNKNOWN";
   }
 }
@@ -145,19 +154,45 @@ char* nextToken(char** save) {
 
 bool parseU32(const char* text, uint32_t& out) {
   if (text == nullptr || text[0] == '\0') return false;
+  if (text[0] == '-') return false;
+  errno = 0;
   char* end = nullptr;
   const unsigned long value = strtoul(text, &end, 0);
   if (end == text || *end != '\0') return false;
+  if (errno == ERANGE || value > std::numeric_limits<uint32_t>::max()) return false;
   out = static_cast<uint32_t>(value);
+  return true;
+}
+
+bool parseU32Range(const char* text, uint32_t minValue, uint32_t maxValue, uint32_t& out) {
+  uint32_t value = 0;
+  if (!parseU32(text, value)) return false;
+  if (value < minValue || value > maxValue) return false;
+  out = value;
   return true;
 }
 
 bool parseI32(const char* text, int32_t& out) {
   if (text == nullptr || text[0] == '\0') return false;
+  errno = 0;
   char* end = nullptr;
   const long value = strtol(text, &end, 0);
   if (end == text || *end != '\0') return false;
+  if (errno == ERANGE || value < std::numeric_limits<int32_t>::min() ||
+      value > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
   out = static_cast<int32_t>(value);
+  return true;
+}
+
+bool parseFloat(const char* text, float& out) {
+  if (text == nullptr || text[0] == '\0') return false;
+  errno = 0;
+  char* end = nullptr;
+  const float value = strtof(text, &end);
+  if (end == text || *end != '\0' || errno == ERANGE) return false;
+  out = value;
   return true;
 }
 
@@ -182,7 +217,7 @@ void lowerInPlace(char* text) {
 
 void printHelp() {
   puts("\n=== LSM6DS3TR native ESP-IDF CLI ===");
-  puts("Common: help ? version ver scan begin init drv drv1 cfg settings refresh verbose <0|1>");
+  puts("Common: help ? version ver scan begin init drv health drv1 cfg settings refresh verbose <0|1>");
   puts("Data: read raw accel gyro temp status tsread steps fifo fifo_read <n> stream");
   puts("Config: odrxl <n> odrg <n> fsxl <2|4|8|16> fsg <125|250|500|1000|2000>");
   puts("Power/filter: apm <hp|lpn> gpm <hp|lpn> gsleep <0|1> alpf2 <0|1> aslope <0|1>");
@@ -237,9 +272,10 @@ void scanI2c() {
 
 void printSettings() {
   LSM6DS3TR::SettingsSnapshot s = device.settings();
-  printf("Settings: init=%s state=%s addr=0x%02X timeout=%lu threshold=%u pending=%s ready=%s hasSample=%s age=%lu\n",
+  printf("Settings: init=%s state=%s addr=0x%02X timeout=%lu threshold=%u dirty=%s pending=%s ready=%s hasSample=%s age=%lu\n",
          s.initialized ? "yes" : "no", stateToStr(s.state), s.i2cAddress,
          static_cast<unsigned long>(s.i2cTimeoutMs), static_cast<unsigned>(s.offlineThreshold),
+         s.cachedConfigDirty ? "yes" : "no",
          s.measurementPending ? "yes" : "no", s.measurementReady ? "yes" : "no",
          s.hasSample ? "yes" : "no", static_cast<unsigned long>(device.sampleAgeMs(nowMs(nullptr))));
 }
@@ -268,15 +304,31 @@ void updateFifoField(const char* field, char* arg) {
     puts("  Expected numeric FIFO value");
     return;
   }
-  if (strcmp(field, "fifo_mode") == 0) cfg.mode = static_cast<LSM6DS3TR::FifoMode>(value);
+  if (strcmp(field, "fifo_mode") == 0) {
+    if (value > 6) { puts("  Expected fifo_mode 0..6"); return; }
+    cfg.mode = static_cast<LSM6DS3TR::FifoMode>(value);
+  }
   if (strcmp(field, "fifo_odr") == 0) cfg.odr = parseOdrValue(value);
-  if (strcmp(field, "fifo_xl") == 0) cfg.accelDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
-  if (strcmp(field, "fifo_g") == 0) cfg.gyroDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
-  if (strcmp(field, "fifo_th") == 0) cfg.threshold = static_cast<uint16_t>(value);
-  if (strcmp(field, "fifo_temp") == 0) cfg.storeTemperature = value != 0;
-  if (strcmp(field, "fifo_step") == 0) cfg.storeTimestampStep = value != 0;
-  if (strcmp(field, "fifo_stop") == 0) cfg.stopOnThreshold = value != 0;
-  if (strcmp(field, "fifo_high") == 0) cfg.onlyHighData = value != 0;
+  if (strcmp(field, "fifo_xl") == 0) {
+    if (value > 7) { puts("  Expected fifo_xl 0..7"); return; }
+    cfg.accelDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
+  }
+  if (strcmp(field, "fifo_g") == 0) {
+    if (value > 7) { puts("  Expected fifo_g 0..7"); return; }
+    cfg.gyroDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
+  }
+  if (strcmp(field, "fifo_th") == 0) {
+    if (value > 2047) { puts("  Expected fifo_th 0..2047"); return; }
+    cfg.threshold = static_cast<uint16_t>(value);
+  }
+  if (strcmp(field, "fifo_temp") == 0 || strcmp(field, "fifo_step") == 0 ||
+      strcmp(field, "fifo_stop") == 0 || strcmp(field, "fifo_high") == 0) {
+    if (value > 1) { puts("  Expected FIFO boolean 0|1"); return; }
+    if (strcmp(field, "fifo_temp") == 0) cfg.storeTemperature = value != 0;
+    if (strcmp(field, "fifo_step") == 0) cfg.storeTimestampStep = value != 0;
+    if (strcmp(field, "fifo_stop") == 0) cfg.stopOnThreshold = value != 0;
+    if (strcmp(field, "fifo_high") == 0) cfg.onlyHighData = value != 0;
+  }
   printStatus(device.configureFifo(cfg));
 }
 
@@ -311,7 +363,7 @@ void processCommand(char* line) {
     device.end();
     printStatus(device.begin(makeConfig()));
     printHealth();
-  } else if (strcmp(cmd, "drv") == 0 || strcmp(cmd, "drv1") == 0) {
+  } else if (strcmp(cmd, "drv") == 0 || strcmp(cmd, "health") == 0 || strcmp(cmd, "drv1") == 0) {
     printHealth();
   } else if (strcmp(cmd, "cfg") == 0 || strcmp(cmd, "settings") == 0) {
     printSettings();
@@ -348,7 +400,11 @@ void processCommand(char* line) {
     else printStatus(st);
   } else if (strcmp(cmd, "fifo_read") == 0) {
     uint32_t count = 1;
-    parseU32(nextToken(&save), count);
+    char* arg = nextToken(&save);
+    if (arg != nullptr && !parseU32Range(arg, 1, FIFO_READ_MAX, count)) {
+      printf("  Expected FIFO read count 1..%lu\n", static_cast<unsigned long>(FIFO_READ_MAX));
+      return;
+    }
     for (uint32_t i = 0; i < count; ++i) {
       uint16_t word = 0;
       const auto st = device.readFifoWord(word);
@@ -434,11 +490,23 @@ void processCommand(char* line) {
   } else if (strncmp(cmd, "fifo_", 5) == 0) {
     updateFifoField(cmd, nextToken(&save));
   } else if (strcmp(cmd, "cal") == 0 || strcmp(cmd, "calxl") == 0) {
-    uint32_t count = 32; parseU32(nextToken(&save), count);
+    uint32_t count = 32;
+    char* arg = nextToken(&save);
+    if (arg != nullptr && !parseU32Range(arg, 1, CALIBRATION_SAMPLE_MAX, count)) {
+      printf("  Expected calibration samples 1..%u\n",
+             static_cast<unsigned>(CALIBRATION_SAMPLE_MAX));
+      return;
+    }
     LSM6DS3TR::Axes bias; printStatus(device.captureAccelBias(static_cast<uint16_t>(count), bias));
     printf("Accel bias: %.6f %.6f %.6f\n", bias.x, bias.y, bias.z);
   } else if (strcmp(cmd, "calg") == 0) {
-    uint32_t count = 32; parseU32(nextToken(&save), count);
+    uint32_t count = 32;
+    char* arg = nextToken(&save);
+    if (arg != nullptr && !parseU32Range(arg, 1, CALIBRATION_SAMPLE_MAX, count)) {
+      printf("  Expected calibration samples 1..%u\n",
+             static_cast<unsigned>(CALIBRATION_SAMPLE_MAX));
+      return;
+    }
     LSM6DS3TR::Axes bias; printStatus(device.captureGyroBias(static_cast<uint16_t>(count), bias));
     printf("Gyro bias: %.6f %.6f %.6f\n", bias.x, bias.y, bias.z);
   } else if (strcmp(cmd, "biasxl") == 0 || strcmp(cmd, "biasg") == 0) {
@@ -447,7 +515,15 @@ void processCommand(char* line) {
       const auto bias = strcmp(cmd, "biasxl") == 0 ? device.accelBias() : device.gyroBias();
       printf("Bias: %.6f %.6f %.6f\n", bias.x, bias.y, bias.z);
     } else {
-      LSM6DS3TR::Axes bias{strtof(a, nullptr), strtof(nextToken(&save), nullptr), strtof(nextToken(&save), nullptr)};
+      float x = 0.0f;
+      float y = 0.0f;
+      float z = 0.0f;
+      if (!parseFloat(a, x) || !parseFloat(nextToken(&save), y) ||
+          !parseFloat(nextToken(&save), z)) {
+        puts("  Expected three numeric bias values");
+        return;
+      }
+      LSM6DS3TR::Axes bias{x, y, z};
       strcmp(cmd, "biasxl") == 0 ? device.setAccelBias(bias) : device.setGyroBias(bias);
     }
   } else if (strcmp(cmd, "biasreset") == 0) {
@@ -470,30 +546,57 @@ void processCommand(char* line) {
     if (strcmp(cmd, "wtstatus") == 0) st = device.readWristTiltStatus(value);
     st.ok() ? printf("%s=0x%02X\n", cmd, value) : printStatus(st);
   } else if (strcmp(cmd, "shub") == 0) {
-    uint32_t count = 12; parseU32(nextToken(&save), count);
+    uint32_t count = 12;
+    char* arg = nextToken(&save);
+    if (arg != nullptr && !parseU32Range(arg, 1, 12, count)) {
+      puts("  Expected sensor-hub byte count 1..12");
+      return;
+    }
     LSM6DS3TR::SensorHubData out; const auto st = device.readSensorHub(out, static_cast<uint8_t>(count));
     if (!st.ok()) printStatus(st);
     else for (uint8_t i = 0; i < out.count; ++i) printf("SHUB[%u]=0x%02X\n", i, out.bytes[i]);
   } else if (strcmp(cmd, "rreg") == 0) {
-    uint32_t reg = 0; if (!parseU32(nextToken(&save), reg)) return;
+    uint32_t reg = 0;
+    if (!parseU32Range(nextToken(&save), 0, LSM6DS3TR::cmd::REG_Z_OFS_USR, reg)) {
+      puts("  Expected register address 0x00..0x75");
+      return;
+    }
     uint8_t value = 0; const auto st = device.readRegisterValue(static_cast<uint8_t>(reg), value);
     st.ok() ? printf("[0x%02lX]=0x%02X\n", static_cast<unsigned long>(reg), value) : printStatus(st);
   } else if (strcmp(cmd, "wreg") == 0) {
-    uint32_t reg = 0, value = 0; if (!parseU32(nextToken(&save), reg) || !parseU32(nextToken(&save), value)) return;
+    uint32_t reg = 0, value = 0;
+    if (!parseU32Range(nextToken(&save), 0, LSM6DS3TR::cmd::REG_Z_OFS_USR, reg) ||
+        !parseU32Range(nextToken(&save), 0, 0xFF, value)) {
+      puts("  Expected register address 0x00..0x75 and value 0x00..0xFF");
+      return;
+    }
     printStatus(device.writeRegisterValue(static_cast<uint8_t>(reg), static_cast<uint8_t>(value)));
   } else if (strcmp(cmd, "dump") == 0) {
-    uint32_t start = 0, len = 32; parseU32(nextToken(&save), start); parseU32(nextToken(&save), len);
-    uint8_t data[64] = {}; if (len > sizeof(data)) len = sizeof(data);
+    uint32_t start = 0, len = 32;
+    char* startArg = nextToken(&save);
+    char* lenArg = nextToken(&save);
+    if ((startArg != nullptr &&
+         !parseU32Range(startArg, 0, LSM6DS3TR::cmd::REG_Z_OFS_USR, start)) ||
+        (lenArg != nullptr && !parseU32Range(lenArg, 1, 64, len)) ||
+        (start + len - 1U > LSM6DS3TR::cmd::REG_Z_OFS_USR)) {
+      puts("  Expected dump range within 0x00..0x75 and length 1..64");
+      return;
+    }
+    uint8_t data[64] = {};
     const auto st = device.readRegisterBlock(static_cast<uint8_t>(start), data, len);
     if (!st.ok()) printStatus(st);
     else for (uint32_t i = 0; i < len; ++i) printf("0x%02lX: 0x%02X\n", static_cast<unsigned long>(start + i), data[i]);
   } else if (strcmp(cmd, "selftest") == 0) {
-    puts("Selftest:");
+    puts("Selftest result: native ESP-IDF CLI runs probe smoke only");
     printStatus(device.probe());
     printHealth();
   } else if (strcmp(cmd, "stress") == 0 || strcmp(cmd, "stress_mix") == 0) {
     uint32_t count = strcmp(cmd, "stress_mix") == 0 ? 50 : 10;
-    parseU32(nextToken(&save), count);
+    char* arg = nextToken(&save);
+    if (arg != nullptr && !parseU32Range(arg, 1, STRESS_COUNT_MAX, count)) {
+      printf("  Expected stress count 1..%lu\n", static_cast<unsigned long>(STRESS_COUNT_MAX));
+      return;
+    }
     runStress(count);
   } else {
     printf("Unknown command: %s\n", cmd);
@@ -519,14 +622,15 @@ void configureI2c() {
 
 void cliLoop() {
   static char input[INPUT_MAX];
+  static uint32_t nextStreamMs = 0;
   size_t len = 0;
   printf("> ");
   while (true) {
-    device.tick(nowMs(nullptr));
-    if (streamMode && device.isOnline()) {
+    const uint32_t now = nowMs(nullptr);
+    device.tick(now);
+    if (streamMode && device.isOnline() && timeReached(now, nextStreamMs)) {
       printMeasurement();
-      vTaskDelay(pdMS_TO_TICKS(250));
-      continue;
+      nextStreamMs = now + 250U;
     }
 
     const int c = getchar();

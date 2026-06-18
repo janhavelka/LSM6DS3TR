@@ -122,6 +122,7 @@ const char* errToStr(LSM6DS3TR::Err err) {
     case Err::I2C_TIMEOUT:           return "I2C_TIMEOUT";
     case Err::I2C_BUS:               return "I2C_BUS";
     case Err::FIFO_EMPTY:            return "FIFO_EMPTY";
+    case Err::OFFLINE:               return "OFFLINE";
     default:                         return "UNKNOWN";
   }
 }
@@ -585,6 +586,7 @@ void printSettings() {
   Serial.printf("  I2C address:        0x%02X\n", snap.i2cAddress);
   Serial.printf("  I2C timeout:        %lu ms\n", static_cast<unsigned long>(snap.i2cTimeoutMs));
   Serial.printf("  Offline threshold:  %u\n", static_cast<unsigned>(snap.offlineThreshold));
+  Serial.printf("  Cached config dirty: %s\n", log_bool_str(snap.cachedConfigDirty));
   Serial.printf("  Measurement ready:  %s\n", log_bool_str(snap.measurementReady));
   Serial.printf("  Has sample:         %s\n", log_bool_str(snap.hasSample));
   Serial.printf("  sampleTimestampMs:  %lu\n",
@@ -1506,7 +1508,7 @@ void printHelp() {
   cli::printHelpItem("version / ver", "Print version and build metadata");
   cli::printHelpItem("scan", "Scan I2C bus");
   cli::printHelpItem("begin", "Initialize/reinitialize device");
-  cli::printHelpItem("drv", "Show driver health");
+  cli::printHelpItem("drv / health", "Show driver health");
   cli::printHelpItem("drv1", "Show one-line health view");
   cli::printHelpItem("cfg / settings", "Show current cached configuration");
   cli::printHelpItem("refresh", "Refresh cached config from device registers");
@@ -1620,7 +1622,7 @@ void processCommand(const String& line) {
     if (st.ok()) {
       printDriverHealth();
     }
-  } else if (cmd == "drv") {
+  } else if (cmd == "drv" || cmd == "health") {
     printDriverHealth();
   } else if (cmd == "drv1") {
     printHealthView(device);

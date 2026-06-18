@@ -16,6 +16,7 @@ MANDATORY_COMMANDS = [
     "begin",
     "init",
     "drv",
+    "health",
     "drv1",
     "cfg",
     "settings",
@@ -103,6 +104,11 @@ REQUIRED_IDF_TOKENS = [
     "vTaskDelay",
     "getchar()",
     "char input[",
+    "cachedConfigDirty",
+    "parseU32Range",
+    "parseFloat",
+    "FIFO_READ_MAX",
+    "STRESS_COUNT_MAX",
 ]
 
 FORBIDDEN_PATTERNS = [

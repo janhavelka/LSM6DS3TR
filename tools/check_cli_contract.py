@@ -24,6 +24,7 @@ MANDATORY_COMMANDS = [
     "probe",
     "recover",
     "drv",
+    "health",
     "read",
     "fifo",
     "tsread",
@@ -43,6 +44,10 @@ MANDATORY_COMMANDS = [
     "biasg",
     "biasreset",
     "version",
+]
+
+REQUIRED_TOKENS = [
+    "cachedConfigDirty",
 ]
 
 
@@ -79,6 +84,10 @@ def main() -> int:
     for cmd in MANDATORY_COMMANDS:
         if re.search(rf"\b{re.escape(cmd)}\b", text) is None:
             fail(f"mandatory command '{cmd}' missing in {bringup_main.as_posix()}")
+
+    for token in REQUIRED_TOKENS:
+        if token not in text:
+            fail(f"required CLI token '{token}' missing in {bringup_main.as_posix()}")
 
     if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
         fail("either 'cfg' or 'settings' command must be present")

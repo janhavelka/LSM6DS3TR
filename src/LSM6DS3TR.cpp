@@ -16,6 +16,7 @@ static constexpr size_t MAX_PUBLIC_READ_LEN = 128;
 static constexpr uint32_t RESET_TIMEOUT_MS = 25;
 static constexpr uint32_t BOOT_TIMEOUT_MS = 25;
 static constexpr uint16_t RESET_MAX_POLLS = 255;
+static constexpr uint16_t SAMPLE_READY_MAX_POLLS = 255;
 static constexpr uint16_t CALIBRATION_MAX_POLLS_PER_SAMPLE = 255;
 
 class ScopedOfflineI2cAllowance {
@@ -257,6 +258,20 @@ static bool isCachedConfigRegister(uint8_t reg) {
       return true;
     default:
       return false;
+  }
+}
+
+static bool isSafePublicRegisterWrite(uint8_t reg, uint8_t value) {
+  switch (reg) {
+    case cmd::REG_FUNC_CFG_ACCESS:
+      return (value & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) == 0;
+    case cmd::REG_CTRL3_C:
+      return (value & (cmd::MASK_BOOT | cmd::MASK_SW_RESET | cmd::MASK_BLE)) == 0 &&
+             (value & cmd::MASK_IF_INC) != 0;
+    case cmd::REG_CTRL4_C:
+      return (value & cmd::MASK_I2C_DISABLE) == 0;
+    default:
+      return true;
   }
 }
 
@@ -574,7 +589,12 @@ Status LSM6DS3TR::requestMeasurement(bool checkReady) {
   _pollJob = PollJob::SAMPLE;
   _pollStep = checkReady ? 0 : 1;
   _pollCount = 0;
-  _pollDeadlineMs = 0;
+  if (checkReady) {
+    const Odr odr = isActiveOdr(_config.odrXl) ? _config.odrXl : _config.odrG;
+    _pollDeadlineMs = _nowMs() + odrIntervalMs(odr) * 3U + 100U;
+  } else {
+    _pollDeadlineMs = 0;
+  }
   _pollStartedOffline = false;
   _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
   return Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
@@ -588,11 +608,16 @@ Status LSM6DS3TR::_startPollJob(uint8_t job, const Status& busyStatus) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  const PollJob pollJob = static_cast<PollJob>(job);
+  if (_driverState == DriverState::OFFLINE && pollJob != PollJob::SOFT_RESET &&
+      pollJob != PollJob::BOOT) {
+    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
   if (pollBusy() || (_measurementRequested && !_measurementReady)) {
     return busyStatus;
   }
 
-  _pollJob = static_cast<PollJob>(job);
+  _pollJob = pollJob;
   _pollStep = 0;
   _pollCount = 0;
   _pollDeadlineMs = 0;
@@ -606,12 +631,16 @@ Status LSM6DS3TR::startSoftReset() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status st = _startPollJob(static_cast<uint8_t>(PollJob::SOFT_RESET),
+                            Status::Error(Err::BUSY, "Poll job in progress"));
+  if (!st.ok() && !st.inProgress()) {
+    return st;
+  }
   _measurementRequested = false;
   _measurementReady = false;
   _hasSample = false;
   _sampleTimestampMs = 0;
-  return _startPollJob(static_cast<uint8_t>(PollJob::SOFT_RESET),
-                       Status::Error(Err::BUSY, "Poll job in progress"));
+  return st;
 }
 
 Status LSM6DS3TR::startBoot() {
@@ -795,8 +824,19 @@ Status LSM6DS3TR::_pollSampleStep() {
   }
 
   if (_pollStep == 0) {
+    if (_pollDeadlineMs != 0 && deadlineReached(_pollNowMs, _pollDeadlineMs)) {
+      _measurementRequested = false;
+      return Status::Error(Err::TIMEOUT, "Measurement ready timeout");
+    }
+    if (_pollCount >= SAMPLE_READY_MAX_POLLS) {
+      _measurementRequested = false;
+      return Status::Error(Err::TIMEOUT, "Measurement ready polling limit",
+                           SAMPLE_READY_MAX_POLLS);
+    }
+
     uint8_t statusReg = 0;
     _pollInstructionUsed = true;
+    ++_pollCount;
     Status st = readRegister(cmd::REG_STATUS_REG, statusReg);
     if (!st.ok()) {
       _measurementRequested = false;
@@ -938,11 +978,14 @@ Status LSM6DS3TR::_pollResetOrBootStep(bool bootJob) {
 
   if (_pollStep == 1) {
     if (deadlineReached(_pollNowMs, _pollDeadlineMs)) {
-      return Status::Error(Err::TIMEOUT, bootJob ? "Boot timeout" : "Reset timeout");
+      _cachedConfigDirty = true;
+      return _recordFailure(
+          Status::Error(Err::TIMEOUT, bootJob ? "Boot timeout" : "Reset timeout"));
     }
     if (_pollCount >= RESET_MAX_POLLS) {
-      return Status::Error(Err::TIMEOUT, bootJob ? "Boot polling limit" : "Reset polling limit",
-                           RESET_MAX_POLLS);
+      _cachedConfigDirty = true;
+      return _recordFailure(Status::Error(
+          Err::TIMEOUT, bootJob ? "Boot polling limit" : "Reset polling limit", RESET_MAX_POLLS));
     }
 
     uint8_t ctrl3Read = 0;
@@ -1226,8 +1269,8 @@ Status LSM6DS3TR::getMeasurement(Measurement& out) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
-  if (!_measurementReady) {
-    return Status::Error(Err::MEASUREMENT_NOT_READY, "Measurement not ready");
+  if (!_hasSample) {
+    return Status::Error(Err::MEASUREMENT_NOT_READY, "No sample available");
   }
 
   out.accel = convertAccel(_rawMeasurement.accel);
@@ -1922,9 +1965,14 @@ Status LSM6DS3TR::resetStepCounter() {
   const uint8_t ctrl10WithReset = static_cast<uint8_t>(_buildCtrl10C() | (1u << cmd::BIT_PEDO_RST_STEP));
   Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10WithReset);
   if (!st.ok()) {
+    _cachedConfigDirty = true;
     return st;
   }
-  return writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
+  if (!st.ok()) {
+    _cachedConfigDirty = true;
+  }
+  return st;
 }
 
 Status LSM6DS3TR::setAccelOffsetWeight(AccelOffsetWeight weight) {
@@ -2110,7 +2158,8 @@ Status LSM6DS3TR::softReset() {
     bool resetDone = false;
     for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
       if (deadlineReached(_nowMs(), deadline)) {
-        return Status::Error(Err::TIMEOUT, "Reset timeout");
+        _cachedConfigDirty = true;
+        return _recordFailure(Status::Error(Err::TIMEOUT, "Reset timeout"));
       }
       uint8_t ctrl3Read = 0;
       st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
@@ -2123,7 +2172,8 @@ Status LSM6DS3TR::softReset() {
       }
     }
     if (!resetDone) {
-      return Status::Error(Err::TIMEOUT, "Reset polling limit", RESET_MAX_POLLS);
+      _cachedConfigDirty = true;
+      return _recordFailure(Status::Error(Err::TIMEOUT, "Reset polling limit", RESET_MAX_POLLS));
     }
 
     return _applyConfig();
@@ -2153,7 +2203,8 @@ Status LSM6DS3TR::boot() {
     bool bootDone = false;
     for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
       if (deadlineReached(_nowMs(), deadline)) {
-        return Status::Error(Err::TIMEOUT, "Boot timeout");
+        _cachedConfigDirty = true;
+        return _recordFailure(Status::Error(Err::TIMEOUT, "Boot timeout"));
       }
       uint8_t ctrl3Read = 0;
       st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
@@ -2166,7 +2217,8 @@ Status LSM6DS3TR::boot() {
       }
     }
     if (!bootDone) {
-      return Status::Error(Err::TIMEOUT, "Boot polling limit", RESET_MAX_POLLS);
+      _cachedConfigDirty = true;
+      return _recordFailure(Status::Error(Err::TIMEOUT, "Boot polling limit", RESET_MAX_POLLS));
     }
 
     return refreshCachedConfig();
@@ -2193,6 +2245,9 @@ Status LSM6DS3TR::writeRegisterValue(uint8_t reg, uint8_t value) {
   }
   if (!isValidPublicRegisterAddress(reg)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid register address");
+  }
+  if (!isSafePublicRegisterWrite(reg, value)) {
+    return Status::Error(Err::INVALID_PARAM, "Unsafe direct register write");
   }
   Status st = writeRegister(reg, value);
   if (!st.ok()) {
@@ -2524,27 +2579,34 @@ Status LSM6DS3TR::_ensureNormalI2cAllowed() const {
 }
 
 Status LSM6DS3TR::_applyConfig() {
+  const auto failDirty = [this](Status st) -> Status {
+    if (_initialized && !st.ok()) {
+      _cachedConfigDirty = true;
+    }
+    return st;
+  };
+
   Status st = writeRegister(
       cmd::REG_CTRL3_C,
       static_cast<uint8_t>(cmd::MASK_IF_INC | (_config.bdu ? cmd::MASK_BDU : 0)));
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
 
   st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, _config.fsXl));
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, _config.fsG));
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR, _buildWakeUpDur());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
 
   const uint8_t offsets[3] = {
       static_cast<uint8_t>(_accelUserOffset.x),
@@ -2552,18 +2614,18 @@ Status LSM6DS3TR::_applyConfig() {
       static_cast<uint8_t>(_accelUserOffset.z),
   };
   st = writeRegs(cmd::REG_X_OFS_USR, offsets, sizeof(offsets));
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
 
   st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
   st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
-  if (!st.ok()) return st;
+  if (!st.ok()) return failDirty(st);
 
   _cachedConfigDirty = false;
   return Status::Ok();
