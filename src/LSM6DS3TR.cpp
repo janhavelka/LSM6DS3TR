@@ -5,6 +5,7 @@
 
 #include "LSM6DS3TR/LSM6DS3TR.h"
 
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -18,6 +19,19 @@ static constexpr uint32_t BOOT_TIMEOUT_MS = 25;
 static constexpr uint16_t RESET_MAX_POLLS = 255;
 static constexpr uint16_t SAMPLE_READY_MAX_POLLS = 255;
 static constexpr uint16_t CALIBRATION_MAX_POLLS_PER_SAMPLE = 255;
+static constexpr uint16_t SELF_TEST_MAX_SAMPLES = 100;
+static constexpr uint16_t SELF_TEST_READY_MAX_POLLS = 512;
+static constexpr uint16_t SELF_TEST_SETTLE_SAMPLES = 5;
+static constexpr uint32_t SELF_TEST_ACCEL_SETTLE_MS = 100;
+static constexpr uint32_t SELF_TEST_GYRO_SETTLE_MS = 800;
+static constexpr uint32_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 60;
+static constexpr uint32_t SELF_TEST_SETTLE_POLLS_PER_MS = 16;
+static constexpr float SELF_TEST_ACCEL_MIN_MG = 90.0f;
+static constexpr float SELF_TEST_ACCEL_MAX_MG = 1700.0f;
+static constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
+static constexpr float SELF_TEST_GYRO_MAX_DPS = 700.0f;
+static constexpr float SELF_TEST_ACCEL_SENSITIVITY_G_LSB = 0.000061f;
+static constexpr float SELF_TEST_GYRO_SENSITIVITY_DPS_LSB = 0.070f;
 
 class ScopedOfflineI2cAllowance {
 public:
@@ -236,6 +250,19 @@ static bool isValidPublicRegisterBlock(uint8_t startReg, size_t len) {
   return endReg <= cmd::REG_Z_OFS_USR;
 }
 
+static bool isFiniteInRange(float value, float minValue, float maxValue) {
+  return std::isfinite(value) && value >= minValue && value <= maxValue;
+}
+
+static bool isValidCalibrationLimits(const CalibrationLimits& limits) {
+  return isFiniteInRange(limits.accelMaxPeakToPeakG, 0.001f, 4.0f) &&
+         isFiniteInRange(limits.accelMaxHorizontalMeanG, 0.0f, 4.0f) &&
+         isFiniteInRange(limits.accelMinZMeanG, -4.0f, 4.0f) &&
+         isFiniteInRange(limits.accelMaxZMeanG, -4.0f, 4.0f) &&
+         limits.accelMinZMeanG <= limits.accelMaxZMeanG &&
+         isFiniteInRange(limits.gyroMaxPeakToPeakDps, 0.001f, 2000.0f);
+}
+
 static bool isCachedConfigRegister(uint8_t reg) {
   switch (reg) {
     case cmd::REG_CTRL1_XL:
@@ -349,6 +376,137 @@ static void decodeFifoStatus(const uint8_t* data, FifoStatus& out) {
                 (static_cast<uint16_t>(data[3] & 0x03u) << 8);
 }
 
+static Status normalizeTransportStatus(Status st) {
+  if (st.code == Err::IN_PROGRESS) {
+    return Status::Error(Err::I2C_BUSY, "Transport busy", st.detail);
+  }
+  return st;
+}
+
+static float absFloat(float value) {
+  return value < 0.0f ? -value : value;
+}
+
+static bool axisInRange(float value, float minValue, float maxValue) {
+  return value >= minValue && value <= maxValue;
+}
+
+static void addCalibrationSample(const Axes& sample, uint16_t samplesDone,
+                                 double& sumX, double& sumY, double& sumZ,
+                                 float& minX, float& maxX,
+                                 float& minY, float& maxY,
+                                 float& minZ, float& maxZ) {
+  sumX += static_cast<double>(sample.x);
+  sumY += static_cast<double>(sample.y);
+  sumZ += static_cast<double>(sample.z);
+
+  if (samplesDone == 0u) {
+    minX = maxX = sample.x;
+    minY = maxY = sample.y;
+    minZ = maxZ = sample.z;
+    return;
+  }
+
+  if (sample.x < minX) minX = sample.x;
+  if (sample.x > maxX) maxX = sample.x;
+  if (sample.y < minY) minY = sample.y;
+  if (sample.y > maxY) maxY = sample.y;
+  if (sample.z < minZ) minZ = sample.z;
+  if (sample.z > maxZ) maxZ = sample.z;
+}
+
+static Status finalizeAccelCalibration(uint16_t samples,
+                                       double sumX, double sumY, double sumZ,
+                                       float minX, float maxX,
+                                       float minY, float maxY,
+                                       float minZ, float maxZ,
+                                       const CalibrationLimits& limits,
+                                       Axes& out) {
+  const float p2pX = maxX - minX;
+  const float p2pY = maxY - minY;
+  const float p2pZ = maxZ - minZ;
+  if (p2pX > limits.accelMaxPeakToPeakG ||
+      p2pY > limits.accelMaxPeakToPeakG ||
+      p2pZ > limits.accelMaxPeakToPeakG) {
+    return Status::Error(Err::CALIBRATION_UNSTABLE, "Accel calibration unstable");
+  }
+
+  const double n = static_cast<double>(samples);
+  const float meanX = static_cast<float>(sumX / n);
+  const float meanY = static_cast<float>(sumY / n);
+  const float meanZ = static_cast<float>(sumZ / n);
+  if (absFloat(meanX) > limits.accelMaxHorizontalMeanG ||
+      absFloat(meanY) > limits.accelMaxHorizontalMeanG ||
+      meanZ < limits.accelMinZMeanG ||
+      meanZ > limits.accelMaxZMeanG) {
+    return Status::Error(Err::CALIBRATION_ORIENTATION, "Accel calibration orientation");
+  }
+
+  out.x = meanX;
+  out.y = meanY;
+  out.z = meanZ - 1.0f;
+  return Status::Ok();
+}
+
+static Status finalizeGyroCalibration(uint16_t samples,
+                                      double sumX, double sumY, double sumZ,
+                                      float minX, float maxX,
+                                      float minY, float maxY,
+                                      float minZ, float maxZ,
+                                      const CalibrationLimits& limits,
+                                      Axes& out) {
+  const float p2pX = maxX - minX;
+  const float p2pY = maxY - minY;
+  const float p2pZ = maxZ - minZ;
+  if (p2pX > limits.gyroMaxPeakToPeakDps ||
+      p2pY > limits.gyroMaxPeakToPeakDps ||
+      p2pZ > limits.gyroMaxPeakToPeakDps) {
+    return Status::Error(Err::CALIBRATION_UNSTABLE, "Gyro calibration unstable");
+  }
+
+  const double n = static_cast<double>(samples);
+  out.x = static_cast<float>(sumX / n);
+  out.y = static_cast<float>(sumY / n);
+  out.z = static_cast<float>(sumZ / n);
+  return Status::Ok();
+}
+
+static Axes rawToAccelSelfTestAxes(const RawAxes& raw) {
+  return Axes{
+      static_cast<float>(raw.x) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
+      static_cast<float>(raw.y) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
+      static_cast<float>(raw.z) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
+  };
+}
+
+static Axes rawToGyroSelfTestAxes(const RawAxes& raw) {
+  return Axes{
+      static_cast<float>(raw.x) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
+      static_cast<float>(raw.y) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
+      static_cast<float>(raw.z) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
+  };
+}
+
+static Axes deltaAxes(const Axes& stimulus, const Axes& baseline) {
+  return Axes{
+      absFloat(stimulus.x - baseline.x),
+      absFloat(stimulus.y - baseline.y),
+      absFloat(stimulus.z - baseline.z),
+  };
+}
+
+static bool accelSelfTestPass(const Axes& delta) {
+  return axisInRange(delta.x * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG) &&
+         axisInRange(delta.y * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG) &&
+         axisInRange(delta.z * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG);
+}
+
+static bool gyroSelfTestPass(const Axes& delta) {
+  return axisInRange(delta.x, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS) &&
+         axisInRange(delta.y, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS) &&
+         axisInRange(delta.z, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS);
+}
+
 }  // namespace
 
 Status LSM6DS3TR::begin(const Config& config) {
@@ -375,6 +533,7 @@ Status LSM6DS3TR::begin(const Config& config) {
   _pollCount = 0;
   _pollNowMs = 0;
   _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   _pollInstructionUsed = false;
   _pollStartedOffline = false;
   _lastPollStatus = Status::Ok();
@@ -399,6 +558,12 @@ Status LSM6DS3TR::begin(const Config& config) {
   _calibrationSumX = 0.0;
   _calibrationSumY = 0.0;
   _calibrationSumZ = 0.0;
+  _calibrationMinX = 0.0f;
+  _calibrationMaxX = 0.0f;
+  _calibrationMinY = 0.0f;
+  _calibrationMaxY = 0.0f;
+  _calibrationMinZ = 0.0f;
+  _calibrationMaxZ = 0.0f;
 
   _config = Config{};
   _accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
@@ -445,6 +610,9 @@ Status LSM6DS3TR::begin(const Config& config) {
   }
   if (!isValidGyroOdr(config.odrG, config.gyroPowerMode)) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid gyro ODR/power-mode combination");
+  }
+  if (!isValidCalibrationLimits(config.calibrationLimits)) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid calibration limits");
   }
 
   _config = config;
@@ -495,6 +663,8 @@ void LSM6DS3TR::end() {
   _rawMeasurement = RawMeasurement{};
   _pollJob = PollJob::NONE;
   _pollStep = 0;
+  _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   _pollStartedOffline = false;
   _lastPollStatus = Status::Ok();
 }
@@ -589,12 +759,9 @@ Status LSM6DS3TR::requestMeasurement(bool checkReady) {
   _pollJob = PollJob::SAMPLE;
   _pollStep = checkReady ? 0 : 1;
   _pollCount = 0;
-  if (checkReady) {
-    const Odr odr = isActiveOdr(_config.odrXl) ? _config.odrXl : _config.odrG;
-    _pollDeadlineMs = _nowMs() + odrIntervalMs(odr) * 3U + 100U;
-  } else {
-    _pollDeadlineMs = 0;
-  }
+  _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
+  _pollInstructionUsed = false;
   _pollStartedOffline = false;
   _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
   return Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
@@ -621,6 +788,7 @@ Status LSM6DS3TR::_startPollJob(uint8_t job, const Status& busyStatus) {
   _pollStep = 0;
   _pollCount = 0;
   _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   _pollInstructionUsed = false;
   _pollStartedOffline = _driverState == DriverState::OFFLINE;
   _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job scheduled");
@@ -651,6 +819,194 @@ Status LSM6DS3TR::startBoot() {
 Status LSM6DS3TR::startRefreshCachedConfig() {
   return _startPollJob(static_cast<uint8_t>(PollJob::REFRESH_CONFIG),
                        Status::Error(Err::BUSY, "Poll job in progress"));
+}
+
+Status LSM6DS3TR::runSelfTest(SelfTestResult& out, uint16_t samples) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (samples == 0u || samples > SELF_TEST_MAX_SAMPLES) {
+    return Status::Error(Err::INVALID_PARAM, "self-test samples must be 1..100");
+  }
+
+  out = SelfTestResult{};
+
+  uint8_t savedCtrl1 = 0;
+  uint8_t savedCtrl2 = 0;
+  uint8_t savedCtrl5 = 0;
+  uint8_t savedCtrl7 = 0;
+  uint8_t savedCtrl8 = 0;
+  Status st = readRegister(cmd::REG_CTRL1_XL, savedCtrl1);
+  if (!st.ok()) return st;
+  st = readRegister(cmd::REG_CTRL2_G, savedCtrl2);
+  if (!st.ok()) return st;
+  st = readRegister(cmd::REG_CTRL5_C, savedCtrl5);
+  if (!st.ok()) return st;
+  st = readRegister(cmd::REG_CTRL7_G, savedCtrl7);
+  if (!st.ok()) return st;
+  st = readRegister(cmd::REG_CTRL8_XL, savedCtrl8);
+  if (!st.ok()) return st;
+
+  auto restoreRegisters = [this, savedCtrl1, savedCtrl2, savedCtrl5,
+                           savedCtrl7, savedCtrl8]() -> Status {
+    ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
+    Status first = Status::Ok();
+    auto keepFirstFailure = [&first](Status restoreStatus) {
+      if (!restoreStatus.ok() && first.ok()) {
+        first = restoreStatus;
+      }
+    };
+    keepFirstFailure(writeRegister(cmd::REG_CTRL5_C, savedCtrl5));
+    keepFirstFailure(writeRegister(cmd::REG_CTRL8_XL, savedCtrl8));
+    keepFirstFailure(writeRegister(cmd::REG_CTRL7_G, savedCtrl7));
+    keepFirstFailure(writeRegister(cmd::REG_CTRL2_G, savedCtrl2));
+    keepFirstFailure(writeRegister(cmd::REG_CTRL1_XL, savedCtrl1));
+    return first;
+  };
+
+  Status result = Status::Ok();
+  RawAxes baselineRaw;
+  RawAxes stimulusRaw;
+  RawAxes discardRaw;
+
+  st = writeRegister(cmd::REG_CTRL5_C, 0x00);
+  if (!st.ok()) {
+    result = st;
+  }
+  if (result.ok()) {
+    st = writeRegister(cmd::REG_CTRL8_XL, 0x00);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(Odr::HZ_416, AccelFs::G_2));
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _settleSelfTest(SELF_TEST_ACCEL_SETTLE_MS);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _readSelfTestAverage(true, SELF_TEST_SETTLE_SAMPLES, discardRaw);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _readSelfTestAverage(true, samples, baselineRaw);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = writeRegister(cmd::REG_CTRL5_C,
+                       static_cast<uint8_t>(1u << cmd::BIT_ST_XL));
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _settleSelfTest(SELF_TEST_ACCEL_SETTLE_MS);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _readSelfTestAverage(true, SELF_TEST_SETTLE_SAMPLES, discardRaw);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    st = _readSelfTestAverage(true, samples, stimulusRaw);
+    if (!st.ok()) result = st;
+  }
+  if (result.ok()) {
+    out.accelBaseline = rawToAccelSelfTestAxes(baselineRaw);
+    out.accelStimulus = rawToAccelSelfTestAxes(stimulusRaw);
+    out.accelDelta = deltaAxes(out.accelStimulus, out.accelBaseline);
+    out.accelPass = accelSelfTestPass(out.accelDelta);
+    if (!out.accelPass) {
+      result = Status::Error(Err::SELF_TEST_FAIL, "Accel self-test delta out of range");
+    }
+  }
+
+  bool gyroSequenceOk = result.ok() || result.code == Err::SELF_TEST_FAIL;
+  if (gyroSequenceOk) {
+    st = writeRegister(cmd::REG_CTRL5_C, 0x00);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = writeRegister(cmd::REG_CTRL7_G, 0x00);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(Odr::HZ_416, GyroFs::DPS_2000));
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _settleSelfTest(SELF_TEST_GYRO_SETTLE_MS);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _readSelfTestAverage(false, SELF_TEST_SETTLE_SAMPLES, discardRaw);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _readSelfTestAverage(false, samples, baselineRaw);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = writeRegister(cmd::REG_CTRL5_C,
+                       static_cast<uint8_t>(1u << cmd::BIT_ST_G));
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _settleSelfTest(SELF_TEST_GYRO_STIMULUS_SETTLE_MS);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _readSelfTestAverage(false, SELF_TEST_SETTLE_SAMPLES, discardRaw);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    st = _readSelfTestAverage(false, samples, stimulusRaw);
+    if (!st.ok()) {
+      result = st;
+      gyroSequenceOk = false;
+    }
+  }
+  if (gyroSequenceOk) {
+    out.gyroBaseline = rawToGyroSelfTestAxes(baselineRaw);
+    out.gyroStimulus = rawToGyroSelfTestAxes(stimulusRaw);
+    out.gyroDelta = deltaAxes(out.gyroStimulus, out.gyroBaseline);
+    out.gyroPass = gyroSelfTestPass(out.gyroDelta);
+    if (!out.gyroPass && result.ok()) {
+      result = Status::Error(Err::SELF_TEST_FAIL, "Gyro self-test delta out of range");
+    }
+  }
+
+  const Status restoreStatus = restoreRegisters();
+  if (result.ok() && !restoreStatus.ok()) {
+    return restoreStatus;
+  }
+  return result;
 }
 
 Status LSM6DS3TR::startFifoDrain(uint16_t maxWords) {
@@ -689,7 +1045,14 @@ Status LSM6DS3TR::startAccelBiasCapture(uint16_t samples) {
   _calibrationSumX = 0.0;
   _calibrationSumY = 0.0;
   _calibrationSumZ = 0.0;
+  _calibrationMinX = 0.0f;
+  _calibrationMaxX = 0.0f;
+  _calibrationMinY = 0.0f;
+  _calibrationMaxY = 0.0f;
+  _calibrationMinZ = 0.0f;
+  _calibrationMaxZ = 0.0f;
   _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   return st;
 }
 
@@ -714,7 +1077,14 @@ Status LSM6DS3TR::startGyroBiasCapture(uint16_t samples) {
   _calibrationSumX = 0.0;
   _calibrationSumY = 0.0;
   _calibrationSumZ = 0.0;
+  _calibrationMinX = 0.0f;
+  _calibrationMaxX = 0.0f;
+  _calibrationMinY = 0.0f;
+  _calibrationMaxY = 0.0f;
+  _calibrationMinZ = 0.0f;
+  _calibrationMaxZ = 0.0f;
   _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   return st;
 }
 
@@ -730,6 +1100,7 @@ Status LSM6DS3TR::_finishPollJob(const Status& st) {
   _pollStep = 0;
   _pollCount = 0;
   _pollDeadlineMs = 0;
+  _pollDeadlineArmed = false;
   _pollInstructionUsed = false;
   _pollStartedOffline = false;
   if (startedOffline && !st.ok() &&
@@ -824,7 +1195,12 @@ Status LSM6DS3TR::_pollSampleStep() {
   }
 
   if (_pollStep == 0) {
-    if (_pollDeadlineMs != 0 && deadlineReached(_pollNowMs, _pollDeadlineMs)) {
+    if (!_pollDeadlineArmed) {
+      const Odr odr = isActiveOdr(_config.odrXl) ? _config.odrXl : _config.odrG;
+      _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3U + 100U;
+      _pollDeadlineArmed = true;
+    }
+    if (deadlineReached(_pollNowMs, _pollDeadlineMs)) {
       _measurementRequested = false;
       return Status::Error(Err::TIMEOUT, "Measurement ready timeout");
     }
@@ -855,7 +1231,7 @@ Status LSM6DS3TR::_pollSampleStep() {
   }
 
   _pollInstructionUsed = true;
-  Status st = _readRawAll();
+  Status st = _readRawAllWithTimestamp(_pollNowMs);
   if (!st.ok()) {
     _measurementRequested = false;
     return st;
@@ -971,6 +1347,7 @@ Status LSM6DS3TR::_pollResetOrBootStep(bool bootJob) {
       return st;
     }
     _pollDeadlineMs = _pollNowMs + (bootJob ? BOOT_TIMEOUT_MS : RESET_TIMEOUT_MS);
+    _pollDeadlineArmed = true;
     _pollCount = 0;
     _pollStep = 1;
     return Status::Ok();
@@ -1178,6 +1555,9 @@ Status LSM6DS3TR::_pollFifoDrainStep() {
     }
     FifoStatus status;
     decodeFifoStatus(data, status);
+    if (status.overrun) {
+      return Status::Error(Err::FIFO_OVERRUN, "FIFO overrun");
+    }
     if (status.empty || status.unreadWords == 0u) {
       _fifoDrainWordsAvailable = 0;
       return _finishPollJob(Status::Ok());
@@ -1209,8 +1589,9 @@ Status LSM6DS3TR::_pollFifoDrainStep() {
 Status LSM6DS3TR::_pollCalibrationStep(bool accelJob) {
   const Odr odr = accelJob ? _config.odrXl : _config.odrG;
   if (_pollStep == 0) {
-    if (_pollDeadlineMs == 0) {
+    if (!_pollDeadlineArmed) {
       _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
+      _pollDeadlineArmed = true;
     }
     bool ready = false;
     _pollInstructionUsed = true;
@@ -1240,17 +1621,31 @@ Status LSM6DS3TR::_pollCalibrationStep(bool accelJob) {
     return st;
   }
   const Axes phys = accelJob ? convertAccel(raw) : convertGyro(raw);
-  _calibrationSumX += static_cast<double>(phys.x);
-  _calibrationSumY += static_cast<double>(phys.y);
-  _calibrationSumZ += static_cast<double>(phys.z);
+  addCalibrationSample(phys, _calibrationSamplesDone,
+                       _calibrationSumX, _calibrationSumY, _calibrationSumZ,
+                       _calibrationMinX, _calibrationMaxX,
+                       _calibrationMinY, _calibrationMaxY,
+                       _calibrationMinZ, _calibrationMaxZ);
   ++_calibrationSamplesDone;
 
   if (_calibrationSamplesDone >= _calibrationSamplesTarget) {
-    const double n = static_cast<double>(_calibrationSamplesTarget);
     Axes bias;
-    bias.x = static_cast<float>(_calibrationSumX / n);
-    bias.y = static_cast<float>(_calibrationSumY / n);
-    bias.z = static_cast<float>(_calibrationSumZ / n - (accelJob ? 1.0 : 0.0));
+    Status quality = accelJob
+        ? finalizeAccelCalibration(_calibrationSamplesTarget,
+                                   _calibrationSumX, _calibrationSumY, _calibrationSumZ,
+                                   _calibrationMinX, _calibrationMaxX,
+                                   _calibrationMinY, _calibrationMaxY,
+                                   _calibrationMinZ, _calibrationMaxZ,
+                                   _config.calibrationLimits, bias)
+        : finalizeGyroCalibration(_calibrationSamplesTarget,
+                                  _calibrationSumX, _calibrationSumY, _calibrationSumZ,
+                                  _calibrationMinX, _calibrationMaxX,
+                                  _calibrationMinY, _calibrationMaxY,
+                                  _calibrationMinZ, _calibrationMaxZ,
+                                  _config.calibrationLimits, bias);
+    if (!quality.ok()) {
+      return quality;
+    }
     if (accelJob) {
       _accelBias = bias;
     } else {
@@ -1262,6 +1657,7 @@ Status LSM6DS3TR::_pollCalibrationStep(bool accelJob) {
   _pollStep = 0;
   _calibrationPollsForSample = 0;
   _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
+  _pollDeadlineArmed = true;
   return Status::Ok();
 }
 
@@ -2120,8 +2516,11 @@ Status LSM6DS3TR::readFifoWord(uint16_t& out) {
   if (!st.ok()) {
     return st;
   }
-  if (status.empty) {
+  if (status.empty || status.unreadWords == 0u) {
     return Status::Error(Err::FIFO_EMPTY, "FIFO empty");
+  }
+  if (status.overrun) {
+    return Status::Error(Err::FIFO_OVERRUN, "FIFO overrun");
   }
 
   uint8_t data[2] = {};
@@ -2404,8 +2803,9 @@ Status LSM6DS3TR::_i2cWriteReadRaw(const uint8_t* txBuf, size_t txLen,
   if (_config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write-read not set");
   }
-  return _config.i2cWriteRead(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen,
-                              _config.i2cTimeoutMs, _config.i2cUser);
+  return normalizeTransportStatus(
+      _config.i2cWriteRead(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen,
+                           _config.i2cTimeoutMs, _config.i2cUser));
 }
 
 Status LSM6DS3TR::_i2cWriteRaw(const uint8_t* buf, size_t len) {
@@ -2415,8 +2815,9 @@ Status LSM6DS3TR::_i2cWriteRaw(const uint8_t* buf, size_t len) {
   if (_config.i2cWrite == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write not set");
   }
-  return _config.i2cWrite(_config.i2cAddress, buf, len, _config.i2cTimeoutMs,
-                          _config.i2cUser);
+  return normalizeTransportStatus(
+      _config.i2cWrite(_config.i2cAddress, buf, len, _config.i2cTimeoutMs,
+                       _config.i2cUser));
 }
 
 Status LSM6DS3TR::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
@@ -2631,7 +3032,7 @@ Status LSM6DS3TR::_applyConfig() {
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_readRawAll() {
+Status LSM6DS3TR::_readRawAllWithTimestamp(uint32_t sampleTimestampMs) {
   uint8_t data[cmd::DATA_LEN_ALL] = {};
   Status st = readRegs(cmd::REG_DATA_START_ALL, data, sizeof(data));
   if (!st.ok()) {
@@ -2640,7 +3041,82 @@ Status LSM6DS3TR::_readRawAll() {
 
   decodeRawAll(data, _rawMeasurement);
   _hasSample = true;
-  _sampleTimestampMs = _nowMs();
+  _sampleTimestampMs = sampleTimestampMs;
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_readRawAll() {
+  return _readRawAllWithTimestamp(_nowMs());
+}
+
+Status LSM6DS3TR::_settleSelfTest(uint32_t settleMs) {
+  if (settleMs == 0u) {
+    return Status::Ok();
+  }
+
+  const uint32_t deadline = _nowMs() + settleMs;
+  const uint32_t maxPolls =
+      settleMs * SELF_TEST_SETTLE_POLLS_PER_MS + SELF_TEST_SETTLE_POLLS_PER_MS;
+  for (uint32_t poll = 0; poll < maxPolls; ++poll) {
+    uint8_t ignored = 0;
+    Status st = readStatusReg(ignored);
+    if (!st.ok()) {
+      return st;
+    }
+    if (_config.nowMs == nullptr || deadlineReached(_nowMs(), deadline)) {
+      return Status::Ok();
+    }
+  }
+  return Status::Error(Err::TIMEOUT, "Self-test settle timeout",
+                       static_cast<int32_t>(settleMs));
+}
+
+Status LSM6DS3TR::_waitForSelfTestReady(bool accel) {
+  const uint32_t timeoutMs = odrIntervalMs(Odr::HZ_416) * 3U + 100U;
+  const uint32_t deadline = _nowMs() + timeoutMs;
+  for (uint16_t poll = 0; poll < SELF_TEST_READY_MAX_POLLS; ++poll) {
+    bool ready = false;
+    Status st = accel ? isAccelDataReady(ready) : isGyroDataReady(ready);
+    if (!st.ok()) {
+      return st;
+    }
+    if (ready) {
+      return Status::Ok();
+    }
+    if (deadlineReached(_nowMs(), deadline)) {
+      return Status::Error(Err::TIMEOUT,
+                           accel ? "Accel self-test data-ready timeout"
+                                 : "Gyro self-test data-ready timeout",
+                           poll);
+    }
+  }
+  return Status::Error(Err::TIMEOUT,
+                       accel ? "Accel self-test polling limit"
+                             : "Gyro self-test polling limit",
+                       SELF_TEST_READY_MAX_POLLS);
+}
+
+Status LSM6DS3TR::_readSelfTestAverage(bool accel, uint16_t samples, RawAxes& out) {
+  int32_t sumX = 0;
+  int32_t sumY = 0;
+  int32_t sumZ = 0;
+  for (uint16_t i = 0; i < samples; ++i) {
+    Status st = _waitForSelfTestReady(accel);
+    if (!st.ok()) {
+      return st;
+    }
+    RawAxes raw;
+    st = accel ? readAccelRaw(raw) : readGyroRaw(raw);
+    if (!st.ok()) {
+      return st;
+    }
+    sumX += raw.x;
+    sumY += raw.y;
+    sumZ += raw.z;
+  }
+  out.x = static_cast<int16_t>(sumX / static_cast<int32_t>(samples));
+  out.y = static_cast<int16_t>(sumY / static_cast<int32_t>(samples));
+  out.z = static_cast<int16_t>(sumZ / static_cast<int32_t>(samples));
   return Status::Ok();
 }
 
@@ -2784,6 +3260,12 @@ Status LSM6DS3TR::captureAccelBias(uint16_t samples, Axes& out) {
   double sumX = 0.0;
   double sumY = 0.0;
   double sumZ = 0.0;
+  float minX = 0.0f;
+  float maxX = 0.0f;
+  float minY = 0.0f;
+  float maxY = 0.0f;
+  float minZ = 0.0f;
+  float maxZ = 0.0f;
 
   for (uint16_t i = 0; i < samples; ++i) {
     // Wait for fresh accel data
@@ -2811,16 +3293,16 @@ Status LSM6DS3TR::captureAccelBias(uint16_t samples, Axes& out) {
       return st;
     }
     const Axes phys = convertAccel(raw);
-    sumX += static_cast<double>(phys.x);
-    sumY += static_cast<double>(phys.y);
-    sumZ += static_cast<double>(phys.z);
+    addCalibrationSample(phys, i, sumX, sumY, sumZ,
+                         minX, maxX, minY, maxY, minZ, maxZ);
   }
 
-  const double n = static_cast<double>(samples);
-  // Bias = average reading - expected value (Z-up: expect X=0, Y=0, Z=+1g)
-  out.x = static_cast<float>(sumX / n);
-  out.y = static_cast<float>(sumY / n);
-  out.z = static_cast<float>(sumZ / n - 1.0);
+  Status st = finalizeAccelCalibration(samples, sumX, sumY, sumZ,
+                                       minX, maxX, minY, maxY, minZ, maxZ,
+                                       _config.calibrationLimits, out);
+  if (!st.ok()) {
+    return st;
+  }
   _accelBias = out;
   return Status::Ok();
 }
@@ -2840,6 +3322,12 @@ Status LSM6DS3TR::captureGyroBias(uint16_t samples, Axes& out) {
   double sumX = 0.0;
   double sumY = 0.0;
   double sumZ = 0.0;
+  float minX = 0.0f;
+  float maxX = 0.0f;
+  float minY = 0.0f;
+  float maxY = 0.0f;
+  float minZ = 0.0f;
+  float maxZ = 0.0f;
 
   for (uint16_t i = 0; i < samples; ++i) {
     // Wait for fresh gyro data
@@ -2867,16 +3355,16 @@ Status LSM6DS3TR::captureGyroBias(uint16_t samples, Axes& out) {
       return st;
     }
     const Axes phys = convertGyro(raw);
-    sumX += static_cast<double>(phys.x);
-    sumY += static_cast<double>(phys.y);
-    sumZ += static_cast<double>(phys.z);
+    addCalibrationSample(phys, i, sumX, sumY, sumZ,
+                         minX, maxX, minY, maxY, minZ, maxZ);
   }
 
-  const double n = static_cast<double>(samples);
-  // Bias = average reading (at rest, expected 0 on all axes)
-  out.x = static_cast<float>(sumX / n);
-  out.y = static_cast<float>(sumY / n);
-  out.z = static_cast<float>(sumZ / n);
+  Status st = finalizeGyroCalibration(samples, sumX, sumY, sumZ,
+                                      minX, maxX, minY, maxY, minZ, maxZ,
+                                      _config.calibrationLimits, out);
+  if (!st.ok()) {
+    return st;
+  }
   _gyroBias = out;
   return Status::Ok();
 }

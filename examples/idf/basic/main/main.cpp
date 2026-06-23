@@ -129,6 +129,10 @@ const char* errToStr(LSM6DS3TR::Err err) {
     case LSM6DS3TR::Err::I2C_BUS: return "I2C_BUS";
     case LSM6DS3TR::Err::FIFO_EMPTY: return "FIFO_EMPTY";
     case LSM6DS3TR::Err::OFFLINE: return "OFFLINE";
+    case LSM6DS3TR::Err::I2C_BUSY: return "I2C_BUSY";
+    case LSM6DS3TR::Err::FIFO_OVERRUN: return "FIFO_OVERRUN";
+    case LSM6DS3TR::Err::CALIBRATION_UNSTABLE: return "CALIBRATION_UNSTABLE";
+    case LSM6DS3TR::Err::CALIBRATION_ORIENTATION: return "CALIBRATION_ORIENTATION";
     default: return "UNKNOWN";
   }
 }
@@ -498,7 +502,7 @@ void processJobCommand(char** save) {
   if (strcmp(sub, "cancel") == 0) {
     manualPollMode = false;
     streamMode = false;
-    puts("  Job manual mode cleared.");
+    puts("  Clear CLI manual polling; active driver job may continue on tick.");
     printJobState("cancel");
     return;
   }
@@ -510,12 +514,12 @@ void printHelp() {
   puts("\n=== LSM6DS3TR native ESP-IDF CLI ===");
   puts("Common: help ? version ver scan begin init drv health drv1 cfg settings refresh job ... verbose <0|1>");
   puts("Data: read raw accel gyro temp status tsread steps fifo fifo_read <n> stream");
-  puts("Config: odrxl <n> odrg <n> fsxl <2|4|8|16> fsg <125|250|500|1000|2000>");
+  puts("Config: odrxl <odr> odrg <odr> fsxl <2|4|8|16> fsg <125|250|500|1000|2000>");
   puts("Power/filter: apm <hp|lpn> gpm <hp|lpn> gsleep <0|1> alpf2 <0|1> aslope <0|1>");
   puts("Power/filter: a6d <0|1> glpf1 <0|1> ghpf <0|1> ghpfmode <0|1|2|3>");
   puts("Features: ts <0|1> tshr <0|1> tsreset pedo <0|1> sigmot <0|1> tilt <0|1>");
   puts("Features: wtilt <0|1> stepreset ofswt <1|16> offset [x y z]");
-  puts("FIFO: fifo_mode <0|1|3|4|6> fifo_odr <n> fifo_xl <0..7> fifo_g <0..7>");
+  puts("FIFO: fifo_mode <bypass|fifo|c2f|b2c|cont|0|1|3|4|6> fifo_odr <odr> fifo_xl <off|0|1|2|3|4|8|16|32> fifo_g <off|0|1|2|3|4|8|16|32>");
   puts("FIFO: fifo_th <0..2047> fifo_temp <0|1> fifo_step <0|1> fifo_stop <0|1> fifo_high <0|1>");
   puts("Diagnostics: cal calxl [n] calg [n] biasxl [x y z] biasg [x y z] biasreset");
   puts("Diagnostics: probe recover whoami id wusrc tapsrc 6dsrc funcsrc1 funcsrc2 wtstatus shub [n]");
@@ -571,49 +575,99 @@ void printSettings() {
          s.hasSample ? "yes" : "no", static_cast<unsigned long>(device.sampleAgeMs(nowMs(nullptr))));
 }
 
-LSM6DS3TR::Odr parseOdrValue(uint32_t value) {
-  if (value == 0) return LSM6DS3TR::Odr::POWER_DOWN;
-  if (value == 12) return LSM6DS3TR::Odr::HZ_12_5;
-  if (value == 26) return LSM6DS3TR::Odr::HZ_26;
-  if (value == 52) return LSM6DS3TR::Odr::HZ_52;
-  if (value == 104) return LSM6DS3TR::Odr::HZ_104;
-  if (value == 208) return LSM6DS3TR::Odr::HZ_208;
-  if (value == 416) return LSM6DS3TR::Odr::HZ_416;
-  if (value == 833) return LSM6DS3TR::Odr::HZ_833;
-  if (value == 1660) return LSM6DS3TR::Odr::HZ_1660;
-  if (value == 3330) return LSM6DS3TR::Odr::HZ_3330;
-  if (value == 6660) return LSM6DS3TR::Odr::HZ_6660;
-  if (value == 1) return LSM6DS3TR::Odr::HZ_1_6;
-  return static_cast<LSM6DS3TR::Odr>(value);
+bool parseOdrToken(char* token, LSM6DS3TR::Odr& out) {
+  if (token == nullptr) return false;
+  lowerInPlace(token);
+  if (strcmp(token, "0") == 0) { out = LSM6DS3TR::Odr::POWER_DOWN; return true; }
+  if (strcmp(token, "1.6") == 0 || strcmp(token, "1") == 0) { out = LSM6DS3TR::Odr::HZ_1_6; return true; }
+  if (strcmp(token, "12.5") == 0 || strcmp(token, "12") == 0) { out = LSM6DS3TR::Odr::HZ_12_5; return true; }
+  if (strcmp(token, "26") == 0) { out = LSM6DS3TR::Odr::HZ_26; return true; }
+  if (strcmp(token, "52") == 0) { out = LSM6DS3TR::Odr::HZ_52; return true; }
+  if (strcmp(token, "104") == 0) { out = LSM6DS3TR::Odr::HZ_104; return true; }
+  if (strcmp(token, "208") == 0) { out = LSM6DS3TR::Odr::HZ_208; return true; }
+  if (strcmp(token, "416") == 0) { out = LSM6DS3TR::Odr::HZ_416; return true; }
+  if (strcmp(token, "833") == 0) { out = LSM6DS3TR::Odr::HZ_833; return true; }
+  if (strcmp(token, "1660") == 0) { out = LSM6DS3TR::Odr::HZ_1660; return true; }
+  if (strcmp(token, "3330") == 0) { out = LSM6DS3TR::Odr::HZ_3330; return true; }
+  if (strcmp(token, "6660") == 0) { out = LSM6DS3TR::Odr::HZ_6660; return true; }
+  return false;
+}
+
+bool parseFifoModeToken(char* token, LSM6DS3TR::FifoMode& out) {
+  if (token == nullptr) return false;
+  lowerInPlace(token);
+  if (strcmp(token, "bypass") == 0 || strcmp(token, "0") == 0) {
+    out = LSM6DS3TR::FifoMode::BYPASS; return true;
+  }
+  if (strcmp(token, "fifo") == 0 || strcmp(token, "1") == 0) {
+    out = LSM6DS3TR::FifoMode::FIFO; return true;
+  }
+  if (strcmp(token, "c2f") == 0 || strcmp(token, "continuous-to-fifo") == 0 ||
+      strcmp(token, "3") == 0) {
+    out = LSM6DS3TR::FifoMode::CONTINUOUS_TO_FIFO; return true;
+  }
+  if (strcmp(token, "b2c") == 0 || strcmp(token, "bypass-to-continuous") == 0 ||
+      strcmp(token, "4") == 0) {
+    out = LSM6DS3TR::FifoMode::BYPASS_TO_CONTINUOUS; return true;
+  }
+  if (strcmp(token, "cont") == 0 || strcmp(token, "continuous") == 0 ||
+      strcmp(token, "6") == 0) {
+    out = LSM6DS3TR::FifoMode::CONTINUOUS; return true;
+  }
+  return false;
+}
+
+bool parseFifoDecimationToken(char* token, LSM6DS3TR::FifoDecimation& out) {
+  if (token == nullptr) return false;
+  lowerInPlace(token);
+  if (strcmp(token, "off") == 0 || strcmp(token, "0") == 0) {
+    out = LSM6DS3TR::FifoDecimation::DISABLED; return true;
+  }
+  if (strcmp(token, "1") == 0) { out = LSM6DS3TR::FifoDecimation::NONE; return true; }
+  if (strcmp(token, "2") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_2; return true; }
+  if (strcmp(token, "3") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_3; return true; }
+  if (strcmp(token, "4") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_4; return true; }
+  if (strcmp(token, "8") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_8; return true; }
+  if (strcmp(token, "16") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_16; return true; }
+  if (strcmp(token, "32") == 0) { out = LSM6DS3TR::FifoDecimation::DIV_32; return true; }
+  return false;
 }
 
 void updateFifoField(const char* field, char* arg) {
   LSM6DS3TR::FifoConfig cfg;
   printStatus(device.getFifoConfig(cfg));
-  uint32_t value = 0;
-  if (!parseU32(arg, value)) {
-    puts("  Expected numeric FIFO value");
+  if (strcmp(field, "fifo_mode") == 0) {
+    if (!parseFifoModeToken(arg, cfg.mode)) {
+      puts("  Expected FIFO mode bypass|fifo|c2f|b2c|cont|0|1|3|4|6");
+      return;
+    }
+  }
+  if (strcmp(field, "fifo_odr") == 0 && !parseOdrToken(arg, cfg.odr)) {
+    puts("  Expected FIFO ODR 0|1.6|12.5|12|26|52|104|208|416|833|1660|3330|6660");
     return;
   }
-  if (strcmp(field, "fifo_mode") == 0) {
-    if (value > 6) { puts("  Expected fifo_mode 0..6"); return; }
-    cfg.mode = static_cast<LSM6DS3TR::FifoMode>(value);
-  }
-  if (strcmp(field, "fifo_odr") == 0) cfg.odr = parseOdrValue(value);
   if (strcmp(field, "fifo_xl") == 0) {
-    if (value > 7) { puts("  Expected fifo_xl 0..7"); return; }
-    cfg.accelDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
+    if (!parseFifoDecimationToken(arg, cfg.accelDecimation)) {
+      puts("  Expected FIFO decimation off|0|1|2|3|4|8|16|32");
+      return;
+    }
   }
   if (strcmp(field, "fifo_g") == 0) {
-    if (value > 7) { puts("  Expected fifo_g 0..7"); return; }
-    cfg.gyroDecimation = static_cast<LSM6DS3TR::FifoDecimation>(value);
+    if (!parseFifoDecimationToken(arg, cfg.gyroDecimation)) {
+      puts("  Expected FIFO decimation off|0|1|2|3|4|8|16|32");
+      return;
+    }
   }
   if (strcmp(field, "fifo_th") == 0) {
+    uint32_t value = 0;
+    if (!parseU32(arg, value)) { puts("  Expected numeric FIFO threshold"); return; }
     if (value > 2047) { puts("  Expected fifo_th 0..2047"); return; }
     cfg.threshold = static_cast<uint16_t>(value);
   }
   if (strcmp(field, "fifo_temp") == 0 || strcmp(field, "fifo_step") == 0 ||
       strcmp(field, "fifo_stop") == 0 || strcmp(field, "fifo_high") == 0) {
+    uint32_t value = 0;
+    if (!parseU32(arg, value)) { puts("  Expected FIFO boolean 0|1"); return; }
     if (value > 1) { puts("  Expected FIFO boolean 0|1"); return; }
     if (strcmp(field, "fifo_temp") == 0) cfg.storeTemperature = value != 0;
     if (strcmp(field, "fifo_step") == 0) cfg.storeTimestampStep = value != 0;
@@ -708,10 +762,13 @@ void processCommand(char* line) {
     streamMode = !streamMode;
     printf("Stream: %s\n", streamMode ? "ON" : "OFF");
   } else if (strcmp(cmd, "odrxl") == 0 || strcmp(cmd, "odrg") == 0) {
-    uint32_t value = 0;
-    if (!parseU32(nextToken(&save), value)) { puts("  Expected ODR value"); return; }
-    printStatus(strcmp(cmd, "odrxl") == 0 ? device.setAccelOdr(parseOdrValue(value))
-                                          : device.setGyroOdr(parseOdrValue(value)));
+    LSM6DS3TR::Odr odr = LSM6DS3TR::Odr::POWER_DOWN;
+    if (!parseOdrToken(nextToken(&save), odr)) {
+      puts("  Expected ODR 0|1.6|12.5|12|26|52|104|208|416|833|1660|3330|6660");
+      return;
+    }
+    printStatus(strcmp(cmd, "odrxl") == 0 ? device.setAccelOdr(odr)
+                                          : device.setGyroOdr(odr));
   } else if (strcmp(cmd, "fsxl") == 0 || strcmp(cmd, "fsg") == 0) {
     uint32_t value = 0;
     if (!parseU32(nextToken(&save), value)) { puts("  Expected FS value"); return; }
@@ -892,8 +949,18 @@ void processCommand(char* line) {
     if (!st.ok()) printStatus(st);
     else for (uint32_t i = 0; i < len; ++i) printf("0x%02lX: 0x%02X\n", static_cast<unsigned long>(start + i), data[i]);
   } else if (strcmp(cmd, "selftest") == 0) {
-    puts("Selftest result: native ESP-IDF CLI runs probe smoke only");
-    printStatus(device.probe());
+    LSM6DS3TR::SelfTestResult result;
+    const auto st = device.runSelfTest(result);
+    printf("Accel delta: x=%.1f y=%.1f z=%.1f mg\n",
+           result.accelDelta.x * 1000.0f,
+           result.accelDelta.y * 1000.0f,
+           result.accelDelta.z * 1000.0f);
+    printf("Gyro delta: x=%.2f y=%.2f z=%.2f dps\n",
+           result.gyroDelta.x, result.gyroDelta.y, result.gyroDelta.z);
+    printStatus(st);
+    printf("Selftest result: pass=%u fail=%u skip=0\n",
+           st.ok() ? 3u : 0u,
+           st.ok() ? 0u : 1u);
     printHealth();
   } else if (strcmp(cmd, "stress") == 0 || strcmp(cmd, "stress_mix") == 0) {
     uint32_t count = strcmp(cmd, "stress_mix") == 0 ? 50 : 10;

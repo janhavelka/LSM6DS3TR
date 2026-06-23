@@ -76,11 +76,6 @@ constexpr int MAX_STRESS_COUNT = 100000;
 constexpr int DEFAULT_DUMP_START = 0x10;
 constexpr int DEFAULT_DUMP_LEN = 32;
 constexpr int MAX_DUMP_LEN = 128;
-constexpr int SELF_TEST_SAMPLES = 5;
-constexpr uint8_t SELF_TEST_CTRL1_XL = 0x60;
-constexpr uint8_t SELF_TEST_CTRL2_G = 0x60;
-constexpr uint8_t SELF_TEST_CTRL5_XL_POS = 0x01;
-constexpr uint8_t SELF_TEST_CTRL5_G_POS = 0x04;
 
 uint32_t exampleNowMs(void*) {
   return millis();
@@ -124,6 +119,10 @@ const char* errToStr(LSM6DS3TR::Err err) {
     case Err::I2C_BUS:               return "I2C_BUS";
     case Err::FIFO_EMPTY:            return "FIFO_EMPTY";
     case Err::OFFLINE:               return "OFFLINE";
+    case Err::I2C_BUSY:              return "I2C_BUSY";
+    case Err::FIFO_OVERRUN:          return "FIFO_OVERRUN";
+    case Err::CALIBRATION_UNSTABLE:  return "CALIBRATION_UNSTABLE";
+    case Err::CALIBRATION_ORIENTATION: return "CALIBRATION_ORIENTATION";
     default:                         return "UNKNOWN";
   }
 }
@@ -319,7 +318,7 @@ void printStatus(const LSM6DS3TR::Status& st) {
                 static_cast<unsigned>(st.code),
                 static_cast<long>(st.detail));
   if (st.msg && st.msg[0]) {
-    Serial.printf("  Message: %s%s%s\n", LOG_COLOR_YELLOW, st.msg, LOG_COLOR_RESET);
+    Serial.printf("  Message: %s\n", st.msg);
   }
 }
 
@@ -1389,78 +1388,12 @@ void processJobCommand(String* tokens, size_t count) {
   if (sub == "cancel") {
     cancelPending();
     manualPollMode = false;
-    Serial.println("  Job manual mode cleared.");
+    Serial.println("  Clear CLI manual polling; active driver job may continue on tick.");
     printJobState("cancel");
     return;
   }
 
   Serial.println("  Expected job [status|auto|start|req|poll|run|get|getraw|cancel]");
-}
-
-bool readRegisterSnapshot(const uint8_t* regs, uint8_t* values, size_t count) {
-  for (size_t i = 0; i < count; ++i) {
-    LSM6DS3TR::Status st = device.readRegisterValue(regs[i], values[i]);
-    if (!st.ok()) {
-      printStatus(st);
-      return false;
-    }
-  }
-  return true;
-}
-
-void restoreRegisterSnapshot(const uint8_t* regs, const uint8_t* values, size_t count) {
-  for (size_t i = 0; i < count; ++i) {
-    const size_t index = count - 1U - i;
-    const LSM6DS3TR::Status st = device.writeRegisterValue(regs[index], values[index]);
-    if (!st.ok()) {
-      printStatus(st);
-    }
-  }
-  (void)device.refreshCachedConfig();
-}
-
-bool averageAccelSamples(int sampleCount, LSM6DS3TR::RawAxes& out) {
-  long sumX = 0;
-  long sumY = 0;
-  long sumZ = 0;
-  for (int i = 0; i < sampleCount; ++i) {
-    LSM6DS3TR::RawAxes raw;
-    const LSM6DS3TR::Status st = device.readAccelRaw(raw);
-    if (!st.ok()) {
-      printStatus(st);
-      return false;
-    }
-    sumX += raw.x;
-    sumY += raw.y;
-    sumZ += raw.z;
-    delay(10);
-  }
-  out.x = static_cast<int16_t>(sumX / sampleCount);
-  out.y = static_cast<int16_t>(sumY / sampleCount);
-  out.z = static_cast<int16_t>(sumZ / sampleCount);
-  return true;
-}
-
-bool averageGyroSamples(int sampleCount, LSM6DS3TR::RawAxes& out) {
-  long sumX = 0;
-  long sumY = 0;
-  long sumZ = 0;
-  for (int i = 0; i < sampleCount; ++i) {
-    LSM6DS3TR::RawAxes raw;
-    const LSM6DS3TR::Status st = device.readGyroRaw(raw);
-    if (!st.ok()) {
-      printStatus(st);
-      return false;
-    }
-    sumX += raw.x;
-    sumY += raw.y;
-    sumZ += raw.z;
-    delay(10);
-  }
-  out.x = static_cast<int16_t>(sumX / sampleCount);
-  out.y = static_cast<int16_t>(sumY / sampleCount);
-  out.z = static_cast<int16_t>(sumZ / sampleCount);
-  return true;
 }
 
 void selfTest() {
@@ -1496,7 +1429,14 @@ void selfTest() {
     report(name, SelftestOutcome::SKIP, note);
   };
 
-  Serial.println("=== LSM6DS3TR selftest (safe commands) ===");
+  auto printSummary = [&]() {
+    Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
+                  goodIfNonZeroColor(stats.pass), static_cast<unsigned long>(stats.pass), LOG_COLOR_RESET,
+                  goodIfZeroColor(stats.fail), static_cast<unsigned long>(stats.fail), LOG_COLOR_RESET,
+                  skipCountColor(stats.skip), static_cast<unsigned long>(stats.skip), LOG_COLOR_RESET);
+  };
+
+  Serial.println("=== LSM6DS3TR selftest (core API) ===");
 
   const uint32_t succBefore = device.totalSuccess();
   const uint32_t failBefore = device.totalFailures();
@@ -1506,10 +1446,7 @@ void selfTest() {
   if (probeStatus.code == LSM6DS3TR::Err::NOT_INITIALIZED) {
     reportSkip("probe responds", "driver not initialized");
     reportSkip("remaining checks", "selftest aborted");
-    Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
-                  goodIfNonZeroColor(stats.pass), static_cast<unsigned long>(stats.pass), LOG_COLOR_RESET,
-                  goodIfZeroColor(stats.fail), static_cast<unsigned long>(stats.fail), LOG_COLOR_RESET,
-                  skipCountColor(stats.skip), static_cast<unsigned long>(stats.skip), LOG_COLOR_RESET);
+    printSummary();
     return;
   }
 
@@ -1527,107 +1464,21 @@ void selfTest() {
               st.ok() && whoAmI == LSM6DS3TR::cmd::WHO_AM_I_VALUE,
               st.ok() ? "" : errToStr(st.code));
 
-  bool accelPass = false;
-  bool gyroPass = false;
-  bool accelExecuted = false;
-  bool gyroExecuted = false;
-  static const uint8_t accelRegs[] = {LSM6DS3TR::cmd::REG_CTRL1_XL, LSM6DS3TR::cmd::REG_CTRL5_C, LSM6DS3TR::cmd::REG_CTRL8_XL};
-  static const uint8_t gyroRegs[] = {LSM6DS3TR::cmd::REG_CTRL2_G, LSM6DS3TR::cmd::REG_CTRL5_C, LSM6DS3TR::cmd::REG_CTRL7_G};
-  uint8_t accelSaved[sizeof(accelRegs)] = {};
-  uint8_t gyroSaved[sizeof(gyroRegs)] = {};
-
-  const bool accelBaselineOk = readRegisterSnapshot(accelRegs, accelSaved, sizeof(accelRegs));
-  reportCheck("capture accel baseline", accelBaselineOk, accelBaselineOk ? "" : "readRegister failed");
-  if (accelBaselineOk) {
-    accelExecuted = true;
-    bool accelConfigured =
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL1_XL, SELF_TEST_CTRL1_XL).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL8_XL, 0x00).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok();
-    reportCheck("configure accel self-test", accelConfigured, accelConfigured ? "" : "register write failed");
-    if (accelConfigured) {
-      delay(100);
-      LSM6DS3TR::RawAxes nost;
-      LSM6DS3TR::RawAxes test;
-      const bool accelBaseRead = averageAccelSamples(SELF_TEST_SAMPLES, nost);
-      reportCheck("read accel baseline", accelBaseRead, accelBaseRead ? "" : "sample read failed");
-      const bool accelStimulusOk =
-          accelBaseRead &&
-          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_XL_POS).ok();
-      reportCheck("enable accel stimulus", accelStimulusOk, accelStimulusOk ? "" : "register write failed");
-      if (accelStimulusOk) {
-        delay(100);
-        const bool accelStimulusRead = averageAccelSamples(SELF_TEST_SAMPLES, test);
-        reportCheck("read accel stimulus", accelStimulusRead, accelStimulusRead ? "" : "sample read failed");
-        if (accelStimulusRead) {
-          const float dx = fabsf(static_cast<float>(test.x - nost.x)) * 0.061f;
-          const float dy = fabsf(static_cast<float>(test.y - nost.y)) * 0.061f;
-          const float dz = fabsf(static_cast<float>(test.z - nost.z)) * 0.061f;
-          accelPass = (dx >= 90.0f && dx <= 1700.0f) &&
-                      (dy >= 90.0f && dy <= 1700.0f) &&
-                      (dz >= 90.0f && dz <= 1700.0f);
-          Serial.printf("  Accel delta: x=%.1f y=%.1f z=%.1f mg\n", dx, dy, dz);
-          reportCheck("accel self-test range", accelPass, "");
-        }
-      }
-    }
-    restoreRegisterSnapshot(accelRegs, accelSaved, sizeof(accelRegs));
-    reportCheck("restore accel registers", true, "");
-  } else {
-    reportSkip("accel self-test", "baseline capture failed");
-  }
-
-  const bool gyroBaselineOk = readRegisterSnapshot(gyroRegs, gyroSaved, sizeof(gyroRegs));
-  reportCheck("capture gyro baseline", gyroBaselineOk, gyroBaselineOk ? "" : "readRegister failed");
-  if (gyroBaselineOk) {
-    gyroExecuted = true;
-    bool gyroConfigured =
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL2_G, SELF_TEST_CTRL2_G).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL7_G, 0x00).ok() &&
-        device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, 0x00).ok();
-    reportCheck("configure gyro self-test", gyroConfigured, gyroConfigured ? "" : "register write failed");
-    if (gyroConfigured) {
-      delay(800);
-      LSM6DS3TR::RawAxes nost;
-      LSM6DS3TR::RawAxes test;
-      const bool gyroBaseRead = averageGyroSamples(SELF_TEST_SAMPLES, nost);
-      reportCheck("read gyro baseline", gyroBaseRead, gyroBaseRead ? "" : "sample read failed");
-      const bool gyroStimulusOk =
-          gyroBaseRead &&
-          device.writeRegisterValue(LSM6DS3TR::cmd::REG_CTRL5_C, SELF_TEST_CTRL5_G_POS).ok();
-      reportCheck("enable gyro stimulus", gyroStimulusOk, gyroStimulusOk ? "" : "register write failed");
-      if (gyroStimulusOk) {
-        delay(60);
-        const bool gyroStimulusRead = averageGyroSamples(SELF_TEST_SAMPLES, test);
-        reportCheck("read gyro stimulus", gyroStimulusRead, gyroStimulusRead ? "" : "sample read failed");
-        if (gyroStimulusRead) {
-          const float dx = fabsf(static_cast<float>(test.x - nost.x)) * 0.00875f;
-          const float dy = fabsf(static_cast<float>(test.y - nost.y)) * 0.00875f;
-          const float dz = fabsf(static_cast<float>(test.z - nost.z)) * 0.00875f;
-          gyroPass = (dx >= 20.0f && dx <= 80.0f) &&
-                     (dy >= 20.0f && dy <= 80.0f) &&
-                     (dz >= 20.0f && dz <= 80.0f);
-          Serial.printf("  Gyro delta: x=%.2f y=%.2f z=%.2f dps\n", dx, dy, dz);
-          reportCheck("gyro self-test range", gyroPass, "");
-        }
-      }
-    }
-    restoreRegisterSnapshot(gyroRegs, gyroSaved, sizeof(gyroRegs));
-    reportCheck("restore gyro registers", true, "");
-  } else {
-    reportSkip("gyro self-test", "baseline capture failed");
-  }
-
-  if (accelExecuted && gyroExecuted) {
-    reportCheck("overall self-test", accelPass && gyroPass, "");
-  } else {
-    reportSkip("overall self-test", "one or more sections skipped");
-  }
-
-  Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
-                goodIfNonZeroColor(stats.pass), static_cast<unsigned long>(stats.pass), LOG_COLOR_RESET,
-                goodIfZeroColor(stats.fail), static_cast<unsigned long>(stats.fail), LOG_COLOR_RESET,
-                skipCountColor(stats.skip), static_cast<unsigned long>(stats.skip), LOG_COLOR_RESET);
+  LSM6DS3TR::SelfTestResult result;
+  st = device.runSelfTest(result);
+  Serial.printf("  Accel delta: x=%.1f y=%.1f z=%.1f mg\n",
+                result.accelDelta.x * 1000.0f,
+                result.accelDelta.y * 1000.0f,
+                result.accelDelta.z * 1000.0f);
+  Serial.printf("  Gyro delta: x=%.2f y=%.2f z=%.2f dps\n",
+                result.gyroDelta.x,
+                result.gyroDelta.y,
+                result.gyroDelta.z);
+  reportCheck("run core self-test", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("accel self-test range", result.accelPass, "");
+  reportCheck("gyro self-test range", result.gyroPass, "");
+  reportCheck("overall self-test", st.ok() && result.accelPass && result.gyroPass, "");
+  printSummary();
 }
 
 void runStressMix(int count) {

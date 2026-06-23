@@ -58,6 +58,8 @@ inline void printHelpItem(const char* command, const char* description) {
 
 inline void printPrompt() {
   LOG_SERIAL.print("> ");
+  LOG_SERIAL.flush();
+  delay(2);
 }
 
 inline void printUnknownCommand(const char* command) {

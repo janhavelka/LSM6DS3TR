@@ -143,6 +143,18 @@ struct SettingsSnapshot {
   bool cachedConfigDirty = false;           ///< True when cached config may differ from chip registers
 };
 
+/// @brief Accelerometer and gyroscope self-test result.
+struct SelfTestResult {
+  Axes accelBaseline;      ///< Average accelerometer baseline in g
+  Axes accelStimulus;      ///< Average accelerometer self-test response in g
+  Axes accelDelta;         ///< Absolute accelerometer delta in g
+  Axes gyroBaseline;       ///< Average gyroscope baseline in dps
+  Axes gyroStimulus;       ///< Average gyroscope self-test response in dps
+  Axes gyroDelta;          ///< Absolute gyroscope delta in dps
+  bool accelPass = false;  ///< True when all accel axes are in datasheet range
+  bool gyroPass = false;   ///< True when all gyro axes are in datasheet range
+};
+
 /// @brief Managed synchronous LSM6DS3TR-C IMU driver.
 class LSM6DS3TR {
 public:
@@ -157,8 +169,10 @@ public:
   void tick(uint32_t nowMs);
 
   /// @brief Advance the active chunked job by at most @p maxInstructions I2C transfers.
-  /// @param nowMs Current monotonic time in milliseconds.
+  /// @param nowMs Current monotonic time in milliseconds. Staged sample jobs use
+  /// this value for ready deadlines and sample timestamps.
   /// @param maxInstructions Maximum register read, register write, or burst read instructions.
+  /// Passing 0 makes no progress and does not arm deadlines.
   /// @return OK when the job completes, IN_PROGRESS while work remains, or a terminal error.
   Status poll(uint32_t nowMs, uint8_t maxInstructions = 1);
 
@@ -197,6 +211,17 @@ public:
   /// @brief Start a chunked cached-configuration refresh job.
   /// @return IN_PROGRESS when scheduled; call poll() to advance.
   Status startRefreshCachedConfig();
+
+  /// @brief Run the bounded blocking accelerometer and gyroscope self-test.
+  ///
+  /// The driver configures the datasheet self-test modes, averages @p samples
+  /// per phase, checks datasheet response thresholds, and attempts to restore
+  /// affected registers before returning.
+  /// @param out Result structure populated with baseline, stimulus, and deltas.
+  /// @param samples Average count per phase (1-100).
+  /// @return OK on pass; SELF_TEST_FAIL on threshold failure; otherwise a
+  ///         register, timeout, or validation status.
+  Status runSelfTest(SelfTestResult& out, uint16_t samples = 5);
 
   // Driver state
   /// @brief Get current driver state.
@@ -241,6 +266,9 @@ public:
   Status requestMeasurement();
 
   /// @brief Request a combined sample, optionally skipping the STATUS_REG readiness read.
+  ///
+  /// Ready-checked jobs arm their timeout on the first positive-budget poll()
+  /// that executes the status-read step, not at request time.
   /// @param checkReady true to require a visible status-read instruction before the raw burst.
   /// @return IN_PROGRESS when the request is accepted.
   Status requestMeasurement(bool checkReady);
@@ -253,6 +281,9 @@ public:
   bool hasSample() const { return _hasSample; }
 
   /// @brief Timestamp of the last cached sample, or 0 if none exists.
+  ///
+  /// Poll-completed samples use the nowMs value passed to the raw-burst poll.
+  /// Direct blocking reads use Config::nowMs when present and 0 when absent.
   uint32_t sampleTimestampMs() const { return _sampleTimestampMs; }
 
   /// @brief Age of the cached sample in milliseconds.
@@ -363,10 +394,12 @@ public:
   ///
   /// On success the bias is auto-applied (equivalent to setAccelBias(out))
   /// and returned via @p out so the caller can persist it.
+  /// On quality failure the previous bias is left unchanged.
   ///
   /// @param samples  Number of readings to average (1-10000).
   /// @param out      Computed bias in g.
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
+  ///         CALIBRATION_UNSTABLE / CALIBRATION_ORIENTATION on quality failure;
   ///         TIMEOUT if data-ready never arrives; NOT_INITIALIZED / I2C errors
   ///         propagated from reads.
   Status captureAccelBias(uint16_t samples, Axes& out);
@@ -385,10 +418,12 @@ public:
   ///
   /// On success the bias is auto-applied (equivalent to setGyroBias(out))
   /// and returned via @p out so the caller can persist it.
+  /// On quality failure the previous bias is left unchanged.
   ///
   /// @param samples  Number of readings to average (1-10000).
   /// @param out      Computed bias in dps.
   /// @return OK on success; INVALID_PARAM if samples is 0 or > 10000;
+  ///         CALIBRATION_UNSTABLE on quality failure;
   ///         TIMEOUT if data-ready never arrives; NOT_INITIALIZED / I2C errors
   ///         propagated from reads.
   Status captureGyroBias(uint16_t samples, Axes& out);
@@ -790,7 +825,11 @@ private:
 
   // Internal helpers
   Status _applyConfig();
+  Status _readRawAllWithTimestamp(uint32_t sampleTimestampMs);
   Status _readRawAll();
+  Status _settleSelfTest(uint32_t settleMs);
+  Status _waitForSelfTestReady(bool accel);
+  Status _readSelfTestAverage(bool accel, uint16_t samples, RawAxes& out);
   Status _startPollJob(uint8_t job, const Status& busyStatus);
   Status _finishPollJob(const Status& st);
   Status _pollSampleStep();
@@ -853,6 +892,7 @@ private:
   uint16_t _pollCount = 0;
   uint32_t _pollNowMs = 0;
   uint32_t _pollDeadlineMs = 0;
+  bool _pollDeadlineArmed = false;
   bool _pollInstructionUsed = false;
   bool _pollStartedOffline = false;
   Status _lastPollStatus = Status::Ok();
@@ -877,6 +917,12 @@ private:
   double _calibrationSumX = 0.0;
   double _calibrationSumY = 0.0;
   double _calibrationSumZ = 0.0;
+  float _calibrationMinX = 0.0f;
+  float _calibrationMaxX = 0.0f;
+  float _calibrationMinY = 0.0f;
+  float _calibrationMaxY = 0.0f;
+  float _calibrationMinZ = 0.0f;
+  float _calibrationMaxZ = 0.0f;
 
   // Managed runtime configuration
   AccelPowerMode _accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;

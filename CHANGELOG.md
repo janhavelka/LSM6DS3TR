@@ -15,12 +15,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ESP-IDF `driver/i2c_master.h` callbacks.
 - IDF example contract check covering native command coverage, required ESP-IDF
   components, native I2C symbols, and absence of Arduino compatibility facades.
+- `Err::I2C_BUSY`, `Err::FIFO_OVERRUN`, `Err::CALIBRATION_UNSTABLE`, and
+  `Err::CALIBRATION_ORIENTATION`.
+- `CalibrationLimits` in `Config` plus blocking/staged calibration quality
+  checks that reject unstable or wrongly oriented captures without updating bias.
+- Core `SelfTestResult` and `runSelfTest()` API for bounded accelerometer and
+  gyroscope self-test.
 
 ### Changed
 
 - `library.json` now advertises both Arduino and ESP-IDF framework support.
 - Removed the private platform time shim; the core now relies on injected
   `Config::nowMs` and otherwise uses 0 for timestamps.
+- Staged sample jobs now arm ready deadlines from the first positive-budget
+  `poll(nowMs, ...)` that executes the status-read step, and poll-completed
+  samples use the raw-burst poll timestamp.
+- FIFO convenience reads now report overrun explicitly and treat zero unread
+  words as empty even if the empty flag is not set.
+- Arduino and ESP-IDF CLI `selftest` commands now call the core self-test API.
+
+### Fixed
+
+- Transport callback `IN_PROGRESS` leakage is normalized to `I2C_BUSY` and
+  tracked as a transport failure.
+- README transport callback sample now applies `timeoutMs` and points to the
+  tested example transport helper.
+
+### Documentation
+
+- Documented the staged poll clock contract, `poll(..., 0)` no-progress
+  behavior, CLI job grammar, job cancel caveat, HIL evidence, and remaining
+  release gates.
 
 ## [1.1.0] - 2026-05-17
 

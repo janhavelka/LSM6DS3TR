@@ -28,7 +28,11 @@ enum class Err : uint8_t {
   I2C_TIMEOUT,           ///< I2C transaction timeout
   I2C_BUS,               ///< I2C bus error
   FIFO_EMPTY,            ///< FIFO has no unread samples
-  OFFLINE                ///< Driver is offline; call recover()
+  OFFLINE,               ///< Driver is offline; call recover()
+  I2C_BUSY,              ///< Transport or shared bus temporarily busy
+  FIFO_OVERRUN,          ///< FIFO overrun observed; data freshness is not guaranteed
+  CALIBRATION_UNSTABLE,  ///< Calibration samples exceeded stillness limits
+  CALIBRATION_ORIENTATION ///< Accelerometer calibration orientation is invalid
 };
 
 /// @brief Status structure returned by all fallible operations.

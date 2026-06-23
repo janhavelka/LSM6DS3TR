@@ -37,6 +37,11 @@ struct FakeBus {
   uint32_t notReadyStatusReads = 0;
   bool holdResetBit = false;
   bool holdBootBit = false;
+  bool simulateSelfTest = true;
+  bool unstableAccelReads = false;
+  bool unstableGyroReads = false;
+  uint32_t accelRawReads = 0;
+  uint32_t gyroRawReads = 0;
   uint8_t regs[256] = {};
 
   FakeBus() {
@@ -109,11 +114,15 @@ struct FakeBus {
     regs[cmd::REG_FIFO_DATA_OUT_H] = 0x00;
   }
 
-  void setFifoStatus(uint16_t unreadWords, uint16_t pattern, uint16_t nextWord) {
+  void setFifoStatus(uint16_t unreadWords, uint16_t pattern, uint16_t nextWord,
+                     bool emptyFlag = false, bool overrun = false) {
     regs[cmd::REG_FIFO_STATUS1] = static_cast<uint8_t>(unreadWords & 0xFFu);
     regs[cmd::REG_FIFO_STATUS2] = static_cast<uint8_t>((unreadWords >> 8) & cmd::MASK_DIFF_FIFO_HI);
-    if (unreadWords == 0u) {
+    if (emptyFlag) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_EMPTY;
+    }
+    if (overrun) {
+      regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_OVER_RUN;
     }
     regs[cmd::REG_FIFO_STATUS3] = static_cast<uint8_t>(pattern & 0xFFu);
     regs[cmd::REG_FIFO_STATUS4] = static_cast<uint8_t>((pattern >> 8) & 0x03u);
@@ -164,6 +173,17 @@ Status fakeWrite(uint8_t, const uint8_t* data, size_t len, uint32_t, void* user)
       continue;
     }
 
+    if (reg == cmd::REG_CTRL5_C) {
+      bus->regs[reg] = value;
+      if (bus->simulateSelfTest && (value & cmd::MASK_ST_XL) != 0u) {
+        bus->setAccelRaw(2000, 2000, 18384);
+      }
+      if (bus->simulateSelfTest && (value & cmd::MASK_ST_G) != 0u) {
+        bus->setGyroRaw(4000, 4000, 4000);
+      }
+      continue;
+    }
+
     if (reg == cmd::REG_CTRL10_C && (value & (1u << cmd::BIT_PEDO_RST_STEP)) != 0u) {
       bus->regs[reg] = value;
       bus->setStepCounter(0u);
@@ -192,6 +212,17 @@ Status fakeWriteRead(uint8_t, const uint8_t* txData, size_t txLen, uint8_t* rxDa
   if (bus->readErrorOnCall != 0u && bus->readCalls == bus->readErrorOnCall) {
     bus->readErrorOnCall = 0;
     return bus->readError;
+  }
+
+  if (startReg == cmd::REG_DATA_START_ACCEL && bus->unstableAccelReads) {
+    const int16_t z = (bus->accelRawReads % 2u) == 0u ? 15400 : 17400;
+    bus->setAccelRaw(0, 0, z);
+    bus->accelRawReads++;
+  }
+  if (startReg == cmd::REG_DATA_START_GYRO && bus->unstableGyroReads) {
+    const int16_t x = (bus->gyroRawReads % 2u) == 0u ? 0 : 500;
+    bus->setGyroRaw(x, 0, 0);
+    bus->gyroRawReads++;
   }
 
   for (size_t i = 0; i < rxLen; ++i) {
@@ -279,6 +310,11 @@ void test_config_defaults() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AccelFs::G_2), static_cast<uint8_t>(cfg.fsXl));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(GyroFs::DPS_250), static_cast<uint8_t>(cfg.fsG));
   TEST_ASSERT_TRUE(cfg.bdu);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.08f, cfg.calibrationLimits.accelMaxPeakToPeakG);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.20f, cfg.calibrationLimits.accelMaxHorizontalMeanG);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.80f, cfg.calibrationLimits.accelMinZMeanG);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.20f, cfg.calibrationLimits.accelMaxZMeanG);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, cfg.calibrationLimits.gyroMaxPeakToPeakDps);
 }
 
 void test_get_settings_snapshot_and_sample_aliases() {
@@ -437,6 +473,17 @@ void test_begin_rejects_invalid_power_mode_enums() {
   cfg = makeConfig(bus);
   cfg.gyroPowerMode = static_cast<GyroPowerMode>(99);
   st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
+}
+
+void test_begin_rejects_invalid_calibration_limits() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.calibrationLimits.accelMinZMeanG = 1.2f;
+  cfg.calibrationLimits.accelMaxZMeanG = 0.8f;
+
+  const Status st = dev.begin(cfg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG), static_cast<uint8_t>(st.code));
 }
 
@@ -619,7 +666,7 @@ void test_recover_success_returns_ready() {
   TEST_ASSERT_EQUAL_UINT32(4321u, dev.lastOkMs());
 }
 
-void test_runtime_in_progress_does_not_update_health() {
+void test_transport_in_progress_normalizes_to_i2c_busy_and_updates_health() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
@@ -630,14 +677,15 @@ void test_runtime_in_progress_does_not_update_health() {
 
   RawMeasurement raw{};
   const Status st = dev.readAllRaw(raw);
-  TEST_ASSERT_TRUE(st.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUSY), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
-  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
-  TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
                           static_cast<uint8_t>(dev.state()));
   TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OK),
+  TEST_ASSERT_EQUAL_UINT32(5678u, dev.lastErrorMs());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_BUSY),
                           static_cast<uint8_t>(dev.lastError().code));
 }
 
@@ -928,6 +976,85 @@ void test_poll_sample_without_status_uses_one_raw_instruction() {
   TEST_ASSERT_EQUAL_UINT32(rawBefore + 1u, bus.readStarts[cmd::REG_DATA_START_ALL]);
 }
 
+void test_poll_sample_without_nowms_delayed_first_poll_does_not_timeout() {
+  FakeBus bus;
+  bus.notReadyStatusReads = 1;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.requestMeasurement(true).code));
+  Status st = dev.poll(1000u, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_TRUE(dev.pollBusy());
+  TEST_ASSERT_FALSE(dev.measurementReady());
+
+  st = dev.poll(1000u, 2);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(dev.measurementReady());
+}
+
+void test_poll_zero_budget_does_not_arm_ready_deadline() {
+  FakeBus bus;
+  bus.notReadyStatusReads = 1;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.requestMeasurement(true).code));
+  const uint32_t statusBefore = bus.readStarts[cmd::REG_STATUS_REG];
+  Status st = dev.poll(1000u, 0);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_TRUE(dev.pollBusy());
+  TEST_ASSERT_EQUAL_UINT32(statusBefore, bus.readStarts[cmd::REG_STATUS_REG]);
+
+  st = dev.poll(1200u, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_TRUE(dev.pollBusy());
+  TEST_ASSERT_EQUAL_UINT32(statusBefore + 1u, bus.readStarts[cmd::REG_STATUS_REG]);
+}
+
+void test_poll_ready_deadline_times_out_after_arming() {
+  FakeBus bus;
+  bus.notReadyStatusReads = 1000;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.requestMeasurement(true).code));
+  Status st = dev.poll(1000u, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS), static_cast<uint8_t>(st.code));
+
+  st = dev.poll(1130u, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.pollBusy());
+}
+
+void test_poll_completed_sample_uses_raw_burst_poll_timestamp() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.requestMeasurement(false).code));
+  const Status st = dev.poll(5555u, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(dev.measurementReady());
+  TEST_ASSERT_EQUAL_UINT32(5555u, dev.sampleTimestampMs());
+}
+
 void test_poll_sample_not_ready_consumes_only_status_instruction() {
   FakeBus bus;
   bus.notReadyStatusReads = 1;
@@ -1170,6 +1297,63 @@ void test_capture_bias_times_out_with_stalled_clock_and_no_data_ready() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT), static_cast<uint8_t>(st.code));
 }
 
+void test_capture_accel_bias_rejects_unstable_samples_without_update() {
+  FakeBus bus;
+  bus.unstableAccelReads = true;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const Axes existing{0.10f, -0.20f, 0.30f};
+  dev.setAccelBias(existing);
+  Axes bias{};
+  const Status st = dev.captureAccelBias(2, bias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CALIBRATION_UNSTABLE),
+                          static_cast<uint8_t>(st.code));
+
+  const Axes stored = dev.accelBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.x, stored.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.y, stored.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.z, stored.z);
+}
+
+void test_capture_accel_bias_rejects_wrong_orientation_without_update() {
+  FakeBus bus;
+  bus.setAccelRaw(16384, 0, 0);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const Axes existing{0.10f, -0.20f, 0.30f};
+  dev.setAccelBias(existing);
+  Axes bias{};
+  const Status st = dev.captureAccelBias(2, bias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CALIBRATION_ORIENTATION),
+                          static_cast<uint8_t>(st.code));
+
+  const Axes stored = dev.accelBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.x, stored.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.y, stored.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.z, stored.z);
+}
+
+void test_capture_gyro_bias_rejects_unstable_samples_without_update() {
+  FakeBus bus;
+  bus.unstableGyroReads = true;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const Axes existing{1.0f, 2.0f, 3.0f};
+  dev.setGyroBias(existing);
+  Axes bias{};
+  const Status st = dev.captureGyroBias(2, bias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CALIBRATION_UNSTABLE),
+                          static_cast<uint8_t>(st.code));
+
+  const Axes stored = dev.gyroBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.x, stored.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.y, stored.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existing.z, stored.z);
+}
+
 void test_poll_accel_calibration_budget_one_exposes_each_status_and_sample_step() {
   FakeBus bus;
   bus.setAccelRaw(0, 0, 16384);
@@ -1252,6 +1436,62 @@ void test_poll_calibration_timeout_is_bounded_without_bias_update() {
   TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.z, storedBias.z);
 }
 
+void test_poll_accel_calibration_rejects_unstable_samples_without_bias_update() {
+  FakeBus bus;
+  bus.unstableAccelReads = true;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const Axes existingBias{0.5f, 0.25f, -0.75f};
+  dev.setAccelBias(existingBias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.startAccelBiasCapture(2).code));
+
+  Status st = Status::Ok();
+  for (uint8_t i = 0; i < 4u; ++i) {
+    st = dev.poll(bus.nowMs, 2);
+    if (!st.inProgress()) {
+      break;
+    }
+  }
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CALIBRATION_UNSTABLE),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.pollBusy());
+  const Axes storedBias = dev.accelBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.x, storedBias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.y, storedBias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.z, storedBias.z);
+}
+
+void test_poll_gyro_calibration_rejects_unstable_samples_without_bias_update() {
+  FakeBus bus;
+  bus.unstableGyroReads = true;
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const Axes existingBias{1.0f, 2.0f, 3.0f};
+  dev.setGyroBias(existingBias);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.startGyroBiasCapture(2).code));
+
+  Status st = Status::Ok();
+  for (uint8_t i = 0; i < 4u; ++i) {
+    st = dev.poll(bus.nowMs, 2);
+    if (!st.inProgress()) {
+      break;
+    }
+  }
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CALIBRATION_UNSTABLE),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.pollBusy());
+  const Axes storedBias = dev.gyroBias();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.x, storedBias.x);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.y, storedBias.y);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, existingBias.z, storedBias.z);
+}
+
 void test_individual_raw_reads_preserve_int16_edges_and_bias_is_float_only() {
   FakeBus bus;
   bus.setAccelRaw(INT16_MIN, INT16_MAX, -1);
@@ -1281,6 +1521,79 @@ void test_individual_raw_reads_preserve_int16_edges_and_bias_is_float_only() {
   TEST_ASSERT_EQUAL_INT16(32766, gyro.y);
   TEST_ASSERT_EQUAL_INT16(-2, gyro.z);
   TEST_ASSERT_EQUAL_INT16(-1, temp);
+}
+
+void test_run_self_test_passes_and_restores_registers() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  const uint8_t ctrl1 = bus.regs[cmd::REG_CTRL1_XL];
+  const uint8_t ctrl2 = bus.regs[cmd::REG_CTRL2_G];
+  const uint8_t ctrl5 = bus.regs[cmd::REG_CTRL5_C];
+  const uint8_t ctrl7 = bus.regs[cmd::REG_CTRL7_G];
+  const uint8_t ctrl8 = bus.regs[cmd::REG_CTRL8_XL];
+
+  SelfTestResult result;
+  const Status st = dev.runSelfTest(result, 2);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(result.accelPass);
+  TEST_ASSERT_TRUE(result.gyroPass);
+  TEST_ASSERT_TRUE(result.accelDelta.x > 0.09f);
+  TEST_ASSERT_TRUE(result.gyroDelta.x > 150.0f);
+  TEST_ASSERT_EQUAL_HEX8(ctrl1, bus.regs[cmd::REG_CTRL1_XL]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl2, bus.regs[cmd::REG_CTRL2_G]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl5, bus.regs[cmd::REG_CTRL5_C]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl7, bus.regs[cmd::REG_CTRL7_G]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl8, bus.regs[cmd::REG_CTRL8_XL]);
+}
+
+void test_run_self_test_fail_restores_registers() {
+  FakeBus bus;
+  bus.simulateSelfTest = false;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  const uint8_t ctrl1 = bus.regs[cmd::REG_CTRL1_XL];
+  const uint8_t ctrl2 = bus.regs[cmd::REG_CTRL2_G];
+  const uint8_t ctrl5 = bus.regs[cmd::REG_CTRL5_C];
+  const uint8_t ctrl7 = bus.regs[cmd::REG_CTRL7_G];
+  const uint8_t ctrl8 = bus.regs[cmd::REG_CTRL8_XL];
+
+  SelfTestResult result;
+  const Status st = dev.runSelfTest(result, 2);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::SELF_TEST_FAIL),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(result.accelPass);
+  TEST_ASSERT_FALSE(result.gyroPass);
+  TEST_ASSERT_EQUAL_HEX8(ctrl1, bus.regs[cmd::REG_CTRL1_XL]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl2, bus.regs[cmd::REG_CTRL2_G]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl5, bus.regs[cmd::REG_CTRL5_C]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl7, bus.regs[cmd::REG_CTRL7_G]);
+  TEST_ASSERT_EQUAL_HEX8(ctrl8, bus.regs[cmd::REG_CTRL8_XL]);
+}
+
+void test_run_self_test_transport_error_propagates() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR dev;
+  Config cfg = makeConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorOnCall = bus.readCalls + 1u;
+  bus.readError = Status::Error(Err::I2C_TIMEOUT, "forced selftest read timeout", -71);
+  SelfTestResult result;
+  const Status st = dev.runSelfTest(result, 2);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_INT32(-71, st.detail);
 }
 
 // ==========================================================================
@@ -1701,6 +2014,32 @@ void test_read_fifo_word_reports_empty() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::FIFO_EMPTY), static_cast<uint8_t>(st.code));
 }
 
+void test_read_fifo_word_reports_zero_unread_as_empty_without_data_read() {
+  FakeBus bus;
+  bus.setFifoStatus(0u, 0x12u, 0xBEEFu, false, false);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t dataBefore = bus.readStarts[cmd::REG_FIFO_DATA_OUT_L];
+  uint16_t word = 0;
+  const Status st = dev.readFifoWord(word);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::FIFO_EMPTY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(dataBefore, bus.readStarts[cmd::REG_FIFO_DATA_OUT_L]);
+}
+
+void test_read_fifo_word_reports_overrun_without_data_read() {
+  FakeBus bus;
+  bus.setFifoStatus(1u, 0x12u, 0xBEEFu, false, true);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t dataBefore = bus.readStarts[cmd::REG_FIFO_DATA_OUT_L];
+  uint16_t word = 0;
+  const Status st = dev.readFifoWord(word);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::FIFO_OVERRUN), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(dataBefore, bus.readStarts[cmd::REG_FIFO_DATA_OUT_L]);
+}
+
 void test_poll_fifo_drain_reads_status_then_one_word_per_instruction() {
   FakeBus bus;
   bus.setFifoStatus(3u, 0x12u, 0xBEEFu);
@@ -1730,6 +2069,22 @@ void test_poll_fifo_drain_reads_status_then_one_word_per_instruction() {
   TEST_ASSERT_FALSE(dev.pollBusy());
   TEST_ASSERT_EQUAL_UINT32(wordBefore + 2u, bus.readStarts[cmd::REG_FIFO_DATA_OUT_L]);
   TEST_ASSERT_EQUAL_UINT16(2u, dev.fifoDrainWordsRead());
+}
+
+void test_poll_fifo_drain_reports_overrun_without_data_read() {
+  FakeBus bus;
+  bus.setFifoStatus(3u, 0x12u, 0xBEEFu, false, true);
+  LSM6DS3TR::LSM6DS3TR dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(dev.startFifoDrain(2).code));
+  const uint32_t dataBefore = bus.readStarts[cmd::REG_FIFO_DATA_OUT_L];
+  const Status st = dev.poll(bus.nowMs, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::FIFO_OVERRUN), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(dev.pollBusy());
+  TEST_ASSERT_EQUAL_UINT32(dataBefore, bus.readStarts[cmd::REG_FIFO_DATA_OUT_L]);
+  TEST_ASSERT_EQUAL_UINT16(0u, dev.fifoDrainWordsRead());
 }
 
 void test_poll_refresh_cached_config_budget_one_reads_one_step() {
@@ -2204,6 +2559,7 @@ int main() {
   RUN_TEST(test_begin_rejects_gyro_1_6);
   RUN_TEST(test_begin_rejects_gyro_833_in_low_power_normal);
   RUN_TEST(test_begin_rejects_invalid_power_mode_enums);
+  RUN_TEST(test_begin_rejects_invalid_calibration_limits);
   RUN_TEST(test_begin_detects_wrong_chip_id);
   RUN_TEST(test_begin_preserves_whoami_transport_errors);
   RUN_TEST(test_probe_after_failed_begin_uses_stored_transport);
@@ -2215,7 +2571,7 @@ int main() {
   RUN_TEST(test_recover_failure_updates_health_once);
   RUN_TEST(test_recover_chip_id_mismatch_updates_health_once);
   RUN_TEST(test_recover_success_returns_ready);
-  RUN_TEST(test_runtime_in_progress_does_not_update_health);
+  RUN_TEST(test_transport_in_progress_normalizes_to_i2c_busy_and_updates_health);
   RUN_TEST(test_recover_reaches_offline_when_threshold_is_one);
   RUN_TEST(test_offline_read_all_raw_returns_busy_without_i2c);
   RUN_TEST(test_offline_non_recovery_poll_jobs_reject_without_scheduling);
@@ -2233,6 +2589,10 @@ int main() {
   RUN_TEST(test_poll_sample_budget_one_splits_status_and_raw);
   RUN_TEST(test_poll_sample_budget_two_reads_status_and_raw);
   RUN_TEST(test_poll_sample_without_status_uses_one_raw_instruction);
+  RUN_TEST(test_poll_sample_without_nowms_delayed_first_poll_does_not_timeout);
+  RUN_TEST(test_poll_zero_budget_does_not_arm_ready_deadline);
+  RUN_TEST(test_poll_ready_deadline_times_out_after_arming);
+  RUN_TEST(test_poll_completed_sample_uses_raw_burst_poll_timestamp);
   RUN_TEST(test_poll_sample_not_ready_consumes_only_status_instruction);
   RUN_TEST(test_poll_sample_not_ready_times_out_and_clears_job);
   RUN_TEST(test_poll_status_failure_stops_job_and_reports_status);
@@ -2243,10 +2603,18 @@ int main() {
   RUN_TEST(test_capture_accel_bias_auto_applies_to_measurements);
   RUN_TEST(test_capture_gyro_bias_auto_applies_to_measurements);
   RUN_TEST(test_capture_bias_times_out_with_stalled_clock_and_no_data_ready);
+  RUN_TEST(test_capture_accel_bias_rejects_unstable_samples_without_update);
+  RUN_TEST(test_capture_accel_bias_rejects_wrong_orientation_without_update);
+  RUN_TEST(test_capture_gyro_bias_rejects_unstable_samples_without_update);
   RUN_TEST(test_poll_accel_calibration_budget_one_exposes_each_status_and_sample_step);
   RUN_TEST(test_poll_calibration_not_ready_consumes_only_one_status_even_with_larger_budget);
   RUN_TEST(test_poll_calibration_timeout_is_bounded_without_bias_update);
+  RUN_TEST(test_poll_accel_calibration_rejects_unstable_samples_without_bias_update);
+  RUN_TEST(test_poll_gyro_calibration_rejects_unstable_samples_without_bias_update);
   RUN_TEST(test_individual_raw_reads_preserve_int16_edges_and_bias_is_float_only);
+  RUN_TEST(test_run_self_test_passes_and_restores_registers);
+  RUN_TEST(test_run_self_test_fail_restores_registers);
+  RUN_TEST(test_run_self_test_transport_error_propagates);
 
   RUN_TEST(test_set_accel_odr);
   RUN_TEST(test_set_gyro_fs);
@@ -2269,7 +2637,10 @@ int main() {
   RUN_TEST(test_fifo_configuration_and_read_helpers_work);
   RUN_TEST(test_fifo_requires_bdu_when_active);
   RUN_TEST(test_read_fifo_word_reports_empty);
+  RUN_TEST(test_read_fifo_word_reports_zero_unread_as_empty_without_data_read);
+  RUN_TEST(test_read_fifo_word_reports_overrun_without_data_read);
   RUN_TEST(test_poll_fifo_drain_reads_status_then_one_word_per_instruction);
+  RUN_TEST(test_poll_fifo_drain_reports_overrun_without_data_read);
   RUN_TEST(test_poll_refresh_cached_config_budget_one_reads_one_step);
   RUN_TEST(test_poll_soft_reset_stages_write_then_autoclear_read);
   RUN_TEST(test_poll_boot_stages_write_then_autoclear_read);

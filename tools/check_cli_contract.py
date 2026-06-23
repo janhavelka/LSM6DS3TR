@@ -49,6 +49,7 @@ MANDATORY_COMMANDS = [
 
 REQUIRED_TOKENS = [
     "cachedConfigDirty",
+    "runSelfTest",
 ]
 
 

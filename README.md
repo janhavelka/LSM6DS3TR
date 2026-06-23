@@ -39,8 +39,10 @@ The managed API covers the most practical runtime features of the chip:
   sensor-hub, and slave-NACK diagnostics
 - accelerometer user offsets and offset weight selection
 - software bias calibration for accel (1-point, Z-up) and gyro (zero-rate-level) with at-rest capture
+- configurable calibration stillness/orientation limits that reject bad captures before updating bias
 - automatic bias correction in `getMeasurement()`; manual helpers `correctAccel()` / `correctGyro()`
-- FIFO configuration, status readout, and FIFO word reads
+- FIFO configuration, status readout, FIFO word reads, and explicit FIFO overrun reporting
+- bounded core accelerometer/gyroscope self-test via `runSelfTest()`
 - raw sample reads, converted sample helpers, and tick-driven async measurement
 - direct single-register and block register access for advanced diagnostics
 - source register reads for wake-up, tap, 6D, embedded function, and wrist-tilt status
@@ -63,8 +65,10 @@ The driver enforces several device constraints from the datasheet and applicatio
 - pedometer step events are short pulses unless interrupt latching/routing is
   configured; the step counter is the durable pedometer readback
 - FIFO configuration requires BDU enabled
+- FIFO convenience reads return `FIFO_EMPTY` when no unread words are available and `FIFO_OVERRUN` when the FIFO overrun flag is observed
 - async combined measurements require BDU and matching active accel/gyro ODR
 - managed setters validate enum values before I2C and keep cached state unchanged if a write fails
+- transport callbacks must be synchronous and timeout-bounded; driver-owned staged jobs are the only APIs that return `IN_PROGRESS`
 - `Config::offlineThreshold = 0` is normalized to one; failed `begin()` clears
   cached config, feature flags, samples, and health before validation.
 - software-reset, boot, and calibration waits use bounded polling; reset/boot timeouts and transport failures during raw polling are recorded in driver health
@@ -106,6 +110,7 @@ optionally `Config::nowMs`.
 LSM6DS3TR::Status myWrite(uint8_t addr, const uint8_t* data, size_t len,
                           uint32_t timeoutMs, void* user) {
   auto* wire = static_cast<TwoWire*>(user);
+  wire->setTimeOut(timeoutMs);
   wire->beginTransmission(addr);
   wire->write(data, len);
   const uint8_t rc = wire->endTransmission(true);
@@ -120,6 +125,7 @@ LSM6DS3TR::Status myWrite(uint8_t addr, const uint8_t* data, size_t len,
 LSM6DS3TR::Status myWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
                               uint8_t* rx, size_t rxLen, uint32_t timeoutMs, void* user) {
   auto* wire = static_cast<TwoWire*>(user);
+  wire->setTimeOut(timeoutMs);
   wire->beginTransmission(addr);
   wire->write(tx, txLen);
   if (wire->endTransmission(false) != 0) {
@@ -176,6 +182,11 @@ void loop() {
 }
 ```
 
+The full Arduino example transport in
+[examples/common/I2cTransport.h](examples/common/I2cTransport.h) clamps
+`timeoutMs` for `Wire`, maps Wire error codes to `Status`, and keeps transport
+policy outside the driver.
+
 ## CLI Example
 
 The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_bringup_cli/main.cpp). It exposes:
@@ -186,7 +197,7 @@ The main example is [examples/01_basic_bringup_cli/main.cpp](examples/01_basic_b
 - register read, write, and dump commands for advanced tuning
 - source-register inspection commands
 - ODR-paced independent data-ready stress and mixed-operation stress commands
-- hardware self-test flow for accelerometer and gyroscope
+- core `runSelfTest()` hardware self-test flow for accelerometer and gyroscope
 - software bias calibration and continuous streaming mode with one line per sample
 - converted CLI sample reads (`read`, `accel`, `gyro`, `stream`) that respect the currently configured software bias values
 - decoded `status` output, expanded FIFO flags, `begin`, `whoami` / `id`, and
@@ -280,6 +291,35 @@ With `maxInstructions = 1`, a ready status-gated sample takes two polls: status
 read first, raw burst second. With `maxInstructions >= 2`, both can complete in
 one `poll()` call when data is ready.
 
+`poll(nowMs, 0)` is an explicit no-progress call: it returns `IN_PROGRESS` for
+an active job, does not touch I2C, and does not arm ready deadlines. For staged
+sample jobs, the `nowMs` argument passed to the first positive-budget readiness
+poll starts the ready deadline, and the `nowMs` argument used for the raw burst
+becomes `sampleTimestampMs()`. Direct blocking reads such as `readAllRaw()` use
+`Config::nowMs` for timestamps when provided and `0` when no hook is configured.
+
+Ready-checked sample jobs can legitimately timeout if a caller manually splits
+`job start sample` and positive-budget `job poll` calls across slow host/serial
+interaction. For instruction-budget diagnostics use direct jobs
+(`requestMeasurement(false)` / `job start direct`) or `job run sample ...`.
+
+CLI job grammar:
+
+```text
+job status
+job auto <0|1>
+job start <sample|direct|reset|boot|refresh|fifo|calxl|calg> [arg]
+job poll <budget 0..255> [count 1..1000] [delayMs 0..1000]
+job run <kind> <budget> [limit 1..1000] [delayMs] [arg]
+job get
+job getraw
+job cancel
+```
+
+`job cancel` is CLI manual-polling cleanup only. It does not cancel a partially
+applied driver job; active staged jobs are expected to complete or fail on later
+`tick()` / `poll()` calls. `end()` is the hard lifecycle reset.
+
 ## TunnelMonitor Fit
 
 See [docs/tunnelmonitor_fit_report.md](docs/tunnelmonitor_fit_report.md) for the API classification and status taxonomy decisions used when integrating behind a queue-owned I2C task.
@@ -320,16 +360,49 @@ idf.py set-target esp32s2
 idf.py build
 ```
 
+## HIL Evidence And Release Gates
+
+Current evidence in this repository:
+
+- native Unity tests cover lifecycle, validation, health, chunked polling, FIFO,
+  calibration quality rejection, self-test, and register helpers
+- Arduino PlatformIO builds are maintained for ESP32-S3 and ESP32-S2
+- broad COM26 Arduino HIL validation on 2026-06-22 covered smoke, 120-command
+  validation, benchmark, post-soak live read, and an 8-hour soak that completed
+  with 0 hard failures and recoverable prompt-capture UNKNOWNs
+- targeted COM26 HIL on 2026-06-23 covered poll budgets `0`, `1`, and `255`,
+  reset/boot retry, job cancel/manual-mode behavior, FIFO/config/source-register
+  commands, calibration, self-test, and short stress
+- closeout targeted COM26 HIL on 2026-06-23 passed 145/145 checks with the
+  final artifacts in
+  [docs/reports/artifacts/hil-COM26-20260623-closeout-targeted-clean4-results.md](docs/reports/artifacts/hil-COM26-20260623-closeout-targeted-clean4-results.md)
+- reset/boot retry and cancel probes are documented in
+  [docs/reports/hil-targeted-poll-COM26-20260623.md](docs/reports/hil-targeted-poll-COM26-20260623.md)
+
+Remaining gates before claiming final field readiness:
+
+- physical bus fault injection: hold SDA/SCL low or force NACK/timeout
+- IMU power-cycle or disconnect/reconnect while the MCU stays alive
+- absent-device behavior on the target wiring
+- alternate address `0x6B`
+- live native ESP-IDF HIL, not only Arduino HIL and IDF build/contract checks
+- clean soak where prompt-capture UNKNOWNs are either eliminated or explained
+  with independent serial-link evidence
+
 ## Hardware-In-Loop Smoke
 
 `tools/hil_smoke.py` drives the maintained serial CLI; it does not add fake devices or simulated buses to production paths. The default command set covers `version`, `scan`, `probe`, `settings`, `health`, `whoami`, `status`, `raw`, `fifo`, and `selftest`.
 
 ```bash
 python tools/hil_smoke.py --dry-run --parser-self-test
-python tools/hil_smoke.py --port COM7
+python tools/hil_smoke.py --suite targeted --port COM7 --reset-before --stress-count 50
 ```
 
-The runner classifies visible status/error tokens such as `I2C_TIMEOUT`, `I2C_NACK_ADDR`, `DEVICE_NOT_FOUND`, `CHIP_ID_MISMATCH`, `SELF_TEST_FAIL`, `FIFO_EMPTY`, and `OFFLINE`. A live self-test still requires a suitable stationary fixture before making field-readiness claims.
+The runner classifies visible status/error tokens such as `I2C_TIMEOUT`,
+`I2C_NACK_ADDR`, `I2C_BUSY`, `DEVICE_NOT_FOUND`, `CHIP_ID_MISMATCH`,
+`SELF_TEST_FAIL`, `FIFO_EMPTY`, `FIFO_OVERRUN`, `CALIBRATION_UNSTABLE`,
+`CALIBRATION_ORIENTATION`, and `OFFLINE`. A live self-test still requires a
+suitable stationary fixture before making field-readiness claims.
 
 ## Repository Notes
 

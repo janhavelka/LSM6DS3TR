@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #ifndef LSM6DS3TR_VERSION_STRING
-#define LSM6DS3TR_VERSION_STRING "1.1.0"
+#define LSM6DS3TR_VERSION_STRING "1.2.0"
 #endif
 
 #ifndef LSM6DS3TR_BUILD_DATE
@@ -45,7 +45,7 @@ namespace LSM6DS3TR {
 static constexpr uint16_t VERSION_MAJOR = 1;
 
 /// @brief Minor version (backward-compatible features).
-static constexpr uint16_t VERSION_MINOR = 1;
+static constexpr uint16_t VERSION_MINOR = 2;
 
 /// @brief Patch version (backward-compatible fixes).
 static constexpr uint16_t VERSION_PATCH = 0;
@@ -54,10 +54,10 @@ static constexpr uint16_t VERSION_PATCH = 0;
 static constexpr const char* VERSION = LSM6DS3TR_VERSION_STRING;
 
 /// @brief Encoded version for numeric comparison: MAJOR*10000 + MINOR*100 + PATCH.
-static constexpr uint32_t VERSION_CODE = 10100;
+static constexpr uint32_t VERSION_CODE = 10200;
 
 /// @brief Backward-compatible alias used by older repositories.
-static constexpr int VERSION_INT = 10100;
+static constexpr int VERSION_INT = 10200;
 
 /// @brief Build date string.
 static constexpr const char* BUILD_DATE = LSM6DS3TR_BUILD_DATE;

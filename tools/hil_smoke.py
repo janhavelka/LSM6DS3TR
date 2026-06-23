@@ -41,6 +41,7 @@ STATUS_TOKENS = {
     "I2C_NACK_DATA",
     "I2C_TIMEOUT",
     "I2C_BUS",
+    "I2C_BUSY",
     "DEVICE_NOT_FOUND",
     "CHIP_ID_MISMATCH",
     "TIMEOUT",
@@ -49,6 +50,9 @@ STATUS_TOKENS = {
     "MEASUREMENT_NOT_READY",
     "SELF_TEST_FAIL",
     "FIFO_EMPTY",
+    "FIFO_OVERRUN",
+    "CALIBRATION_UNSTABLE",
+    "CALIBRATION_ORIENTATION",
     "OFFLINE",
 }
 
@@ -692,6 +696,7 @@ def open_serial(args: argparse.Namespace):
 def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list[str]) -> StepResult:
     timeout_s = spec.timeout_s if spec.timeout_s is not None else args.command_timeout
     command_start = time.monotonic()
+    prompt_recovered = False
     transcript.append(f"\n>>> {spec.command}\n")
     port.write((spec.command + "\n").encode("utf-8"))
     port.flush()
@@ -720,6 +725,23 @@ def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list
             transcript.append(extra)
             if prompt_seen(output):
                 break
+        if args.late_prompt_grace > 0 and not prompt_seen(output):
+            transcript.append("\n<<< late prompt drain >>>\n")
+            extra = read_until_idle_or_prompt(
+                port, args.late_prompt_grace, args.idle_timeout, args.stop_on_prompt
+            )
+            output += extra
+            transcript.append(extra)
+        if args.resync_on_prompt_loss and not prompt_seen(output):
+            transcript.append("\n<<< prompt resync: health >>>\n")
+            port.write(b"health\n")
+            port.flush()
+            extra = read_until_idle_or_prompt(
+                port, args.prompt_retry_timeout, args.idle_timeout, args.stop_on_prompt
+            )
+            output += extra
+            transcript.append(extra)
+            prompt_recovered = prompt_seen(output)
 
     elapsed_s = time.monotonic() - command_start
     if not output_written:
@@ -737,6 +759,8 @@ def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list
     elif classification.ok():
         outcome = "PASS"
         notes = spec.notes
+        if prompt_recovered:
+            notes = (notes + "; " if notes else "") + "prompt recovered with health resync"
     else:
         outcome = "FAIL"
         reasons: list[str] = []
@@ -1052,6 +1076,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-no-prompt", type=int, default=1)
     parser.add_argument("--retry-missing-prompt", type=int, default=1)
     parser.add_argument("--prompt-retry-timeout", type=float, default=5.0)
+    parser.add_argument("--late-prompt-grace", type=float, default=0.75)
+    parser.add_argument("--resync-on-prompt-loss", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--stop-on-prompt", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-prompt", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--stop-on-fail", action=argparse.BooleanOptionalAction, default=False)

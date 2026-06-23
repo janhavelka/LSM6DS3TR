@@ -15,7 +15,9 @@ namespace LSM6DS3TR {
 /// @param len Number of bytes to write.
 /// @param timeoutMs Transaction timeout in milliseconds.
 /// @param user User context pointer.
-/// @return Status indicating success or failure.
+/// @return Status indicating success or failure. Callback must complete
+/// synchronously and must not return IN_PROGRESS; the driver normalizes that to
+/// I2C_BUSY for compatibility with shared-bus adapters.
 using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
                               uint32_t timeoutMs, void* user);
 
@@ -27,7 +29,9 @@ using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
 /// @param rxLen Number of bytes to read.
 /// @param timeoutMs Transaction timeout in milliseconds.
 /// @param user User context pointer.
-/// @return Status indicating success or failure.
+/// @return Status indicating success or failure. Callback must complete
+/// synchronously and must not return IN_PROGRESS; the driver normalizes that to
+/// I2C_BUSY for compatibility with shared-bus adapters.
 using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
                                   uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
                                   void* user);
@@ -36,6 +40,15 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
 /// @param user User context pointer.
 /// @return Current monotonic milliseconds.
 using NowMsFn = uint32_t (*)(void* user);
+
+/// @brief Quality limits for automatic software bias calibration.
+struct CalibrationLimits {
+  float accelMaxPeakToPeakG = 0.08f;       ///< Maximum accel peak-to-peak per axis
+  float accelMaxHorizontalMeanG = 0.20f;   ///< Maximum absolute X/Y mean while Z-up
+  float accelMinZMeanG = 0.80f;            ///< Minimum accepted Z-axis mean
+  float accelMaxZMeanG = 1.20f;            ///< Maximum accepted Z-axis mean
+  float gyroMaxPeakToPeakDps = 3.0f;       ///< Maximum gyro peak-to-peak per axis
+};
 
 /// @brief Output data rate register encoding.
 enum class Odr : uint8_t {
@@ -129,7 +142,7 @@ struct Config {
   void* i2cUser = nullptr;               ///< User context for I2C callbacks
 
   // Timing hooks
-  NowMsFn nowMs = nullptr;  ///< Monotonic millisecond source
+  NowMsFn nowMs = nullptr;  ///< Optional monotonic source; direct reads use 0 when absent
   void* timeUser = nullptr; ///< User context for timing hook
 
   // Device settings
@@ -147,6 +160,9 @@ struct Config {
 
   // Health tracking
   uint8_t offlineThreshold = 5; ///< Consecutive tracked failures before OFFLINE
+
+  // Calibration quality
+  CalibrationLimits calibrationLimits; ///< Stillness/orientation limits for bias capture
 };
 
 }  // namespace LSM6DS3TR
