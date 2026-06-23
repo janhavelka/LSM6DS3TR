@@ -1,0 +1,57 @@
+
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m1719277[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1480804 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  28743979
+  sampleAgeMs:        1480963
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 

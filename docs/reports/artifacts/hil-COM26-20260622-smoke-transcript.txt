@@ -1,0 +1,140 @@
+=== BOOT/SETTLE ===
+
+>>> version
+
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+> 
+>>> scan
+
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         no
+  sampleTimestampMs:  0
+  sampleAgeMs:        0
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+> 
+>>> whoami
+
+  WHO_AM_I = 0x6A expected=0x6A match=[32mYES[0m
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> raw
+
+Raw: ax=85 ay=-301 az=16689 | gx=18 gy=-183 gz=-117 | t=1121
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> selftest
+
+=== LSM6DS3TR selftest (safe commands) ===
+  [[32mPASS[0m] probe responds
+  [[32mPASS[0m] probe no-health-side-effects
+  [[32mPASS[0m] readWhoAmI
+  [[32mPASS[0m] chip id matches 0x6A
+  [[32mPASS[0m] capture accel baseline
+  [[32mPASS[0m] configure accel self-test
+  [[32mPASS[0m] read accel baseline
+  [[32mPASS[0m] enable accel stimulus
+  [[32mPASS[0m] read accel stimulus
+  Accel delta: x=495.3 y=509.2 z=336.4 mg
+  [[32mPASS[0m] accel self-test range
+  [[32mPASS[0m] restore accel registers
+  [[32mPASS[0m] capture gyro baseline
+  [[32mPASS[0m] configure gyro self-test
+  [[32mPASS[0m] read gyro baseline
+  [[32mPASS[0m] enable gyro stimulus
+  [[32mPASS[0m] read gyro stimulus
+  Gyro delta: x=45.97 y=44.77 z=50.86 dps
+  [[32mPASS[0m] gyro self-test range
+  [[32mPASS[0m] restore gyro registers
+  [[32mPASS[0m] overall self-test
+Selftest result: pass=[32m19[0m fail=[32m0[0m skip=[32m0[0m
+> 

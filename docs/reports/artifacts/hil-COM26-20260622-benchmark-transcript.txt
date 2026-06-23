@@ -1,0 +1,128 @@
+=== BOOT/SETTLE ===
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40379d02
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x118c
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xc20
+load:0x403cb700,len:0x30e0
+entry 0x403c88b8
+[36m[I][0m === LSM6DS3TR-C Bringup CLI ===
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+[36m[I][0m I2C initialized (SDA=8, SCL=9)
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+[36m[I][0m Device initialized successfully
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+
+Type 'help' for commands
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+> 
+>>> stress 500
+
+  Progress: 50/500 (10%, ok=[32m50[0m, fail=[32m0[0m)
+  Progress: 100/500 (20%, ok=[32m100[0m, fail=[32m0[0m)
+  Progress: 150/500 (30%, ok=[32m150[0m, fail=[32m0[0m)
+  Progress: 200/500 (40%, ok=[32m200[0m, fail=[32m0[0m)
+  Progress: 250/500 (50%, ok=[32m250[0m, fail=[32m0[0m)
+  Progress: 300/500 (60%, ok=[32m300[0m, fail=[32m0[0m)
+  Progress: 350/500 (70%, ok=[32m350[0m, fail=[32m0[0m)
+  Progress: 400/500 (80%, ok=[32m400[0m, fail=[32m0[0m)
+  Progress: 450/500 (90%, ok=[32m450[0m, fail=[32m0[0m)
+  Progress: 500/500 (100%, ok=[32m500[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   500 per active accel/gyro channel
+  Polls:    4733
+  Reads:    [32m521[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.01%[0m
+  Duration: 4715 ms
+  Poll rate: 1003.82 polls/s
+  Accel samples: 500 (106.04/s)
+  Gyro samples:  500 (106.04/s)
+  Temp samples:  251 (53.23/s)
+  Health delta: [32msuccess +5984[0m, [32mfailures +0[0m
+  Temp C:   min=29.41 avg=29.46 max=29.52
+  Accel g:  x[0.003, 0.007] y[-0.020, -0.017] z[1.008, 1.027]
+  Gyro dps: x[0.079, 0.201] y[-1.715, -1.514] z[-1.103, -0.971]
+> 
+>>> stress_mix 500
+
+  Progress: 50/500 (10%, ok=[32m50[0m, fail=[32m0[0m)
+  Progress: 100/500 (20%, ok=[32m100[0m, fail=[32m0[0m)
+  Progress: 150/500 (30%, ok=[32m150[0m, fail=[32m0[0m)
+  Progress: 200/500 (40%, ok=[32m200[0m, fail=[32m0[0m)
+  Progress: 250/500 (50%, ok=[32m250[0m, fail=[32m0[0m)
+  Progress: 300/500 (60%, ok=[32m300[0m, fail=[32m0[0m)
+  Progress: 350/500 (70%, ok=[32m350[0m, fail=[32m0[0m)
+  Progress: 400/500 (80%, ok=[32m400[0m, fail=[32m0[0m)
+  Progress: 450/500 (90%, ok=[32m450[0m, fail=[32m0[0m)
+  Progress: 500/500 (100%, ok=[32m500[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 500
+  Success: [32m500[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 137 ms
+  Rate: 3649.64 ops/s
+  Health delta: [32msuccess +500[0m, [32mfailures +0[0m
+  readAllRaw [32mok=84[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=84[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=83[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=83[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=83[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=83[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 5984 -> [32m6484 (+500)[0m
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m6484[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 128 ms ago
+  Last error: never
+> 

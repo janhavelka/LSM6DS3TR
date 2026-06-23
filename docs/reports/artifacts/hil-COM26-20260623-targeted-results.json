@@ -1,0 +1,2128 @@
+[
+  {
+    "test_id": "TGT-BOOT-001",
+    "feature": "baseline",
+    "command": "version",
+    "expected": "Version:, Commit:",
+    "observed": "=== Version === | Version: 1.1.0 | Full:    1.1.0 (f10e8e4, 2026-06-23 05:23:29, dirty) | Built:   2026-06-23 05:23:29 | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-BOOT-002",
+    "feature": "baseline",
+    "command": "health",
+    "expected": "State:, READY",
+    "observed": "=== Driver Health === | State: READY | Online: yes | Consecutive failures: 0 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-BOOT-003",
+    "feature": "baseline",
+    "command": "whoami",
+    "expected": "WHO_AM_I = 0x6A, match=",
+    "observed": "WHO_AM_I = 0x6A expected=0x6A match=YES",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-001",
+    "feature": "poll/manual",
+    "command": "job status",
+    "expected": "Job status:",
+    "observed": "Job status: busy=no ready=no hasSample=no manual=no | Last poll: OK (code=0, detail=0) | Last poll msg: OK | Health: state=READY ok=1 fail=0 consecutive=0",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-002",
+    "feature": "poll/manual",
+    "command": "job auto 0",
+    "expected": "Automatic tick polling: no, manual=yes",
+    "observed": "Automatic tick polling: no | Job auto: busy=no ready=no hasSample=no manual=yes | Last poll: OK (code=0, detail=0) | Last poll msg: OK | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-003",
+    "feature": "poll/sample",
+    "command": "job start sample",
+    "expected": "Status:, IN_PROGRESS, Job start:; allowed failures: IN_PROGRESS",
+    "observed": "Status: IN_PROGRESS (code=10, detail=0) | Message: Measurement scheduled | Job start: busy=yes ready=no hasSample=no manual=yes | Last poll: IN_PROGRESS (code=10, detail=0) | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-004",
+    "feature": "poll/sample",
+    "command": "job get",
+    "expected": "MEASUREMENT_NOT_READY; allowed failures: IN_PROGRESS, MEASUREMENT_NOT_READY",
+    "observed": "Status: MEASUREMENT_NOT_READY (code=8, detail=0) | Message: No sample available | Job get: busy=yes ready=no hasSample=no manual=yes | Last poll: IN_PROGRESS (code=10, detail=0)...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "MEASUREMENT_NOT_READY"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-005",
+    "feature": "poll/budget-zero",
+    "command": "job poll 0 1",
+    "expected": "budget=0 -> IN_PROGRESS, busy=yes; allowed failures: IN_PROGRESS",
+    "observed": "Poll 1/1 budget=0 -> IN_PROGRESS busy=yes ready=no | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job in progress | Job poll: busy=yes ready=no hasSample=no manual=ye...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-006",
+    "feature": "poll/budget-one",
+    "command": "job poll 1 1",
+    "expected": "budget=1 ->, busy=; allowed failures: IN_PROGRESS",
+    "observed": "Poll 1/1 budget=1 -> TIMEOUT busy=no ready=no | Status: TIMEOUT (code=4, detail=0) | Message: Measurement ready timeout | Job poll: busy=no ready=no hasSample=no manual=no | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']",
+    "tokens": [
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-007",
+    "feature": "poll/sample",
+    "command": "job poll 1 20 2",
+    "expected": "Status: OK, Job poll:; allowed failures: IN_PROGRESS",
+    "observed": "Poll 1/20 budget=1 -> TIMEOUT busy=no ready=no | Status: TIMEOUT (code=4, detail=0) | Message: Measurement ready timeout | Job poll: busy=no ready=no hasSample=no manual=no | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']; missing=['Status: OK']",
+    "tokens": [
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-008",
+    "feature": "poll/sample",
+    "command": "job getraw",
+    "expected": "Cached raw:",
+    "observed": "Status: MEASUREMENT_NOT_READY (code=8, detail=0) | Message: No sample available | Job getraw: busy=no ready=no hasSample=no manual=no | Last poll: TIMEOUT (code=4, detail=0) | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "FAIL",
+    "notes": "failures=['MEASUREMENT_NOT_READY', 'TIMEOUT']; missing=['Cached raw:']",
+    "tokens": [
+      "MEASUREMENT_NOT_READY",
+      "TIMEOUT"
+    ],
+    "failures": [
+      "MEASUREMENT_NOT_READY",
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-009",
+    "feature": "poll/sample",
+    "command": "job get",
+    "expected": "Sample:, Status: OK",
+    "observed": "Status: MEASUREMENT_NOT_READY (code=8, detail=0) | Message: No sample available | Job get: busy=no ready=no hasSample=no manual=no | Last poll: TIMEOUT (code=4, detail=0) | ...",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "FAIL",
+    "notes": "failures=['MEASUREMENT_NOT_READY', 'TIMEOUT']; missing=['Sample:', 'Status: OK']",
+    "tokens": [
+      "MEASUREMENT_NOT_READY",
+      "TIMEOUT"
+    ],
+    "failures": [
+      "MEASUREMENT_NOT_READY",
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-010",
+    "feature": "poll/direct",
+    "command": "job run direct 1 3",
+    "expected": "Job run: kind=direct, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Measurement scheduled | Job run: kind=direct budget=1 polls=1 limit=3 | ...",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-011",
+    "feature": "poll/busy",
+    "command": "job start sample",
+    "expected": "Status:, IN_PROGRESS; allowed failures: IN_PROGRESS",
+    "observed": "Status: IN_PROGRESS (code=10, detail=0) | Message: Measurement scheduled | Job start: busy=yes ready=no hasSample=yes manual=yes | Last poll: IN_PROGRESS (code=10, detail=0) | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-012",
+    "feature": "poll/busy",
+    "command": "job start refresh",
+    "expected": "BUSY; allowed failures: IN_PROGRESS, BUSY",
+    "observed": "Status: BUSY (code=9, detail=0) | Message: Poll job in progress | Job start: busy=yes ready=no hasSample=yes manual=yes | Last poll: IN_PROGRESS (code=10, detail=0) | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "BUSY",
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-013",
+    "feature": "poll/busy",
+    "command": "job poll 2 20 2",
+    "expected": "Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Poll 1/20 budget=2 -> TIMEOUT busy=no ready=no | Status: TIMEOUT (code=4, detail=0) | Message: Measurement ready timeout | Job poll: busy=no ready=no hasSample=yes manual=no | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']; missing=['Status: OK']",
+    "tokens": [
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-014",
+    "feature": "poll/invalid",
+    "command": "job start fifo 0",
+    "expected": "INVALID_PARAM; allowed failures: INVALID_PARAM",
+    "observed": "Status: INVALID_PARAM (code=5, detail=0) | Message: maxWords must be > 0 | Job start: busy=no ready=no hasSample=yes manual=no | Last poll: TIMEOUT (code=4, detail=0) | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']",
+    "tokens": [
+      "INVALID_PARAM",
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-015",
+    "feature": "poll/invalid",
+    "command": "job start calxl 0",
+    "expected": "INVALID_PARAM; allowed failures: INVALID_PARAM",
+    "observed": "Status: INVALID_PARAM (code=5, detail=0) | Message: samples must be 1..10000 | Job start: busy=no ready=no hasSample=yes manual=no | Last poll: TIMEOUT (code=4, detail=0) | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']",
+    "tokens": [
+      "INVALID_PARAM",
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-016",
+    "feature": "poll/invalid",
+    "command": "job start bogus",
+    "expected": "Invalid job kind",
+    "observed": "Invalid job kind",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-017",
+    "feature": "poll/invalid",
+    "command": "job poll 999",
+    "expected": "Invalid poll budget",
+    "observed": "Invalid poll budget",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-018",
+    "feature": "poll/budget-zero",
+    "command": "job run sample 0 3 0",
+    "expected": "Job run: kind=sample budget=0, IN_PROGRESS; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Measurement scheduled | Job run: kind=sample budget=0 polls=3 limit=3 | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-019",
+    "feature": "poll/recover-progress",
+    "command": "job poll 2 20 2",
+    "expected": "Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Poll 1/20 budget=2 -> TIMEOUT busy=no ready=no | Status: TIMEOUT (code=4, detail=0) | Message: Measurement ready timeout | Job poll: busy=no ready=no hasSample=yes manual=no | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "FAIL",
+    "notes": "failures=['TIMEOUT']; missing=['Status: OK']",
+    "tokens": [
+      "TIMEOUT"
+    ],
+    "failures": [
+      "TIMEOUT"
+    ],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-020",
+    "feature": "poll/refresh",
+    "command": "job run refresh 1 30",
+    "expected": "Job run: kind=refresh, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=refresh budget=1 polls=11 limit=30 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-021",
+    "feature": "poll/refresh",
+    "command": "job run refresh 255 3",
+    "expected": "Job run: kind=refresh, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=refresh budget=255 polls=1 limit=3 | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-022",
+    "feature": "poll/reset",
+    "command": "job run reset 1 60 2",
+    "expected": "Job run: kind=reset, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=reset budget=1 polls=18 limit=60 | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-023",
+    "feature": "poll/boot",
+    "command": "job run boot 1 60 2",
+    "expected": "Job run: kind=boot, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=boot budget=1 polls=13 limit=60 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POLL-024",
+    "feature": "poll/post",
+    "command": "job auto 1",
+    "expected": "Automatic tick polling: yes",
+    "observed": "Automatic tick polling: yes | Job auto: busy=no ready=no hasSample=no manual=no | Last poll: OK (code=0, detail=0) | Last poll msg: OK | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-001",
+    "feature": "data",
+    "command": "status",
+    "expected": "STATUS_REG",
+    "observed": "STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-002",
+    "feature": "data",
+    "command": "raw",
+    "expected": "Raw:",
+    "observed": "Raw: ax=83 ay=-317 az=16689 | gx=20 gy=-181 gz=-115 | t=1587",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-003",
+    "feature": "data",
+    "command": "read",
+    "expected": "Sample:, g, dps, C",
+    "observed": "Sample: ax=+0.004 ay=-0.019 az=+1.017 g | gx=+0.17 gy=-1.63 gz=-1.03 dps | t=31.22 C",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-004",
+    "feature": "data",
+    "command": "accel",
+    "expected": "Accel",
+    "observed": "Accel: x=0.005 y=-0.018 z=1.019 g (raw: 86 -303 16698)",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-005",
+    "feature": "data",
+    "command": "gyro",
+    "expected": "Gyro",
+    "observed": "Gyro: x=0.11 y=-1.61 z=-1.00 dps (raw: 13 -184 -114)",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FEAT-006",
+    "feature": "data",
+    "command": "temp",
+    "expected": "Temp",
+    "observed": "Temp: 31.22 C (raw: 1592)",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-001",
+    "feature": "full-scale",
+    "command": "fsxl 2",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-002",
+    "feature": "full-scale",
+    "command": "fsxl 4",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-003",
+    "feature": "full-scale",
+    "command": "fsxl 8",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-004",
+    "feature": "full-scale",
+    "command": "fsxl 16",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-005",
+    "feature": "full-scale",
+    "command": "fsxl 2",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-006",
+    "feature": "full-scale",
+    "command": "fsg 125",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-007",
+    "feature": "full-scale",
+    "command": "fsg 250",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-008",
+    "feature": "full-scale",
+    "command": "fsg 500",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-009",
+    "feature": "full-scale",
+    "command": "fsg 1000",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-010",
+    "feature": "full-scale",
+    "command": "fsg 2000",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FS-011",
+    "feature": "full-scale",
+    "command": "fsg 250",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-001",
+    "feature": "odr",
+    "command": "odrxl 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-002",
+    "feature": "odr",
+    "command": "odrxl 1.6",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-003",
+    "feature": "odr",
+    "command": "odrxl 12.5",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-004",
+    "feature": "odr",
+    "command": "odrxl 26",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-005",
+    "feature": "odr",
+    "command": "odrxl 52",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-006",
+    "feature": "odr",
+    "command": "odrxl 104",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-007",
+    "feature": "odr",
+    "command": "odrxl 208",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-008",
+    "feature": "odr",
+    "command": "odrxl 416",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-009",
+    "feature": "odr",
+    "command": "odrxl 833",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-010",
+    "feature": "odr",
+    "command": "odrxl 1660",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-011",
+    "feature": "odr",
+    "command": "odrxl 3330",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-012",
+    "feature": "odr",
+    "command": "odrxl 6660",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-013",
+    "feature": "odr",
+    "command": "odrxl 104",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-014",
+    "feature": "odr",
+    "command": "odrg 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-015",
+    "feature": "odr",
+    "command": "odrg 12.5",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-016",
+    "feature": "odr",
+    "command": "odrg 26",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-017",
+    "feature": "odr",
+    "command": "odrg 52",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-018",
+    "feature": "odr",
+    "command": "odrg 104",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-019",
+    "feature": "odr",
+    "command": "odrg 208",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-020",
+    "feature": "odr",
+    "command": "odrg 416",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-021",
+    "feature": "odr",
+    "command": "odrg 833",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-022",
+    "feature": "odr",
+    "command": "odrg 1660",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-023",
+    "feature": "odr",
+    "command": "odrg 3330",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-024",
+    "feature": "odr",
+    "command": "odrg 6660",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-ODR-025",
+    "feature": "odr",
+    "command": "odrg 104",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-001",
+    "feature": "power",
+    "command": "apm lpn",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-002",
+    "feature": "power",
+    "command": "apm hp",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-003",
+    "feature": "power",
+    "command": "gpm lpn",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-004",
+    "feature": "power",
+    "command": "gpm hp",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09399999980814755,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-005",
+    "feature": "power",
+    "command": "gsleep 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-PWR-006",
+    "feature": "power",
+    "command": "gsleep 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-001",
+    "feature": "filters",
+    "command": "alpf2 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-002",
+    "feature": "filters",
+    "command": "aslope 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-003",
+    "feature": "filters",
+    "command": "a6d 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-004",
+    "feature": "filters",
+    "command": "glpf1 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-005",
+    "feature": "filters",
+    "command": "ghpf 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-006",
+    "feature": "filters",
+    "command": "ghpfmode 3",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-007",
+    "feature": "filters",
+    "command": "alpf2 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-008",
+    "feature": "filters",
+    "command": "aslope 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-009",
+    "feature": "filters",
+    "command": "a6d 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-010",
+    "feature": "filters",
+    "command": "glpf1 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-011",
+    "feature": "filters",
+    "command": "ghpfmode 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FLT-012",
+    "feature": "filters",
+    "command": "ghpf 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-001",
+    "feature": "embedded-functions",
+    "command": "ts 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-002",
+    "feature": "embedded-functions",
+    "command": "tsread",
+    "expected": "Timestamp",
+    "observed": "Timestamp: 5626",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-003",
+    "feature": "embedded-functions",
+    "command": "tshr 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-004",
+    "feature": "embedded-functions",
+    "command": "tsreset",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-005",
+    "feature": "embedded-functions",
+    "command": "tshr 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-006",
+    "feature": "embedded-functions",
+    "command": "pedo 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-007",
+    "feature": "embedded-functions",
+    "command": "steps",
+    "expected": "Step",
+    "observed": "Pedometer: yes | Accel ODR: 104 Hz | Steps: 0 | Step timestamp: 0 | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-008",
+    "feature": "embedded-functions",
+    "command": "stepreset",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-009",
+    "feature": "embedded-functions",
+    "command": "pedo 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-010",
+    "feature": "embedded-functions",
+    "command": "sigmot 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-011",
+    "feature": "embedded-functions",
+    "command": "sigmot 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-012",
+    "feature": "embedded-functions",
+    "command": "tilt 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-013",
+    "feature": "embedded-functions",
+    "command": "tilt 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-014",
+    "feature": "embedded-functions",
+    "command": "wtilt 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FNC-015",
+    "feature": "embedded-functions",
+    "command": "wtilt 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-001",
+    "feature": "calibration",
+    "command": "ofswt 16",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-002",
+    "feature": "calibration",
+    "command": "offset -4 7 12",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-003",
+    "feature": "calibration",
+    "command": "offset",
+    "expected": "Offset:",
+    "observed": "Offset: x=-4 y=7 z=12",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-004",
+    "feature": "calibration",
+    "command": "offset 0 0 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-005",
+    "feature": "calibration",
+    "command": "job run calxl 1 40 2 1",
+    "expected": "Job run: kind=calxl, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=calxl budget=1 polls=2 limit=40 | ...",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-006",
+    "feature": "calibration",
+    "command": "job run calg 1 40 2 1",
+    "expected": "Job run: kind=calg, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=calg budget=1 polls=2 limit=40 | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-007",
+    "feature": "calibration",
+    "command": "biasxl",
+    "expected": "Accel bias:",
+    "observed": "Accel bias: x=0.005124 y=-0.018971 z=0.018090 g",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-008",
+    "feature": "calibration",
+    "command": "biasg",
+    "expected": "Gyro bias:",
+    "observed": "Gyro bias: x=0.166250 y=-1.601250 z=-1.041250 dps",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-CAL-009",
+    "feature": "calibration",
+    "command": "biasreset",
+    "expected": "biases cleared",
+    "observed": "All software biases cleared.",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-001",
+    "feature": "fifo",
+    "command": "fifo_mode bypass",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-002",
+    "feature": "fifo",
+    "command": "fifo_odr 104",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-003",
+    "feature": "fifo",
+    "command": "fifo_xl 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-004",
+    "feature": "fifo",
+    "command": "fifo_g 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-005",
+    "feature": "fifo",
+    "command": "fifo_th 8",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-006",
+    "feature": "fifo",
+    "command": "fifo_temp 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-007",
+    "feature": "fifo",
+    "command": "fifo_step 1",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-008",
+    "feature": "fifo",
+    "command": "fifo_stop 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-009",
+    "feature": "fifo",
+    "command": "fifo_high 0",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-010",
+    "feature": "fifo",
+    "command": "fifo_mode cont",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-011",
+    "feature": "fifo",
+    "command": "fifo",
+    "expected": "FIFO",
+    "observed": "=== FIFO === | Mode: continuous | ODR:  104 Hz | Threshold: 8 | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-012",
+    "feature": "fifo",
+    "command": "job run fifo 1 20 2 8",
+    "expected": "Job run: kind=fifo, Status: OK; allowed failures: IN_PROGRESS",
+    "observed": "Start: | Status: IN_PROGRESS (code=10, detail=0) | Message: Poll job scheduled | Job run: kind=fifo budget=1 polls=9 limit=20 | ...",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS",
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-013",
+    "feature": "fifo",
+    "command": "fifo_read 8",
+    "expected": "FIFO; allowed failures: FIFO_EMPTY",
+    "observed": "FIFO[0] = 0xFF8D | FIFO[1] = 0x0048 | FIFO[2] = 0xFEC9 | FIFO[3] = 0x4127 | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-FIFO-014",
+    "feature": "fifo",
+    "command": "fifo_mode bypass",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-001",
+    "feature": "sources",
+    "command": "wusrc",
+    "expected": "0x",
+    "observed": "wusrc = 0x00",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-002",
+    "feature": "sources",
+    "command": "tapsrc",
+    "expected": "0x",
+    "observed": "tapsrc = 0x00",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-003",
+    "feature": "sources",
+    "command": "6dsrc",
+    "expected": "0x",
+    "observed": "6dsrc = 0x00",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-004",
+    "feature": "sources",
+    "command": "funcsrc1",
+    "expected": "0x",
+    "observed": "funcsrc1 = 0x00 | step delta           no | significant motion   no | tilt                 no | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-005",
+    "feature": "sources",
+    "command": "funcsrc2",
+    "expected": "0x",
+    "observed": "funcsrc2 = 0x84 | slave3 nack          yes | slave2 nack          no | slave1 nack          no | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-006",
+    "feature": "sources",
+    "command": "wtstatus",
+    "expected": "0x",
+    "observed": "wtstatus = 0x00 | x positive           no | x negative           no | y positive           no | ...",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SRC-007",
+    "feature": "sources",
+    "command": "shub 12",
+    "expected": "2E:",
+    "observed": "2E: 00 00 00 00 00 00 00 00 00 00 00 00              |............|",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-REG-001",
+    "feature": "registers",
+    "command": "rreg 0x0F",
+    "expected": "[0x0F] = 0x6A",
+    "observed": "[0x0F] = 0x6A",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-REG-002",
+    "feature": "registers",
+    "command": "dump 0x00 64",
+    "expected": "00:, 30:",
+    "observed": "00: 00 00 00 00 00 00 08 88 09 00 20 00 00 00 00 6A  |.......... ....j| | 10: 40 40 44 00 00 08 00 00 E0 20 00 00 00 00 07 C2  |@@D...... ......| | 20: 32 06 0D 00 45 FF 8E FF 4...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-REG-003",
+    "feature": "registers",
+    "command": "wreg 0x73 0x00",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-INV-001",
+    "feature": "invalid-input",
+    "command": "odrg 1.6",
+    "expected": "INVALID_PARAM; allowed failures: INVALID_PARAM",
+    "observed": "Status: INVALID_PARAM (code=5, detail=0) | Message: Invalid gyro ODR/power-mode combination",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "INVALID_PARAM"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-INV-002",
+    "feature": "invalid-input",
+    "command": "dump 0x10 0",
+    "expected": "Invalid dump",
+    "observed": "Invalid dump range",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-INV-003",
+    "feature": "invalid-input",
+    "command": "rreg 0x100",
+    "expected": "Invalid register",
+    "observed": "Invalid register",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-STRESS-001",
+    "feature": "stress",
+    "command": "stress 50",
+    "expected": "Stress Summary, Errors:",
+    "observed": "Progress: 5/50 (10%, ok=5, fail=0) | Progress: 10/50 (20%, ok=10, fail=0) | Progress: 15/50 (30%, ok=15, fail=0) | Progress: 20/50 (40%, ok=20, fail=0) | ...",
+    "elapsed_s": 0.5470000000204891,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-STRESS-002",
+    "feature": "stress",
+    "command": "stress_mix 50",
+    "expected": "Mixed Stress Summary, Errors:",
+    "observed": "Progress: 5/50 (10%, ok=5, fail=0) | Progress: 10/50 (20%, ok=10, fail=0) | Progress: 15/50 (30%, ok=15, fail=0) | Progress: 20/50 (40%, ok=20, fail=0) | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-SELF-001",
+    "feature": "self-test",
+    "command": "selftest",
+    "expected": "Selftest result:",
+    "observed": "=== LSM6DS3TR selftest (safe commands) === | [PASS] probe responds | [PASS] probe no-health-side-effects | [PASS] readWhoAmI | ...",
+    "elapsed_s": 1.3130000000819564,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POST-001",
+    "feature": "post-check",
+    "command": "refresh",
+    "expected": "Status:, OK",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POST-002",
+    "feature": "post-check",
+    "command": "settings",
+    "expected": "Driver state:, READY",
+    "observed": "=== Current Settings === | Initialized:        yes | Driver state:       READY | I2C address:        0x6A | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "TGT-POST-003",
+    "feature": "post-check",
+    "command": "health",
+    "expected": "State:, READY",
+    "observed": "=== Driver Health === | State: READY | Online: yes | Consecutive failures: 0 | ...",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  }
+]

@@ -1,0 +1,136 @@
+[
+  {
+    "test_id": "SMK-01",
+    "feature": "smoke",
+    "command": "version",
+    "expected": "No failure tokens",
+    "observed": "=== Version === | Version: 1.1.0 | Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean) | Built:   2026-06-22 20:17:40 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-02",
+    "feature": "smoke",
+    "command": "scan",
+    "expected": "No failure tokens",
+    "observed": "[I] Scanning I2C bus (timeout=50ms)... | [I]      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F | 00:                         -- -- -- -- -- -- -- -- | 10: -- -- -- -- -- -- --...",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-03",
+    "feature": "smoke",
+    "command": "probe",
+    "expected": "No failure tokens",
+    "observed": "Status: OK (code=0, detail=0) | Message: OK | Health changes: | (no health changes)",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-04",
+    "feature": "smoke",
+    "command": "settings",
+    "expected": "No failure tokens",
+    "observed": "=== Current Settings === | Initialized:        yes | Driver state:       READY | I2C address:        0x6A | ...",
+    "elapsed_s": 0.0940000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-05",
+    "feature": "smoke",
+    "command": "health",
+    "expected": "No failure tokens",
+    "observed": "=== Driver Health === | State: READY | Online: yes | Consecutive failures: 0 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-06",
+    "feature": "smoke",
+    "command": "whoami",
+    "expected": "No failure tokens",
+    "observed": "WHO_AM_I = 0x6A expected=0x6A match=YES",
+    "elapsed_s": 0.10900000017136335,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-07",
+    "feature": "smoke",
+    "command": "status",
+    "expected": "No failure tokens",
+    "observed": "STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)",
+    "elapsed_s": 0.11000000010244548,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-08",
+    "feature": "smoke",
+    "command": "raw",
+    "expected": "No failure tokens",
+    "observed": "Raw: ax=85 ay=-301 az=16689 | gx=18 gy=-183 gz=-117 | t=1121",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-09",
+    "feature": "smoke",
+    "command": "fifo",
+    "expected": "No failure tokens",
+    "observed": "=== FIFO === | Mode: bypass | ODR:  POWER_DOWN | Threshold: 0 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "SMK-10",
+    "feature": "smoke",
+    "command": "selftest",
+    "expected": "Selftest result:",
+    "observed": "=== LSM6DS3TR selftest (safe commands) === | [PASS] probe responds | [PASS] probe no-health-side-effects | [PASS] readWhoAmI | ...",
+    "elapsed_s": 1.3120000001508743,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  }
+]

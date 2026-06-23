@@ -28,6 +28,8 @@ constexpr size_t INPUT_MAX = 160;
 constexpr uint32_t FIFO_READ_MAX = 256;
 constexpr uint32_t STRESS_COUNT_MAX = 10000;
 constexpr uint16_t CALIBRATION_SAMPLE_MAX = 10000;
+constexpr uint8_t RESERVED_REGISTER_START = 0x43;
+constexpr uint8_t RESERVED_REGISTER_END = 0x48;
 
 struct I2cContext {
   i2c_master_bus_handle_t bus = nullptr;
@@ -39,6 +41,7 @@ LSM6DS3TR::LSM6DS3TR device;
 I2cContext i2c;
 bool verboseMode = false;
 bool streamMode = false;
+bool manualPollMode = false;
 
 bool timeReached(uint32_t now, uint32_t deadline) {
   return static_cast<int32_t>(now - deadline) >= 0;
@@ -215,9 +218,297 @@ void lowerInPlace(char* text) {
   }
 }
 
+bool isReservedRegister(uint8_t reg) {
+  return reg >= RESERVED_REGISTER_START && reg <= RESERVED_REGISTER_END;
+}
+
+bool rangeIntersectsReserved(uint32_t start, uint32_t len) {
+  if (len == 0) return false;
+  const uint32_t end = start + len - 1U;
+  return start <= RESERVED_REGISTER_END && end >= RESERVED_REGISTER_START;
+}
+
+enum class JobKind : uint8_t {
+  SAMPLE,
+  DIRECT,
+  RESET,
+  BOOT,
+  REFRESH,
+  FIFO,
+  CALXL,
+  CALG,
+};
+
+bool parseJobKind(char* token, JobKind& out) {
+  if (token == nullptr) return false;
+  lowerInPlace(token);
+  if (strcmp(token, "sample") == 0 || strcmp(token, "ready") == 0) {
+    out = JobKind::SAMPLE;
+    return true;
+  }
+  if (strcmp(token, "direct") == 0 || strcmp(token, "raw") == 0) {
+    out = JobKind::DIRECT;
+    return true;
+  }
+  if (strcmp(token, "reset") == 0) {
+    out = JobKind::RESET;
+    return true;
+  }
+  if (strcmp(token, "boot") == 0) {
+    out = JobKind::BOOT;
+    return true;
+  }
+  if (strcmp(token, "refresh") == 0) {
+    out = JobKind::REFRESH;
+    return true;
+  }
+  if (strcmp(token, "fifo") == 0) {
+    out = JobKind::FIFO;
+    return true;
+  }
+  if (strcmp(token, "calxl") == 0) {
+    out = JobKind::CALXL;
+    return true;
+  }
+  if (strcmp(token, "calg") == 0) {
+    out = JobKind::CALG;
+    return true;
+  }
+  return false;
+}
+
+const char* jobKindName(JobKind kind) {
+  switch (kind) {
+    case JobKind::SAMPLE: return "sample";
+    case JobKind::DIRECT: return "direct";
+    case JobKind::RESET: return "reset";
+    case JobKind::BOOT: return "boot";
+    case JobKind::REFRESH: return "refresh";
+    case JobKind::FIFO: return "fifo";
+    case JobKind::CALXL: return "calxl";
+    case JobKind::CALG: return "calg";
+    default: return "unknown";
+  }
+}
+
+uint16_t defaultJobArg(JobKind kind) {
+  if (kind == JobKind::FIFO) return 8;
+  if (kind == JobKind::CALXL || kind == JobKind::CALG) return 2;
+  return 0;
+}
+
+LSM6DS3TR::Status startJobByKind(JobKind kind, uint16_t arg) {
+  streamMode = false;
+  manualPollMode = true;
+  switch (kind) {
+    case JobKind::SAMPLE: return device.requestMeasurement(true);
+    case JobKind::DIRECT: return device.requestMeasurement(false);
+    case JobKind::RESET: return device.startSoftReset();
+    case JobKind::BOOT: return device.startBoot();
+    case JobKind::REFRESH: return device.startRefreshCachedConfig();
+    case JobKind::FIFO: return device.startFifoDrain(arg);
+    case JobKind::CALXL: return device.startAccelBiasCapture(arg);
+    case JobKind::CALG: return device.startGyroBiasCapture(arg);
+    default:
+      manualPollMode = false;
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "Invalid job kind");
+  }
+}
+
+void updateManualPollMode() {
+  if (!device.pollBusy()) manualPollMode = false;
+}
+
+void printCachedMeasurement(const LSM6DS3TR::Measurement& m) {
+  printf("Sample: ax=%+.3f ay=%+.3f az=%+.3f g | gx=%+.2f gy=%+.2f gz=%+.2f dps | t=%.2f C\n",
+         m.accel.x, m.accel.y, m.accel.z, m.gyro.x, m.gyro.y, m.gyro.z,
+         m.temperatureC);
+}
+
+void printRawMeasurementSnapshot() {
+  LSM6DS3TR::RawMeasurement raw;
+  const auto st = device.getRawMeasurement(raw);
+  if (!st.ok()) {
+    printStatus(st);
+    return;
+  }
+  printf("  Cached raw: ax=%d ay=%d az=%d gx=%d gy=%d gz=%d t=%d ts=%lu\n",
+         raw.accel.x, raw.accel.y, raw.accel.z, raw.gyro.x, raw.gyro.y,
+         raw.gyro.z, raw.temperature, static_cast<unsigned long>(device.sampleTimestampMs()));
+}
+
+void printJobState(const char* label) {
+  const auto last = device.lastPollStatus();
+  printf("  Job %s: busy=%s ready=%s hasSample=%s manual=%s\n",
+         label, device.pollBusy() ? "yes" : "no",
+         device.measurementReady() ? "yes" : "no",
+         device.hasSample() ? "yes" : "no", manualPollMode ? "yes" : "no");
+  printf("  Last poll: %s (code=%u, detail=%ld)\n", errToStr(last.code),
+         static_cast<unsigned>(last.code), static_cast<long>(last.detail));
+  if (last.msg != nullptr && last.msg[0] != '\0') {
+    printf("  Last poll msg: %s\n", last.msg);
+  }
+  printf("  Health: state=%s ok=%lu fail=%lu consecutive=%u\n",
+         stateToStr(device.state()), static_cast<unsigned long>(device.totalSuccess()),
+         static_cast<unsigned long>(device.totalFailures()),
+         static_cast<unsigned>(device.consecutiveFailures()));
+}
+
+void processJobCommand(char** save) {
+  char* sub = nextToken(save);
+  if (sub == nullptr) {
+    printJobState("status");
+    return;
+  }
+  lowerInPlace(sub);
+
+  if (strcmp(sub, "status") == 0) {
+    printJobState("status");
+    return;
+  }
+
+  if (strcmp(sub, "auto") == 0) {
+    bool enabled = false;
+    if (!parseBool(nextToken(save), enabled)) {
+      puts("  Expected job auto [0|1]");
+      return;
+    }
+    manualPollMode = !enabled;
+    printf("  Automatic tick polling: %s\n", enabled ? "yes" : "no");
+    printJobState("auto");
+    return;
+  }
+
+  if (strcmp(sub, "start") == 0 || strcmp(sub, "req") == 0) {
+    JobKind kind = JobKind::SAMPLE;
+    if (!parseJobKind(nextToken(save), kind)) {
+      puts("  Expected job start <sample|direct|reset|boot|refresh|fifo|calxl|calg> [arg]");
+      return;
+    }
+    uint32_t arg = defaultJobArg(kind);
+    char* argToken = nextToken(save);
+    if (argToken != nullptr && !parseU32Range(argToken, 0, CALIBRATION_SAMPLE_MAX, arg)) {
+      puts("  Invalid job argument");
+      return;
+    }
+    const auto st = startJobByKind(kind, static_cast<uint16_t>(arg));
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("start");
+    return;
+  }
+
+  if (strcmp(sub, "poll") == 0) {
+    uint32_t budget = 0;
+    if (!parseU32Range(nextToken(save), 0, 255, budget)) {
+      puts("  Expected job poll <budget 0..255> [count 1..1000] [delayMs 0..1000]");
+      return;
+    }
+    uint32_t iterations = 1;
+    uint32_t delayMs = 0;
+    char* countToken = nextToken(save);
+    if (countToken != nullptr && !parseU32Range(countToken, 1, 1000, iterations)) {
+      puts("  Invalid poll count");
+      return;
+    }
+    char* delayToken = nextToken(save);
+    if (delayToken != nullptr && !parseU32Range(delayToken, 0, 1000, delayMs)) {
+      puts("  Invalid poll delay");
+      return;
+    }
+    LSM6DS3TR::Status st = device.lastPollStatus();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      st = device.poll(nowMs(nullptr), static_cast<uint8_t>(budget));
+      printf("  Poll %lu/%lu budget=%lu -> %s busy=%s ready=%s\n",
+             static_cast<unsigned long>(i + 1U), static_cast<unsigned long>(iterations),
+             static_cast<unsigned long>(budget), errToStr(st.code),
+             device.pollBusy() ? "yes" : "no", device.measurementReady() ? "yes" : "no");
+      if (!st.inProgress()) break;
+      if (delayMs > 0) vTaskDelay(pdMS_TO_TICKS(delayMs));
+    }
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("poll");
+    return;
+  }
+
+  if (strcmp(sub, "run") == 0) {
+    JobKind kind = JobKind::SAMPLE;
+    if (!parseJobKind(nextToken(save), kind)) {
+      puts("  Expected job run <kind> <budget> [limit 1..1000] [delayMs] [arg]");
+      return;
+    }
+    uint32_t budget = 0;
+    if (!parseU32Range(nextToken(save), 0, 255, budget)) {
+      puts("  Invalid poll budget");
+      return;
+    }
+    uint32_t limit = 100;
+    uint32_t delayMs = 0;
+    uint32_t arg = defaultJobArg(kind);
+    char* limitToken = nextToken(save);
+    if (limitToken != nullptr && !parseU32Range(limitToken, 1, 1000, limit)) {
+      puts("  Invalid poll limit");
+      return;
+    }
+    char* delayToken = nextToken(save);
+    if (delayToken != nullptr && !parseU32Range(delayToken, 0, 1000, delayMs)) {
+      puts("  Invalid poll delay");
+      return;
+    }
+    char* argToken = nextToken(save);
+    if (argToken != nullptr && !parseU32Range(argToken, 0, CALIBRATION_SAMPLE_MAX, arg)) {
+      puts("  Invalid job argument");
+      return;
+    }
+    LSM6DS3TR::Status st = startJobByKind(kind, static_cast<uint16_t>(arg));
+    puts("  Start:");
+    printStatus(st);
+    uint32_t polls = 0;
+    while ((st.inProgress() || device.pollBusy()) && polls < limit) {
+      st = device.poll(nowMs(nullptr), static_cast<uint8_t>(budget));
+      ++polls;
+      if (!st.inProgress()) break;
+      if (delayMs > 0) vTaskDelay(pdMS_TO_TICKS(delayMs));
+    }
+    printf("  Job run: kind=%s budget=%lu polls=%lu limit=%lu\n",
+           jobKindName(kind), static_cast<unsigned long>(budget),
+           static_cast<unsigned long>(polls), static_cast<unsigned long>(limit));
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("run");
+    return;
+  }
+
+  if (strcmp(sub, "getraw") == 0) {
+    printRawMeasurementSnapshot();
+    printJobState("getraw");
+    return;
+  }
+
+  if (strcmp(sub, "get") == 0) {
+    LSM6DS3TR::Measurement m;
+    const auto st = device.getMeasurement(m);
+    if (st.ok()) printCachedMeasurement(m);
+    printStatus(st);
+    printJobState("get");
+    return;
+  }
+
+  if (strcmp(sub, "cancel") == 0) {
+    manualPollMode = false;
+    streamMode = false;
+    puts("  Job manual mode cleared.");
+    printJobState("cancel");
+    return;
+  }
+
+  puts("  Expected job [status|auto|start|req|poll|run|get|getraw|cancel]");
+}
+
 void printHelp() {
   puts("\n=== LSM6DS3TR native ESP-IDF CLI ===");
-  puts("Common: help ? version ver scan begin init drv health drv1 cfg settings refresh verbose <0|1>");
+  puts("Common: help ? version ver scan begin init drv health drv1 cfg settings refresh job ... verbose <0|1>");
   puts("Data: read raw accel gyro temp status tsread steps fifo fifo_read <n> stream");
   puts("Config: odrxl <n> odrg <n> fsxl <2|4|8|16> fsg <125|250|500|1000|2000>");
   puts("Power/filter: apm <hp|lpn> gpm <hp|lpn> gsleep <0|1> alpf2 <0|1> aslope <0|1>");
@@ -369,6 +660,8 @@ void processCommand(char* line) {
     printSettings();
   } else if (strcmp(cmd, "refresh") == 0) {
     printStatus(device.refreshCachedConfig());
+  } else if (strcmp(cmd, "job") == 0) {
+    processJobCommand(&save);
   } else if (strcmp(cmd, "verbose") == 0) {
     bool value = false;
     if (parseBool(nextToken(&save), value)) verboseMode = value;
@@ -561,6 +854,10 @@ void processCommand(char* line) {
       puts("  Expected register address 0x00..0x75");
       return;
     }
+    if (isReservedRegister(static_cast<uint8_t>(reg))) {
+      puts("  Reserved register range 0x43-0x48 is blocked");
+      return;
+    }
     uint8_t value = 0; const auto st = device.readRegisterValue(static_cast<uint8_t>(reg), value);
     st.ok() ? printf("[0x%02lX]=0x%02X\n", static_cast<unsigned long>(reg), value) : printStatus(st);
   } else if (strcmp(cmd, "wreg") == 0) {
@@ -568,6 +865,10 @@ void processCommand(char* line) {
     if (!parseU32Range(nextToken(&save), 0, LSM6DS3TR::cmd::REG_Z_OFS_USR, reg) ||
         !parseU32Range(nextToken(&save), 0, 0xFF, value)) {
       puts("  Expected register address 0x00..0x75 and value 0x00..0xFF");
+      return;
+    }
+    if (isReservedRegister(static_cast<uint8_t>(reg))) {
+      puts("  Reserved register range 0x43-0x48 is blocked");
       return;
     }
     printStatus(device.writeRegisterValue(static_cast<uint8_t>(reg), static_cast<uint8_t>(value)));
@@ -580,6 +881,10 @@ void processCommand(char* line) {
         (lenArg != nullptr && !parseU32Range(lenArg, 1, 64, len)) ||
         (start + len - 1U > LSM6DS3TR::cmd::REG_Z_OFS_USR)) {
       puts("  Expected dump range within 0x00..0x75 and length 1..64");
+      return;
+    }
+    if (rangeIntersectsReserved(start, len)) {
+      puts("  Dump range intersects reserved 0x43-0x48");
       return;
     }
     uint8_t data[64] = {};
@@ -627,7 +932,9 @@ void cliLoop() {
   printf("> ");
   while (true) {
     const uint32_t now = nowMs(nullptr);
-    device.tick(now);
+    if (!manualPollMode) {
+      device.tick(now);
+    }
     if (streamMode && device.isOnline() && timeReached(now, nextStreamMs)) {
       printMeasurement();
       nextStreamMs = now + 250U;

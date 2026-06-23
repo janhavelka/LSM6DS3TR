@@ -21,6 +21,7 @@ MANDATORY_COMMANDS = [
     "cfg",
     "settings",
     "refresh",
+    "job",
     "verbose",
     "read",
     "raw",

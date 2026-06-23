@@ -1,0 +1,52 @@
+=== BOOT/SETTLE ===
+
+>>> job run reset 1 60 2
+
+  Start:
+  Status: [31mIN_PROGRESS[0m (code=10, detail=0)
+  Message: [33mPoll job scheduled[0m
+  Job run: kind=reset budget=1 polls=18 limit=60
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Job run: busy=no ready=no hasSample=no manual=no
+  Last poll: OK (code=0, detail=0)
+  Last poll msg: OK
+  Health: state=READY ok=75 fail=0 consecutive=0
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m75[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 127 ms ago
+  Last error: never
+> 
+>>> job run boot 1 60 2
+
+  Start:
+  Status: [31mIN_PROGRESS[0m (code=10, detail=0)
+  Message: [33mPoll job scheduled[0m
+  Job run: kind=boot budget=1 polls=13 limit=60
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Job run: busy=no ready=no hasSample=no manual=no
+  Last poll: OK (code=0, detail=0)
+  Last poll msg: OK
+  Health: state=READY ok=87 fail=0 consecutive=0
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m87[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 133 ms ago
+  Last error: never
+> 

@@ -1,0 +1,937 @@
+=== BOOT/SETTLE ===
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40379d02
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x118c
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xc20
+load:0x403cb700,len:0x30e0
+entry 0x403c88b8
+[36m[I][0m === LSM6DS3TR-C Bringup CLI ===
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+[36m[I][0m I2C initialized (SDA=8, SCL=9)
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+[36m[I][0m Device initialized successfully
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+
+Type 'help' for commands
+> 
+>>> help
+
+
+[36m=== LSM6DS3TR-C CLI Help ===[0m
+Version: 1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+
+[32m[Common][0m
+  [36mhelp / ?                        [0m - Show this help
+  [36mversion / ver                   [0m - Print version and build metadata
+  [36mscan                            [0m - Scan I2C bus
+  [36mbegin                           [0m - Initialize/reinitialize device
+  [36mdrv / health                    [0m - Show driver health
+  [36mdrv1                            [0m - Show one-line health view
+  [36mcfg / settings                  [0m - Show current cached configuration
+  [36mrefresh                         [0m - Refresh cached config from device registers
+  [36mverbose [0|1]                   [0m - Toggle or set verbose mode
+
+[32m[Measurement][0m
+  [36mread                            [0m - Read accel + gyro + temp (converted)
+  [36mraw                             [0m - Read accel + gyro + temp (raw)
+  [36maccel                           [0m - Read accelerometer only
+  [36mgyro                            [0m - Read gyroscope only
+  [36mtemp                            [0m - Read temperature only
+  [36mstatus                          [0m - Read STATUS_REG with decoded data-ready bits
+  [36mtsread                          [0m - Read timestamp counter
+  [36msteps                           [0m - Read step counter and step timestamp
+  [36mfifo                            [0m - Read FIFO config and status
+  [36mfifo_read [N]                   [0m - Read up to N FIFO words
+  [36mstream                          [0m - Toggle continuous output (one line per sample at sensor ODR)
+
+[32m[Core Config][0m
+  [36modrxl [hz]                      [0m - Get/set accel ODR (off|1.6|12.5|26|52|104|208|416|833|1660|3330|6660)
+  [36modrg [hz]                       [0m - Get/set gyro ODR (off|12.5|26|52|104|208|416|833|1660|3330|6660)
+  [36mfsxl [g]                        [0m - Get/set accel full-scale (2|4|8|16)
+  [36mfsg [dps]                       [0m - Get/set gyro full-scale (125|250|500|1000|2000)
+  [36mapm [hp|lpn]                    [0m - Get/set accel power mode
+  [36mgpm [hp|lpn]                    [0m - Get/set gyro power mode
+  [36mgsleep [0|1]                    [0m - Get/set gyro sleep
+  [36mreset                           [0m - Software reset and re-apply cached config
+  [36mboot                            [0m - Issue boot command and refresh cached config
+
+[32m[Filters And Embedded][0m
+  [36malpf2 [0|1]                     [0m - Get/set accel LPF2
+  [36maslope [0|1]                    [0m - Get/set accel high-pass/slope
+  [36ma6d [0|1]                       [0m - Get/set accel low-pass on 6D
+  [36mglpf1 [0|1]                     [0m - Get/set gyro LPF1
+  [36mghpf [0|1]                      [0m - Get/set gyro HPF
+  [36mghpfmode [0..3]                 [0m - Get/set gyro HPF cutoff
+  [36mts [0|1]                        [0m - Get/set timestamp enable
+  [36mtshr [0|1]                      [0m - Get/set timestamp high resolution
+  [36mtsreset                         [0m - Reset timestamp counter
+  [36mpedo [0|1]                      [0m - Get/set pedometer
+  [36msigmot [0|1]                    [0m - Get/set significant motion
+  [36mtilt [0|1]                      [0m - Get/set tilt detection
+  [36mwtilt [0|1]                     [0m - Get/set wrist tilt
+  [36mstepreset                       [0m - Reset step counter
+
+[32m[Offsets And FIFO][0m
+  [36mofswt [1|16]                    [0m - Get/set accel offset weight
+  [36moffset [x y z]                  [0m - Get/set accel user offsets
+  [36mfifo_mode [mode]                [0m - Get/set FIFO mode
+  [36mfifo_odr [hz]                   [0m - Get/set FIFO ODR
+  [36mfifo_xl [off|1|2|3|4|8|16|32]   [0m - Get/set FIFO accel decimation
+  [36mfifo_g [off|1|2|3|4|8|16|32]    [0m - Get/set FIFO gyro decimation
+  [36mfifo_th [N]                     [0m - Get/set FIFO threshold (0..2047)
+  [36mfifo_temp [0|1]                 [0m - Get/set FIFO temperature storage
+  [36mfifo_step [0|1]                 [0m - Get/set FIFO step/timestamp storage
+  [36mfifo_stop [0|1]                 [0m - Get/set FIFO stop on threshold
+  [36mfifo_high [0|1]                 [0m - Get/set FIFO high-byte-only mode
+
+[32m[Calibration][0m
+  [36mcal [N]                         [0m - Calibrate accel+gyro at rest (Z-up, default 100 samples)
+  [36mcalxl [N]                       [0m - Calibrate accel only (Z-up, default 100 samples)
+  [36mcalg [N]                        [0m - Calibrate gyro only (stationary, default 100 samples)
+  [36mbiasxl [x y z]                  [0m - Get/set accel software bias (g)
+  [36mbiasg [x y z]                   [0m - Get/set gyro software bias (dps)
+  [36mbiasreset                       [0m - Clear all software biases to zero
+
+[32m[Diagnostics][0m
+  [36mprobe                           [0m - Probe WHO_AM_I without health tracking
+  [36mrecover                         [0m - Retry initialization/recovery
+  [36mwhoami / id                     [0m - Read WHO_AM_I register
+  [36mwusrc                           [0m - Read WAKE_UP_SRC
+  [36mtapsrc                          [0m - Read TAP_SRC
+  [36m6dsrc                           [0m - Read D6D_SRC
+  [36mfuncsrc1                        [0m - Read FUNC_SRC1
+  [36mfuncsrc2                        [0m - Read FUNC_SRC2
+  [36mwtstatus                        [0m - Read WRIST_TILT_IA
+  [36mshub [N]                        [0m - Read SENSORHUB1..12 output bytes
+  [36mselftest                        [0m - Run accelerometer and gyroscope self-test
+  [36mstress [N]                      [0m - ODR-paced converted-sample stress test
+  [36mstress_mix [N]                  [0m - Blocking mixed-operation stress test
+
+[32m[Registers][0m
+  [36mrreg <addr>                     [0m - Read register byte (reserved 0x43-0x48 blocked)
+  [36mwreg <addr> <val>               [0m - Write register byte and refresh cache when needed
+  [36mdump [addr len]                 [0m - Hex dump register range outside 0x43-0x48
+> 
+>>> version
+
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+> 
+>>> scan
+
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         no
+  sampleTimestampMs:  0
+  sampleAgeMs:        0
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+> 
+>>> drv1
+
+Health: state=[32mREADY[0m online=[32mtrue[0m consec=[32m0[0m ok=[90m0[0m fail=[32m0[0m rate=[31m0.0%[0m
+> 
+>>> whoami
+
+  WHO_AM_I = 0x6A expected=0x6A match=[32mYES[0m
+> 
+>>> id
+
+  WHO_AM_I = 0x6A expected=0x6A match=[32mYES[0m
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> raw
+
+Raw: ax=94 ay=-296 az=16697 | gx=19 gy=-183 gz=-119 | t=1145
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.14 gy=-1.59 gz=-1.02 dps | t=29.44 C
+> 
+>>> accel
+
+Accel: x=0.006 y=-0.018 z=1.018 g (raw: 95 -303 16690)
+> 
+>>> gyro
+
+Gyro: x=0.11 y=-1.56 z=-1.07 dps (raw: 13 -178 -122)
+> 
+>>> temp
+
+Temp: 29.47 C (raw: 1144)
+> 
+>>> odrxl
+
+  odrxl: 104 Hz
+> 
+>>> odrg
+
+  odrg: 104 Hz
+> 
+>>> fsxl
+
+  Accel FS: +/-2g
+> 
+>>> fsg
+
+  Gyro FS: +/-250 dps
+> 
+>>> apm
+
+  apm: high-performance
+> 
+>>> gpm
+
+  gpm: high-performance
+> 
+>>> gsleep
+
+  Gyro sleep: no
+> 
+>>> fsxl 2
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsxl 4
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsxl 8
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsxl 16
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsxl 2
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 125
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 250
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 500
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 1000
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 2000
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fsg 250
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrxl 12.5
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrxl 104
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrxl 6660
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrxl 1.6
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrxl 104
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> apm hp
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrg 12.5
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrg 104
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrg 6660
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> odrg 104
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> alpf2 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> alpf2 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> aslope 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> aslope 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> a6d 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> a6d 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> glpf1 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> glpf1 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ghpf 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ghpfmode 3
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ghpfmode 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ghpf 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ts 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> tsread
+
+  Timestamp: 12810
+> 
+>>> tshr 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> tsreset
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> tshr 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> pedo 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> steps
+
+  Pedometer: yes
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: default debounce can require several consecutive real steps before the counter increments.
+> 
+>>> stepreset
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> pedo 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> sigmot 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> sigmot 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> tilt 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> tilt 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> wtilt 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> wtilt 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ofswt 16
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> offset -4 7 12
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> offset
+
+  Offset: x=-4 y=7 z=12
+> 
+>>> offset 0 0 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> ofswt 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> biasxl
+
+  Accel bias: x=0.000000 y=0.000000 z=0.000000 g
+> 
+>>> biasg
+
+  Gyro bias: x=0.000000 y=0.000000 z=0.000000 dps
+> 
+>>> biasxl 0.001 0.002 -0.003
+
+  Accel bias set: x=0.001000 y=0.002000 z=-0.003000 g
+> 
+>>> biasg 0.1 -0.2 0.3
+
+  Gyro bias set: x=0.100000 y=-0.200000 z=0.300000 dps
+> 
+>>> biasreset
+
+  All software biases cleared.
+> 
+>>> fifo_mode bypass
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_odr 104
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_xl 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_g 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_th 8
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_temp 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_step 1
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_stop 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_high 0
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo_mode cont
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: continuous
+  ODR:  104 Hz
+  Threshold: 8
+  Unread words: 96
+  Pattern: 0
+  Watermark: yes
+  Overrun: no
+  Full smart: no
+  Empty: no
+> 
+>>> fifo_read 8
+
+  FIFO[0] = 0x0012
+  FIFO[1] = 0xFF47
+  FIFO[2] = 0xFF88
+  FIFO[3] = 0x0056
+  FIFO[4] = 0xFED8
+  FIFO[5] = 0x4135
+  FIFO[6] = 0x0013
+  FIFO[7] = 0xFF49
+> 
+>>> fifo_mode bypass
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> wusrc
+
+  wusrc = 0x00
+> 
+>>> tapsrc
+
+  tapsrc = 0x00
+> 
+>>> 6dsrc
+
+  6dsrc = 0x00
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> funcsrc2
+
+  funcsrc2 = 0x84
+    slave3 nack          yes
+    slave2 nack          no
+    slave1 nack          no
+    slave0 nack          no
+    wrist tilt           no
+> 
+>>> wtstatus
+
+  wtstatus = 0x00
+    x positive           no
+    x negative           no
+    y positive           no
+    y negative           no
+    z positive           no
+    z negative           no
+> 
+>>> shub 12
+
+  2E: 00 00 00 00 00 00 00 00 00 00 00 00              |............|
+> 
+>>> rreg 0x0F
+
+  [0x0F] = 0x6A
+> 
+>>> dump 0x10 32
+
+  10: 40 40 44 00 00 00 00 00 E0 20 00 00 00 00 07 C2  |@@D...... ......|
+  20: 7C 04 10 00 48 FF 87 FF 62 00 C1 FE 3D 41 00 00  ||...H...b...=A..|
+> 
+>>> wreg 0x73 0x00
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> reset
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m186[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 155 ms ago
+  Last error: never
+> 
+>>> boot
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> refresh
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 209 -> [32m226 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m226[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> bogus_command
+
+  Unknown command: 'bogus_command' (type 'help')
+> 
+>>> odrxl bad
+
+  Invalid ODR token
+> 
+>>> odrg 1.6
+
+  Status: [31mINVALID_PARAM[0m (code=5, detail=0)
+  Message: [33mInvalid gyro ODR/power-mode combination[0m
+> 
+>>> fsxl 32
+
+  Expected fsxl [2|4|8|16]
+> 
+>>> rreg 0x100
+
+  Invalid register
+> 
+>>> dump 0x10 0
+
+  Invalid dump range
+> 
+>>> fifo_th 2048
+
+  Expected fifo_th [0..2047]
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.28%[0m
+  Duration: 460 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.70/s)
+  Gyro samples:  50 (108.70/s)
+  Temp samples:  26 (56.52/s)
+  Health delta: [32msuccess +587[0m, [32mfailures +0[0m
+  Temp C:   min=29.43 avg=29.48 max=29.52
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.105, 0.193] y[-1.636, -1.549] z[-1.103, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 813 -> [32m863 (+50)[0m
+> 
+>>> selftest
+
+=== LSM6DS3TR selftest (safe commands) ===
+  [[32mPASS[0m] probe responds
+  [[32mPASS[0m] probe no-health-side-effects
+  [[32mPASS[0m] readWhoAmI
+  [[32mPASS[0m] chip id matches 0x6A
+  [[32mPASS[0m] capture accel baseline
+  [[32mPASS[0m] configure accel self-test
+  [[32mPASS[0m] read accel baseline
+  [[32mPASS[0m] enable accel stimulus
+  [[32mPASS[0m] read accel stimulus
+  Accel delta: x=494.8 y=509.4 z=338.0 mg
+  [[32mPASS[0m] accel self-test range
+  [[32mPASS[0m] restore accel registers
+  [[32mPASS[0m] capture gyro baseline
+  [[32mPASS[0m] configure gyro self-test
+  [[32mPASS[0m] read gyro baseline
+  [[32mPASS[0m] enable gyro stimulus
+  [[32mPASS[0m] read gyro stimulus
+  Gyro delta: x=46.00 y=44.72 z=50.88 dps
+  [[32mPASS[0m] gyro self-test range
+  [[32mPASS[0m] restore gyro registers
+  [[32mPASS[0m] overall self-test
+Selftest result: pass=[32m19[0m fail=[32m0[0m skip=[32m0[0m
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  20418
+  sampleAgeMs:        1500
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          yes
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           104 Hz
+  FIFO threshold:     8
+  FIFO accel decim:   1
+  FIFO gyro decim:    1
+  FIFO temp:          yes
+  FIFO step/time:     yes
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m1014[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 227 ms ago
+  Last error: never
+> 

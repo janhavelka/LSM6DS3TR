@@ -1,0 +1,6220 @@
+=== BOOT/SETTLE ===
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40379d02
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x118c
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xc20
+load:0x403cb700,len:0x30e0
+entry 0x403c88b8
+[36m[I][0m === LSM6DS3TR-C Bringup CLI ===
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+[36m[I][0m I2C initialized (SDA=8, SCL=9)
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+[36m[I][0m Device initialized successfully
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+
+Type 'help' for commands
+> 
+>>> raw
+
+Raw: ax=77 ay=-301 az=16679 | gx=14 gy=-182 gz=-122 | t=1162
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.18 gy=-1.60 gz=-1.00 dps | t=29.51 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 84 -314 16683)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.59 z=-1.05 dps (raw: 15 -182 -120)
+> 
+>>> temp
+
+Temp: 29.52 C (raw: 1158)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m7[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  1994
+  sampleAgeMs:        1245
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    465
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.18%[0m
+  Duration: 464 ms
+  Poll rate: 1002.16 polls/s
+  Accel samples: 50 (107.76/s)
+  Gyro samples:  50 (107.76/s)
+  Temp samples:  25 (53.88/s)
+  Health delta: [32msuccess +590[0m, [32mfailures +0[0m
+  Temp C:   min=29.49 avg=29.53 max=29.56
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.017] z[1.017, 1.019]
+  Gyro dps: x[0.105, 0.184] y[-1.645, -1.575] z[-1.085, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 602 -> [32m652 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 652 -> [32m669 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m669[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=81 ay=-301 az=16688 | gx=18 gy=-181 gz=-121 | t=1163
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.13 gy=-1.62 gz=-1.03 dps | t=29.53 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 87 -306 16688)
+> 
+>>> gyro
+
+Gyro: x=0.17 y=-1.63 z=-1.02 dps (raw: 19 -186 -117)
+> 
+>>> temp
+
+Temp: 29.52 C (raw: 1156)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m676[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 308 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  4909
+  sampleAgeMs:        1243
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    466
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.16%[0m
+  Duration: 466 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (107.30/s)
+  Gyro samples:  50 (107.30/s)
+  Temp samples:  26 (55.79/s)
+  Health delta: [32msuccess +592[0m, [32mfailures +0[0m
+  Temp C:   min=29.48 avg=29.52 max=29.56
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.114, 0.184] y[-1.671, -1.558] z[-1.085, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 1273 -> [32m1323 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 1323 -> [32m1340 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m1340[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=92 ay=-303 az=16699 | gx=17 gy=-185 gz=-117 | t=1164
+> 
+>>> read
+
+Sample: ax=+0.007 ay=-0.019 az=+1.018 g | gx=+0.12 gy=-1.62 gz=-1.02 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.020 g (raw: 76 -311 16720)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.60 z=-1.07 dps (raw: 16 -183 -122)
+> 
+>>> temp
+
+Temp: 29.52 C (raw: 1158)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m1347[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  7837
+  sampleAgeMs:        1247
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    458
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.35%[0m
+  Duration: 457 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.41/s)
+  Gyro samples:  50 (109.41/s)
+  Temp samples:  25 (54.70/s)
+  Health delta: [32msuccess +583[0m, [32mfailures +0[0m
+  Temp C:   min=29.46 avg=29.51 max=29.57
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.105, 0.193] y[-1.663, -1.549] z[-1.094, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 1935 -> [32m1985 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 1985 -> [32m2002 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m2002[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=74 ay=-325 az=16676 | gx=15 gy=-182 gz=-118 | t=1159
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.14 gy=-1.64 gz=-1.05 dps | t=29.48 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.017 g (raw: 78 -318 16679)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.60 z=-1.06 dps (raw: 15 -183 -121)
+> 
+>>> temp
+
+Temp: 29.49 C (raw: 1149)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m2009[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  10771
+  sampleAgeMs:        1247
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    457
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.38%[0m
+  Duration: 456 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.65/s)
+  Gyro samples:  50 (109.65/s)
+  Temp samples:  25 (54.82/s)
+  Health delta: [32msuccess +582[0m, [32mfailures +0[0m
+  Temp C:   min=29.46 avg=29.51 max=29.56
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.016, 1.020]
+  Gyro dps: x[0.114, 0.201] y[-1.645, -1.566] z[-1.076, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 2596 -> [32m2646 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 2646 -> [32m2663 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m2663[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=74 ay=-303 az=16682 | gx=14 gy=-179 gz=-116 | t=1149
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.12 gy=-1.62 gz=-1.03 dps | t=29.55 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 76 -309 16682)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.65 z=-1.00 dps (raw: 17 -188 -114)
+> 
+>>> temp
+
+Temp: 29.50 C (raw: 1152)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m2670[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  13696
+  sampleAgeMs:        1243
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    459
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.33%[0m
+  Duration: 459 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (108.93/s)
+  Gyro samples:  50 (108.93/s)
+  Temp samples:  26 (56.64/s)
+  Health delta: [32msuccess +585[0m, [32mfailures +0[0m
+  Temp C:   min=29.46 avg=29.51 max=29.55
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.016, 1.019]
+  Gyro dps: x[0.105, 0.184] y[-1.654, -1.549] z[-1.085, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 3260 -> [32m3310 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 3310 -> [32m3327 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m3327[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=69 ay=-318 az=16679 | gx=18 gy=-185 gz=-115 | t=1155
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.15 gy=-1.64 gz=-1.02 dps | t=29.52 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.018 z=1.018 g (raw: 78 -290 16687)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.61 z=-1.04 dps (raw: 16 -184 -119)
+> 
+>>> temp
+
+Temp: 29.47 C (raw: 1145)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m3334[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  16611
+  sampleAgeMs:        1247
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m51[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.06%[0m
+  Duration: 461 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (108.46/s)
+  Gyro samples:  50 (108.46/s)
+  Temp samples:  25 (54.23/s)
+  Health delta: [32msuccess +586[0m, [32mfailures +0[0m
+  Temp C:   min=29.48 avg=29.54 max=29.57
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.088, 0.201] y[-1.663, -1.558] z[-1.076, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 3925 -> [32m3975 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 3975 -> [32m3992 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m3992[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=83 ay=-307 az=16701 | gx=13 gy=-187 gz=-119 | t=1159
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.019 g | gx=+0.18 gy=-1.60 gz=-1.04 dps | t=29.55 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 80 -304 16696)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.59 z=-1.02 dps (raw: 16 -182 -116)
+> 
+>>> temp
+
+Temp: 29.52 C (raw: 1158)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m3999[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  19546
+  sampleAgeMs:        1245
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.28%[0m
+  Duration: 460 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.70/s)
+  Gyro samples:  50 (108.70/s)
+  Temp samples:  25 (54.35/s)
+  Health delta: [32msuccess +586[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.53 max=29.57
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.017] z[1.012, 1.024]
+  Gyro dps: x[0.105, 0.184] y[-1.689, -1.549] z[-1.085, -0.971]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 4590 -> [32m4640 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 4640 -> [32m4657 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m4657[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=67 ay=-306 az=16535 | gx=14 gy=-172 gz=-117 | t=1158
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.016 g | gx=+0.17 gy=-1.59 gz=-1.06 dps | t=29.55 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.020 z=1.024 g (raw: 90 -324 16779)
+> 
+>>> gyro
+
+Gyro: x=0.17 y=-1.58 z=-1.04 dps (raw: 19 -181 -119)
+> 
+>>> temp
+
+Temp: 29.54 C (raw: 1161)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m4664[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 309 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  22467
+  sampleAgeMs:        1248
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    458
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.35%[0m
+  Duration: 457 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.41/s)
+  Gyro samples:  50 (109.41/s)
+  Temp samples:  26 (56.89/s)
+  Health delta: [32msuccess +584[0m, [32mfailures +0[0m
+  Temp C:   min=29.49 avg=29.53 max=29.57
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.011, 1.026]
+  Gyro dps: x[0.096, 0.193] y[-1.706, -1.514] z[-1.094, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 5253 -> [32m5303 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 5303 -> [32m5320 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m5320[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=79 ay=-305 az=16706 | gx=17 gy=-183 gz=-123 | t=1169
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.019 az=+1.018 g | gx=+0.15 gy=-1.61 gz=-1.04 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 80 -319 16689)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.54 z=-1.05 dps (raw: 16 -176 -120)
+> 
+>>> temp
+
+Temp: 29.50 C (raw: 1152)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m5327[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  25400
+  sampleAgeMs:        1249
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    464
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.21%[0m
+  Duration: 463 ms
+  Poll rate: 1002.16 polls/s
+  Accel samples: 50 (107.99/s)
+  Gyro samples:  50 (107.99/s)
+  Temp samples:  25 (54.00/s)
+  Health delta: [32msuccess +589[0m, [32mfailures +0[0m
+  Temp C:   min=29.51 avg=29.55 max=29.59
+  Accel g:  x[0.004, 0.006] y[-0.021, -0.018] z[1.008, 1.030]
+  Gyro dps: x[0.096, 0.193] y[-1.680, -1.488] z[-1.094, -0.980]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 5921 -> [32m5971 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 5971 -> [32m5988 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m5988[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=97 ay=-319 az=16688 | gx=15 gy=-185 gz=-118 | t=1167
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.019 g | gx=+0.13 gy=-1.63 gz=-1.05 dps | t=29.52 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.019 g (raw: 89 -311 16705)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.63 z=-1.02 dps (raw: 16 -186 -117)
+> 
+>>> temp
+
+Temp: 29.53 C (raw: 1160)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m5995[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  28330
+  sampleAgeMs:        1242
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    463
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.23%[0m
+  Duration: 463 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (107.99/s)
+  Gyro samples:  50 (107.99/s)
+  Temp samples:  26 (56.16/s)
+  Health delta: [32msuccess +589[0m, [32mfailures +0[0m
+  Temp C:   min=29.49 avg=29.54 max=29.58
+  Accel g:  x[0.003, 0.007] y[-0.020, -0.018] z[1.003, 1.032]
+  Gyro dps: x[0.088, 0.193] y[-1.724, -1.453] z[-1.103, -0.980]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 6589 -> [32m6639 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 6639 -> [32m6656 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m6656[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=47 ay=-325 az=16504 | gx=14 gy=-171 gz=-126 | t=1168
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.020 g | gx=+0.14 gy=-1.65 gz=-1.03 dps | t=29.52 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.018 z=1.018 g (raw: 80 -296 16684)
+> 
+>>> gyro
+
+Gyro: x=0.14 y=-1.65 z=-1.03 dps (raw: 16 -188 -118)
+> 
+>>> temp
+
+Temp: 29.50 C (raw: 1152)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m6663[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  31253
+  sampleAgeMs:        1245
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    466
+  Reads:    [32m53[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.37%[0m
+  Duration: 466 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (107.30/s)
+  Gyro samples:  50 (107.30/s)
+  Temp samples:  26 (55.79/s)
+  Health delta: [32msuccess +592[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.54 max=29.57
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.015, 1.019]
+  Gyro dps: x[0.105, 0.184] y[-1.663, -1.566] z[-1.094, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 7260 -> [32m7310 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 7310 -> [32m7327 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m7327[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=74 ay=-314 az=16686 | gx=13 gy=-186 gz=-123 | t=1159
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.016 g | gx=+0.14 gy=-1.62 gz=-1.01 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 84 -311 16690)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.61 z=-1.05 dps (raw: 15 -184 -120)
+> 
+>>> temp
+
+Temp: 29.54 C (raw: 1161)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m7334[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 311 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  34169
+  sampleAgeMs:        1244
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.28%[0m
+  Duration: 460 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.70/s)
+  Gyro samples:  50 (108.70/s)
+  Temp samples:  25 (54.35/s)
+  Health delta: [32msuccess +586[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.53 max=29.56
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.016, 1.019]
+  Gyro dps: x[0.105, 0.193] y[-1.654, -1.584] z[-1.103, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 7925 -> [32m7975 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 7975 -> [32m7992 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m7992[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=82 ay=-310 az=16680 | gx=17 gy=-187 gz=-121 | t=1163
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.16 gy=-1.61 gz=-1.07 dps | t=29.52 C
+> 
+>>> accel
+
+Accel: x=0.004 y=-0.019 z=1.018 g (raw: 65 -305 16693)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.62 z=-1.05 dps (raw: 15 -185 -120)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1165)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m7999[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 309 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  37088
+  sampleAgeMs:        1238
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    467
+  Reads:    [32m53[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.35%[0m
+  Duration: 465 ms
+  Poll rate: 1004.30 polls/s
+  Accel samples: 50 (107.53/s)
+  Gyro samples:  50 (107.53/s)
+  Temp samples:  26 (55.91/s)
+  Health delta: [32msuccess +593[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.55 max=29.60
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.096, 0.175] y[-1.645, -1.558] z[-1.111, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 8597 -> [32m8647 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 8647 -> [32m8664 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m8664[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=94 ay=-297 az=16706 | gx=18 gy=-187 gz=-119 | t=1170
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.019 az=+1.018 g | gx=+0.12 gy=-1.57 gz=-1.09 dps | t=29.57 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 90 -312 16695)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.56 z=-1.07 dps (raw: 15 -178 -122)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1165)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m8671[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  40012
+  sampleAgeMs:        1247
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    466
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.16%[0m
+  Duration: 466 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (107.30/s)
+  Gyro samples:  50 (107.30/s)
+  Temp samples:  26 (55.79/s)
+  Health delta: [32msuccess +592[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.56 max=29.58
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.007, 1.028]
+  Gyro dps: x[0.079, 0.193] y[-1.741, -1.505] z[-1.085, -0.980]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 9268 -> [32m9318 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 9318 -> [32m9335 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m9335[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=80 ay=-309 az=16628 | gx=18 gy=-179 gz=-117 | t=1162
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.020 az=+1.012 g | gx=+0.11 gy=-1.55 gz=-1.07 dps | t=29.55 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.020 z=1.025 g (raw: 89 -321 16799)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.59 z=-1.04 dps (raw: 15 -182 -119)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1166)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m9342[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  42940
+  sampleAgeMs:        1249
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    457
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.38%[0m
+  Duration: 456 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.65/s)
+  Gyro samples:  50 (109.65/s)
+  Temp samples:  25 (54.82/s)
+  Health delta: [32msuccess +582[0m, [32mfailures +0[0m
+  Temp C:   min=29.49 avg=29.54 max=29.58
+  Accel g:  x[0.003, 0.006] y[-0.021, -0.017] z[1.016, 1.019]
+  Gyro dps: x[0.096, 0.175] y[-1.671, -1.566] z[-1.076, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 9929 -> [32m9979 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 9979 -> [32m9996 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m9996[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=67 ay=-325 az=16708 | gx=20 gy=-185 gz=-120 | t=1161
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.018 az=+1.018 g | gx=+0.14 gy=-1.61 gz=-1.05 dps | t=29.50 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.017 g (raw: 83 -311 16677)
+> 
+>>> gyro
+
+Gyro: x=0.11 y=-1.61 z=-1.01 dps (raw: 13 -184 -115)
+> 
+>>> temp
+
+Temp: 29.57 C (raw: 1171)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m10003[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  45877
+  sampleAgeMs:        1283
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    464
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.21%[0m
+  Duration: 463 ms
+  Poll rate: 1002.16 polls/s
+  Accel samples: 50 (107.99/s)
+  Gyro samples:  50 (107.99/s)
+  Temp samples:  26 (56.16/s)
+  Health delta: [32msuccess +590[0m, [32mfailures +0[0m
+  Temp C:   min=29.51 avg=29.55 max=29.58
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.096, 0.184] y[-1.663, -1.566] z[-1.094, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 10598 -> [32m10648 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 10648 -> [32m10665 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m10665[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=78 ay=-306 az=16699 | gx=18 gy=-184 gz=-120 | t=1171
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.020 az=+1.018 g | gx=+0.14 gy=-1.68 gz=-1.06 dps | t=29.57 C
+> 
+>>> accel
+
+Accel: x=0.004 y=-0.018 z=1.017 g (raw: 72 -299 16680)
+> 
+>>> gyro
+
+Gyro: x=0.11 y=-1.63 z=-1.08 dps (raw: 13 -186 -123)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1165)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m10672[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  48855
+  sampleAgeMs:        1242
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    464
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.21%[0m
+  Duration: 463 ms
+  Poll rate: 1002.16 polls/s
+  Accel samples: 50 (107.99/s)
+  Gyro samples:  50 (107.99/s)
+  Temp samples:  26 (56.16/s)
+  Health delta: [32msuccess +590[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.55 max=29.59
+  Accel g:  x[0.003, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.114, 0.193] y[-1.654, -1.558] z[-1.094, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 11267 -> [32m11317 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 11317 -> [32m11334 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m11334[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=81 ay=-303 az=16677 | gx=17 gy=-185 gz=-121 | t=1169
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.018 az=+1.018 g | gx=+0.17 gy=-1.55 gz=-1.03 dps | t=29.53 C
+> 
+>>> accel
+
+Accel: x=0.004 y=-0.018 z=1.018 g (raw: 73 -302 16685)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.61 z=-1.01 dps (raw: 17 -184 -115)
+> 
+>>> temp
+
+Temp: 29.54 C (raw: 1162)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m11341[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 311 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  51779
+  sampleAgeMs:        1245
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    466
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.16%[0m
+  Duration: 466 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (107.30/s)
+  Gyro samples:  50 (107.30/s)
+  Temp samples:  26 (55.79/s)
+  Health delta: [32msuccess +592[0m, [32mfailures +0[0m
+  Temp C:   min=29.48 avg=29.54 max=29.57
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.105, 0.175] y[-1.671, -1.558] z[-1.103, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 11938 -> [32m11988 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 11988 -> [32m12005 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m12005[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=77 ay=-311 az=16690 | gx=16 gy=-189 gz=-120 | t=1153
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.019 az=+1.017 g | gx=+0.17 gy=-1.60 gz=-1.03 dps | t=29.55 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 90 -311 16693)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.59 z=-1.09 dps (raw: 17 -182 -124)
+> 
+>>> temp
+
+Temp: 29.50 C (raw: 1152)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m12012[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  54717
+  sampleAgeMs:        1250
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    458
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.35%[0m
+  Duration: 457 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.41/s)
+  Gyro samples:  50 (109.41/s)
+  Temp samples:  26 (56.89/s)
+  Health delta: [32msuccess +584[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.54 max=29.57
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.016, 1.019]
+  Gyro dps: x[0.096, 0.175] y[-1.680, -1.566] z[-1.067, -0.980]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 12601 -> [32m12651 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 12651 -> [32m12668 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m12668[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=82 ay=-306 az=16675 | gx=16 gy=-182 gz=-121 | t=1157
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.16 gy=-1.64 gz=-1.02 dps | t=29.51 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.020 z=1.018 g (raw: 79 -322 16686)
+> 
+>>> gyro
+
+Gyro: x=0.12 y=-1.58 z=-1.04 dps (raw: 14 -181 -119)
+> 
+>>> temp
+
+Temp: 29.53 C (raw: 1160)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m12675[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 311 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  57653
+  sampleAgeMs:        1239
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    463
+  Reads:    [32m53[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.45%[0m
+  Duration: 461 ms
+  Poll rate: 1004.34 polls/s
+  Accel samples: 50 (108.46/s)
+  Gyro samples:  50 (108.46/s)
+  Temp samples:  26 (56.40/s)
+  Health delta: [32msuccess +589[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.54 max=29.57
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.105, 0.184] y[-1.645, -1.558] z[-1.103, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 13269 -> [32m13319 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 13319 -> [32m13336 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m13336[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=68 ay=-311 az=16685 | gx=16 gy=-184 gz=-120 | t=1174
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.020 az=+1.018 g | gx=+0.11 gy=-1.62 gz=-1.04 dps | t=29.57 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.019 g (raw: 77 -313 16703)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.59 z=-1.04 dps (raw: 15 -182 -119)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1165)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m13343[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  60570
+  sampleAgeMs:        1247
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.28%[0m
+  Duration: 460 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.70/s)
+  Gyro samples:  50 (108.70/s)
+  Temp samples:  25 (54.35/s)
+  Health delta: [32msuccess +586[0m, [32mfailures +0[0m
+  Temp C:   min=29.52 avg=29.54 max=29.58
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.017] z[1.016, 1.019]
+  Gyro dps: x[0.114, 0.184] y[-1.654, -1.558] z[-1.076, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 13934 -> [32m13984 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 13984 -> [32m14001 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m14001[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=73 ay=-309 az=16678 | gx=14 gy=-184 gz=-118 | t=1165
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.019 az=+1.018 g | gx=+0.15 gy=-1.59 gz=-1.04 dps | t=29.52 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.016 g (raw: 75 -306 16661)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.62 z=-1.05 dps (raw: 17 -185 -120)
+> 
+>>> temp
+
+Temp: 29.51 C (raw: 1154)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m14008[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  63501
+  sampleAgeMs:        1248
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    460
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.30%[0m
+  Duration: 459 ms
+  Poll rate: 1002.18 polls/s
+  Accel samples: 50 (108.93/s)
+  Gyro samples:  50 (108.93/s)
+  Temp samples:  25 (54.47/s)
+  Health delta: [32msuccess +585[0m, [32mfailures +0[0m
+  Temp C:   min=29.51 avg=29.54 max=29.59
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.017] z[1.016, 1.019]
+  Gyro dps: x[0.088, 0.184] y[-1.636, -1.566] z[-1.111, -1.015]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 14598 -> [32m14648 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 14648 -> [32m14665 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m14665[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=82 ay=-306 az=16668 | gx=16 gy=-184 gz=-122 | t=1157
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.14 gy=-1.61 gz=-1.03 dps | t=29.57 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.020 z=1.018 g (raw: 82 -323 16685)
+> 
+>>> gyro
+
+Gyro: x=0.13 y=-1.60 z=-1.01 dps (raw: 15 -183 -115)
+> 
+>>> temp
+
+Temp: 29.57 C (raw: 1169)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m14672[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 314 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  66429
+  sampleAgeMs:        1251
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    462
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.26%[0m
+  Duration: 461 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.46/s)
+  Gyro samples:  50 (108.46/s)
+  Temp samples:  25 (54.23/s)
+  Health delta: [32msuccess +587[0m, [32mfailures +0[0m
+  Temp C:   min=29.51 avg=29.56 max=29.62
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.016, 1.020]
+  Gyro dps: x[0.096, 0.184] y[-1.663, -1.558] z[-1.103, -0.971]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 15264 -> [32m15314 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 15314 -> [32m15331 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m15331[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=85 ay=-322 az=16682 | gx=18 gy=-184 gz=-121 | t=1159
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.017 g | gx=+0.16 gy=-1.61 gz=-1.02 dps | t=29.56 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.020 z=1.017 g (raw: 75 -336 16670)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.61 z=-1.01 dps (raw: 17 -184 -115)
+> 
+>>> temp
+
+Temp: 29.54 C (raw: 1163)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m15338[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 313 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  69364
+  sampleAgeMs:        1250
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    467
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.13%[0m
+  Duration: 465 ms
+  Poll rate: 1004.30 polls/s
+  Accel samples: 50 (107.53/s)
+  Gyro samples:  50 (107.53/s)
+  Temp samples:  26 (55.91/s)
+  Health delta: [32msuccess +593[0m, [32mfailures +0[0m
+  Temp C:   min=29.49 avg=29.54 max=29.58
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.016, 1.019]
+  Gyro dps: x[0.105, 0.184] y[-1.645, -1.566] z[-1.085, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 15936 -> [32m15986 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 15986 -> [32m16003 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m16003[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=76 ay=-309 az=16678 | gx=15 gy=-184 gz=-121 | t=1168
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.15 gy=-1.60 gz=-1.05 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.017 g (raw: 79 -313 16675)
+> 
+>>> gyro
+
+Gyro: x=0.16 y=-1.58 z=-1.04 dps (raw: 18 -180 -119)
+> 
+>>> temp
+
+Temp: 29.56 C (raw: 1168)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m16010[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 315 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  72301
+  sampleAgeMs:        1246
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    457
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.38%[0m
+  Duration: 456 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.65/s)
+  Gyro samples:  50 (109.65/s)
+  Temp samples:  25 (54.82/s)
+  Health delta: [32msuccess +582[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.54 max=29.57
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.114, 0.193] y[-1.663, -1.566] z[-1.111, -1.015]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 16597 -> [32m16647 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 16647 -> [32m16664 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m16664[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 1 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=91 ay=-320 az=16680 | gx=18 gy=-182 gz=-118 | t=1163
+> 
+>>> read
+
+Sample: ax=+0.004 ay=-0.019 az=+1.018 g | gx=+0.15 gy=-1.56 gz=-1.09 dps | t=29.53 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.019 g (raw: 85 -306 16697)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.61 z=-1.05 dps (raw: 17 -184 -120)
+> 
+>>> temp
+
+Temp: 29.58 C (raw: 1173)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m16671[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  75228
+  sampleAgeMs:        1243
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    465
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.18%[0m
+  Duration: 464 ms
+  Poll rate: 1002.16 polls/s
+  Accel samples: 50 (107.76/s)
+  Gyro samples:  50 (107.76/s)
+  Temp samples:  25 (53.88/s)
+  Health delta: [32msuccess +590[0m, [32mfailures +0[0m
+  Temp C:   min=29.51 avg=29.55 max=29.58
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.105, 0.184] y[-1.645, -1.575] z[-1.103, -0.998]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 17266 -> [32m17316 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 17316 -> [32m17333 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m17333[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=83 ay=-290 az=16687 | gx=18 gy=-181 gz=-121 | t=1153
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.12 gy=-1.60 gz=-1.05 dps | t=29.57 C
+> 
+>>> accel
+
+Accel: x=0.004 y=-0.019 z=1.018 g (raw: 67 -305 16692)
+> 
+>>> gyro
+
+Gyro: x=0.17 y=-1.61 z=-1.03 dps (raw: 19 -184 -118)
+> 
+>>> temp
+
+Temp: 29.52 C (raw: 1157)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m17340[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  78157
+  sampleAgeMs:        1242
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    460
+  Reads:    [32m53[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.52%[0m
+  Duration: 458 ms
+  Poll rate: 1004.37 polls/s
+  Accel samples: 50 (109.17/s)
+  Gyro samples:  50 (109.17/s)
+  Temp samples:  26 (56.77/s)
+  Health delta: [32msuccess +586[0m, [32mfailures +0[0m
+  Temp C:   min=29.50 avg=29.54 max=29.59
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.012, 1.026]
+  Gyro dps: x[0.096, 0.193] y[-1.671, -1.540] z[-1.085, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 17931 -> [32m17981 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 17981 -> [32m17998 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m17998[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=76 ay=-331 az=16603 | gx=16 gy=-181 gz=-118 | t=1162
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.17 gy=-1.62 gz=-1.07 dps | t=29.53 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.019 g (raw: 85 -315 16704)
+> 
+>>> gyro
+
+Gyro: x=0.18 y=-1.62 z=-1.06 dps (raw: 20 -185 -121)
+> 
+>>> temp
+
+Temp: 29.55 C (raw: 1164)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m18005[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 312 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  81083
+  sampleAgeMs:        1250
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    458
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.35%[0m
+  Duration: 457 ms
+  Poll rate: 1002.19 polls/s
+  Accel samples: 50 (109.41/s)
+  Gyro samples:  50 (109.41/s)
+  Temp samples:  26 (56.89/s)
+  Health delta: [32msuccess +584[0m, [32mfailures +0[0m
+  Temp C:   min=29.52 avg=29.55 max=29.59
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.019]
+  Gyro dps: x[0.096, 0.175] y[-1.654, -1.566] z[-1.120, -0.989]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 16 ms
+  Rate: 3125.00 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 18594 -> [32m18644 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 18644 -> [32m18661 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m18661[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=85 ay=-307 az=16699 | gx=19 gy=-185 gz=-120 | t=1169
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.018 g | gx=+0.14 gy=-1.63 gz=-1.04 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.004 y=-0.019 z=1.019 g (raw: 72 -311 16697)
+> 
+>>> gyro
+
+Gyro: x=0.11 y=-1.62 z=-1.04 dps (raw: 13 -185 -119)
+> 
+>>> temp
+
+Temp: 29.54 C (raw: 1161)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m18668[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 311 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  84013
+  sampleAgeMs:        1248
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    461
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.28%[0m
+  Duration: 460 ms
+  Poll rate: 1002.17 polls/s
+  Accel samples: 50 (108.70/s)
+  Gyro samples:  50 (108.70/s)
+  Temp samples:  26 (56.52/s)
+  Health delta: [32msuccess +587[0m, [32mfailures +0[0m
+  Temp C:   min=29.52 avg=29.55 max=29.58
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.096, 0.184] y[-1.663, -1.558] z[-1.094, -0.971]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 19260 -> [32m19310 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 19310 -> [32m19327 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m19327[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=88 ay=-315 az=16697 | gx=15 gy=-179 gz=-119 | t=1169
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.019 az=+1.019 g | gx=+0.13 gy=-1.56 gz=-1.06 dps | t=29.54 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.018 g (raw: 87 -315 16686)
+> 
+>>> gyro
+
+Gyro: x=0.15 y=-1.61 z=-1.04 dps (raw: 17 -184 -119)
+> 
+>>> temp
+
+Temp: 29.57 C (raw: 1170)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m19334[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  86940
+  sampleAgeMs:        1246
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:          no
+  Significant motion: no
+  Tilt:               no
+  Wrist tilt:         no
+  Offset weight:      1 mg/LSB
+  User offset:        x=0 y=0 z=0
+  FIFO mode:          bypass
+  FIFO ODR:           POWER_DOWN
+  FIFO threshold:     0
+  FIFO accel decim:   off
+  FIFO gyro decim:    off
+  FIFO temp:          no
+  FIFO step/time:     no
+  FIFO stop@th:       no
+  FIFO high-only:     no
+> 
+>>> funcsrc1
+
+  funcsrc1 = 0x00
+    step delta           no
+    significant motion   no
+    tilt                 no
+    step detected        no
+    step overflow        no
+    hard/soft iron fail  no
+    soft iron done       no
+    sensor hub done      no
+> 
+>>> tsread
+
+  Timestamp: 5601
+> 
+>>> steps
+
+  Pedometer: no
+  Accel ODR: 104 Hz
+  Steps: 0
+  Step timestamp: 0
+  FUNC_SRC1: 0x00
+    step detected        no
+    step delta           no
+    step overflow        no
+  Note: pedometer is disabled; run 'pedo 1' before expecting step counts.
+> 
+>>> stress 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+
+=== Stress Summary ===
+  Mode:     independent data-ready polling
+  Target:   50 per active accel/gyro channel
+  Polls:    459
+  Reads:    [32m52[0m
+  Errors:   [32m0[0m
+  Poll hit rate: [31m11.33%[0m
+  Duration: 459 ms
+  Poll rate: 1000.00 polls/s
+  Accel samples: 50 (108.93/s)
+  Gyro samples:  50 (108.93/s)
+  Temp samples:  25 (54.47/s)
+  Health delta: [32msuccess +584[0m, [32mfailures +0[0m
+  Temp C:   min=29.52 avg=29.56 max=29.60
+  Accel g:  x[0.004, 0.006] y[-0.020, -0.018] z[1.017, 1.020]
+  Gyro dps: x[0.105, 0.175] y[-1.645, -1.566] z[-1.076, -1.015]
+> 
+>>> stress_mix 50
+
+  Progress: 5/50 (10%, ok=[32m5[0m, fail=[32m0[0m)
+  Progress: 10/50 (20%, ok=[32m10[0m, fail=[32m0[0m)
+  Progress: 15/50 (30%, ok=[32m15[0m, fail=[32m0[0m)
+  Progress: 20/50 (40%, ok=[32m20[0m, fail=[32m0[0m)
+  Progress: 25/50 (50%, ok=[32m25[0m, fail=[32m0[0m)
+  Progress: 30/50 (60%, ok=[32m30[0m, fail=[32m0[0m)
+  Progress: 35/50 (70%, ok=[32m35[0m, fail=[32m0[0m)
+  Progress: 40/50 (80%, ok=[32m40[0m, fail=[32m0[0m)
+  Progress: 45/50 (90%, ok=[32m45[0m, fail=[32m0[0m)
+  Progress: 50/50 (100%, ok=[32m50[0m, fail=[32m0[0m)
+=== Mixed Stress Summary ===
+  Total: 50
+  Success: [32m50[0m
+  Errors: [32m0[0m
+  Success rate: [32m100.00%[0m
+  Duration: 17 ms
+  Rate: 2941.18 ops/s
+  Health delta: [32msuccess +50[0m, [32mfailures +0[0m
+  readAllRaw [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readAccel  [32mok=9[0m [32mfail=0[0m ([32m100.0%[0m)
+  readGyro   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readTemp   [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readStatus [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  readWhoAmI [32mok=8[0m [32mfail=0[0m ([32m100.0%[0m)
+  Health changes:
+  TotalOK: 19923 -> [32m19973 (+50)[0m
+> 
+>>> recover
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  TotalOK: 19973 -> [32m19990 (+17)[0m
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m19990[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 0 ms ago
+  Last error: never
+> 
+>>> raw
+
+Raw: ax=69 ay=-320 az=16697 | gx=16 gy=-182 gz=-120 | t=1179
+> 
+>>> read
+
+Sample: ax=+0.005 ay=-0.018 az=+1.019 g | gx=+0.16 gy=-1.61 gz=-1.09 dps | t=29.56 C
+> 
+>>> accel
+
+Accel: x=0.005 y=-0.019 z=1.016 g (raw: 83 -309 16661)
+> 
+>>> gyro
+
+Gyro: x=0.16 y=-1.63 z=-1.03 dps (raw: 18 -186 -118)
+> 
+>>> temp
+
+Temp: 29.56 C (raw: 1167)
+> 
+>>> status
+
+  STATUS_REG = 0x07 (XLDA=1 GDA=1 TDA=1)
+> 
+>>> fifo
+
+=== FIFO ===
+  Mode: bypass
+  ODR:  POWER_DOWN
+  Threshold: 0
+  Unread words: 0
+  Pattern: 0
+  Watermark: no
+  Overrun: no
+  Full smart: no
+  Empty: yes
+> 
+>>> probe
+
+  Status: [32mOK[0m (code=0, detail=0)
+  Message: [33mOK[0m
+  Health changes:
+  (no health changes)
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m19997[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 311 ms ago
+  Last error: never
+> 
+>>> settings
+
+=== Current Settings ===
+  Initialized:        yes
+  Driver state:       READY
+  I2C address:        0x6A
+  I2C timeout:        50 ms
+  Offline threshold:  5
+  Cached config dirty: no
+  Measurement ready:  no
+  Has sample:         yes
+  sampleTimestampMs:  89865
+  sampleAgeMs:        1246
+  Accel ODR:          104 Hz
+  Gyro ODR:           104 Hz
+  Accel FS:           +/-2g
+  Gyro FS:            +/-250 dps
+  Accel power:        high-performance
+  Gyro power:         high-performance
+  Gyro sleep:         no
+  Accel LPF2:         no
+  Accel HP/slope:     no
+  Accel LPF on 6D:    no
+  Gyro LPF1:          no
+  Gyro HPF:           no
+  Gyro HPF mode:      0.0081
+  Timestamp:          no
+  Timestamp HR:       no
+  Pedometer:         

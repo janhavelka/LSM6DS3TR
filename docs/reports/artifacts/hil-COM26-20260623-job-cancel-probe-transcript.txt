@@ -1,0 +1,46 @@
+=== BOOT/SETTLE ===
+
+>>> job auto 0
+
+  Automatic tick polling: no
+  Job auto: busy=no ready=no hasSample=no manual=yes
+  Last poll: OK (code=0, detail=0)
+  Last poll msg: OK
+  Health: state=READY ok=0 fail=0 consecutive=0
+> 
+>>> job start direct
+
+  Status: [31mIN_PROGRESS[0m (code=10, detail=0)
+  Message: [33mMeasurement scheduled[0m
+  Job start: busy=yes ready=no hasSample=no manual=yes
+  Last poll: IN_PROGRESS (code=10, detail=0)
+  Last poll msg: Measurement scheduled
+  Health: state=READY ok=0 fail=0 consecutive=0
+> 
+>>> job cancel
+
+  Job manual mode cleared.
+  Job cancel: busy=yes ready=no hasSample=no manual=no
+  Last poll: IN_PROGRESS (code=10, detail=0)
+  Last poll msg: Measurement scheduled
+  Health: state=READY ok=0 fail=0 consecutive=0
+> 
+>>> job status
+
+  Job status: busy=no ready=yes hasSample=yes manual=no
+  Last poll: OK (code=0, detail=0)
+  Last poll msg: OK
+  Health: state=READY ok=1 fail=0 consecutive=0
+> 
+>>> health
+
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [32m1[0m
+  Total failures: [32m0[0m
+  Success rate: [32m100.0%[0m
+  Last OK: 310 ms ago
+  Last error: never
+> 

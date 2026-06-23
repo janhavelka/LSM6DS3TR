@@ -25,6 +25,7 @@ MANDATORY_COMMANDS = [
     "recover",
     "drv",
     "health",
+    "job",
     "read",
     "fifo",
     "tsread",

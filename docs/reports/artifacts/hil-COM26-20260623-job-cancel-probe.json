@@ -1,0 +1,77 @@
+[
+  {
+    "test_id": "CMD-001",
+    "feature": "custom",
+    "command": "job auto 0",
+    "expected": "No failure tokens",
+    "observed": "Automatic tick polling: no | Job auto: busy=no ready=no hasSample=no manual=yes | Last poll: OK (code=0, detail=0) | Last poll msg: OK | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-002",
+    "feature": "custom",
+    "command": "job start direct",
+    "expected": "No failure tokens",
+    "observed": "Status: IN_PROGRESS (code=10, detail=0) | Message: Measurement scheduled | Job start: busy=yes ready=no hasSample=no manual=yes | Last poll: IN_PROGRESS (code=10, detail=0) | ...",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-003",
+    "feature": "custom",
+    "command": "job cancel",
+    "expected": "No failure tokens",
+    "observed": "Job manual mode cleared. | Job cancel: busy=yes ready=no hasSample=no manual=no | Last poll: IN_PROGRESS (code=10, detail=0) | Last poll msg: Measurement scheduled | ...",
+    "elapsed_s": 0.10999999986961484,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "IN_PROGRESS"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-004",
+    "feature": "custom",
+    "command": "job status",
+    "expected": "No failure tokens",
+    "observed": "Job status: busy=no ready=yes hasSample=yes manual=no | Last poll: OK (code=0, detail=0) | Last poll msg: OK | Health: state=READY ok=1 fail=0 consecutive=0",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-005",
+    "feature": "custom",
+    "command": "health",
+    "expected": "No failure tokens",
+    "observed": "=== Driver Health === | State: READY | Online: yes | Consecutive failures: 0 | ...",
+    "elapsed_s": 0.10899999993853271,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  }
+]

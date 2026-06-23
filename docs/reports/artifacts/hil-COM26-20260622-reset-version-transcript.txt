@@ -1,0 +1,54 @@
+=== BOOT/SETTLE ===
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40379d02
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x118c
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xc20
+load:0x403cb700,len:0x30e0
+entry 0x403c88b8
+[36m[I][0m === LSM6DS3TR-C Bringup CLI ===
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+[36m[I][0m I2C initialized (SDA=8, SCL=9)
+[36m[I][0m Scanning I2C bus (timeout=50ms)...
+[36m[I][0m      0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+00:                         -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- -- -- 6A -- -- -- -- -- 
+70: -- -- -- -- -- -- -- --                         
+[36m[I][0m Scan complete. Found 2 device(s).
+[36m[I][0m Common addresses: 0x3C/0x3D=OLED, 0x6A/0x6B=LSM6DS3TR, 0x76/0x77=BME280
+[36m[I][0m Device initialized successfully
+=== Driver Health ===
+  State: [32mREADY[0m
+  Online: [32myes[0m
+  Consecutive failures: [32m0[0m
+  Total success: [33m0[0m
+  Total failures: [32m0[0m
+  Success rate: [31m0.0%[0m
+  Last OK: never
+  Last error: never
+
+Type 'help' for commands
+> 
+>>> version
+
+=== Version ===
+  Version: 1.1.0
+  Full:    1.1.0 (f10e8e4, 2026-06-22 20:17:40, clean)
+  Built:   2026-06-22 20:17:40
+  Commit:  f10e8e4
+  Status:  clean
+> 

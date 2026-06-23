@@ -65,6 +65,7 @@ LSM6DS3TR::LSM6DS3TR device;
 bool verboseMode = false;
 bool continuousMode = false;
 bool pendingRead = false;
+bool manualPollMode = false;
 uint32_t pendingStartMs = 0;
 int stressRemaining = 0;
 StressStats stressStats;
@@ -1111,6 +1112,291 @@ void handleMeasurementReady() {
   }
 }
 
+void printJobState(const char* label) {
+  const LSM6DS3TR::Status last = device.lastPollStatus();
+  Serial.printf("  Job %s: busy=%s ready=%s hasSample=%s manual=%s\n",
+                label,
+                log_bool_str(device.pollBusy()),
+                log_bool_str(device.measurementReady()),
+                log_bool_str(device.hasSample()),
+                log_bool_str(manualPollMode));
+  Serial.printf("  Last poll: %s (code=%u, detail=%ld)\n",
+                errToStr(last.code),
+                static_cast<unsigned>(last.code),
+                static_cast<long>(last.detail));
+  if (last.msg && last.msg[0]) {
+    Serial.printf("  Last poll msg: %s\n", last.msg);
+  }
+  Serial.printf("  Health: state=%s ok=%lu fail=%lu consecutive=%u\n",
+                stateToStr(device.state()),
+                static_cast<unsigned long>(device.totalSuccess()),
+                static_cast<unsigned long>(device.totalFailures()),
+                device.consecutiveFailures());
+}
+
+bool parseJobKind(String token, String& outKind) {
+  token.toLowerCase();
+  if (token == "sample" || token == "ready" ||
+      token == "direct" || token == "raw" ||
+      token == "reset" || token == "boot" ||
+      token == "refresh" || token == "fifo" ||
+      token == "calxl" || token == "calg") {
+    outKind = token;
+    return true;
+  }
+  return false;
+}
+
+uint16_t defaultJobArg(const String& kind) {
+  if (kind == "fifo") {
+    return 8;
+  }
+  if (kind == "calxl" || kind == "calg") {
+    return 2;
+  }
+  return 0;
+}
+
+LSM6DS3TR::Status startJobByKind(const String& kind, uint16_t arg) {
+  cancelPending();
+  manualPollMode = true;
+  if (kind == "sample" || kind == "ready") {
+    return device.requestMeasurement(true);
+  }
+  if (kind == "direct" || kind == "raw") {
+    return device.requestMeasurement(false);
+  }
+  if (kind == "reset") {
+    return device.startSoftReset();
+  }
+  if (kind == "boot") {
+    return device.startBoot();
+  }
+  if (kind == "refresh") {
+    return device.startRefreshCachedConfig();
+  }
+  if (kind == "fifo") {
+    return device.startFifoDrain(arg);
+  }
+  if (kind == "calxl") {
+    return device.startAccelBiasCapture(arg);
+  }
+  if (kind == "calg") {
+    return device.startGyroBiasCapture(arg);
+  }
+  manualPollMode = false;
+  return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "Invalid job kind");
+}
+
+void updateManualPollMode() {
+  if (!device.pollBusy()) {
+    manualPollMode = false;
+  }
+}
+
+void printRawMeasurementSnapshot() {
+  LSM6DS3TR::RawMeasurement raw;
+  const LSM6DS3TR::Status st = device.getRawMeasurement(raw);
+  if (!st.ok()) {
+    printStatus(st);
+    return;
+  }
+  Serial.printf("  Cached raw: ax=%d ay=%d az=%d gx=%d gy=%d gz=%d t=%d ts=%lu\n",
+                raw.accel.x,
+                raw.accel.y,
+                raw.accel.z,
+                raw.gyro.x,
+                raw.gyro.y,
+                raw.gyro.z,
+                raw.temperature,
+                static_cast<unsigned long>(device.sampleTimestampMs()));
+}
+
+void processJobCommand(String* tokens, size_t count) {
+  if (count == 1 || tokens[1] == "status") {
+    printJobState("status");
+    return;
+  }
+
+  String sub = tokens[1];
+  sub.toLowerCase();
+
+  if (sub == "auto") {
+    if (count != 3) {
+      Serial.println("  Expected job auto [0|1]");
+      return;
+    }
+    bool enabled = false;
+    if (!parseBoolToken(tokens[2], enabled)) {
+      Serial.println("  Expected job auto [0|1]");
+      return;
+    }
+    manualPollMode = !enabled;
+    Serial.printf("  Automatic tick polling: %s\n", log_bool_str(enabled));
+    printJobState("auto");
+    return;
+  }
+
+  if (sub == "start" || sub == "req") {
+    if (count < 3) {
+      Serial.println("  Expected job start <sample|direct|reset|boot|refresh|fifo|calxl|calg> [arg]");
+      return;
+    }
+    String kind;
+    if (!parseJobKind(tokens[2], kind)) {
+      Serial.println("  Invalid job kind");
+      return;
+    }
+    unsigned long arg = defaultJobArg(kind);
+    if (count >= 4 && !parseUnsignedToken(tokens[3], 10000UL, arg)) {
+      Serial.println("  Invalid job argument");
+      return;
+    }
+    const LSM6DS3TR::Status st = startJobByKind(kind, static_cast<uint16_t>(arg));
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("start");
+    return;
+  }
+
+  if (sub == "poll") {
+    if (count < 3) {
+      Serial.println("  Expected job poll <budget 0..255> [count 1..1000] [delayMs 0..1000]");
+      return;
+    }
+    unsigned long budget = 0;
+    unsigned long iterations = 1;
+    unsigned long delayMs = 0;
+    if (!parseUnsignedToken(tokens[2], 255UL, budget)) {
+      Serial.println("  Invalid poll budget");
+      return;
+    }
+    if (count >= 4 && !parseUnsignedToken(tokens[3], 1000UL, iterations)) {
+      Serial.println("  Invalid poll count");
+      return;
+    }
+    if (count >= 5 && !parseUnsignedToken(tokens[4], 1000UL, delayMs)) {
+      Serial.println("  Invalid poll delay");
+      return;
+    }
+    if (iterations == 0UL) {
+      Serial.println("  Invalid poll count");
+      return;
+    }
+    LSM6DS3TR::Status st = device.lastPollStatus();
+    for (unsigned long i = 0; i < iterations; ++i) {
+      st = device.poll(millis(), static_cast<uint8_t>(budget));
+      Serial.printf("  Poll %lu/%lu budget=%lu -> %s busy=%s ready=%s\n",
+                    i + 1UL,
+                    iterations,
+                    budget,
+                    errToStr(st.code),
+                    log_bool_str(device.pollBusy()),
+                    log_bool_str(device.measurementReady()));
+      if (!st.inProgress()) {
+        break;
+      }
+      if (delayMs > 0UL) {
+        delay(static_cast<unsigned long>(delayMs));
+      }
+    }
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("poll");
+    return;
+  }
+
+  if (sub == "run") {
+    if (count < 4) {
+      Serial.println("  Expected job run <kind> <budget> [limit 1..1000] [delayMs] [arg]");
+      return;
+    }
+    String kind;
+    if (!parseJobKind(tokens[2], kind)) {
+      Serial.println("  Invalid job kind");
+      return;
+    }
+    unsigned long budget = 0;
+    unsigned long limit = 100;
+    unsigned long delayMs = 0;
+    unsigned long arg = 0;
+    if (!parseUnsignedToken(tokens[3], 255UL, budget)) {
+      Serial.println("  Invalid poll budget");
+      return;
+    }
+    if (count >= 5 && !parseUnsignedToken(tokens[4], 1000UL, limit)) {
+      Serial.println("  Invalid poll limit");
+      return;
+    }
+    if (count >= 6 && !parseUnsignedToken(tokens[5], 1000UL, delayMs)) {
+      Serial.println("  Invalid poll delay");
+      return;
+    }
+    if (count >= 7) {
+      if (!parseUnsignedToken(tokens[6], 10000UL, arg)) {
+        Serial.println("  Invalid job argument");
+        return;
+      }
+    } else {
+      arg = defaultJobArg(kind);
+    }
+    if (limit == 0UL) {
+      Serial.println("  Invalid poll limit");
+      return;
+    }
+    LSM6DS3TR::Status st = startJobByKind(kind, static_cast<uint16_t>(arg));
+    Serial.println("  Start:");
+    printStatus(st);
+    unsigned long polls = 0;
+    while ((st.inProgress() || device.pollBusy()) && polls < limit) {
+      st = device.poll(millis(), static_cast<uint8_t>(budget));
+      ++polls;
+      if (!st.inProgress()) {
+        break;
+      }
+      if (delayMs > 0UL) {
+        delay(static_cast<unsigned long>(delayMs));
+      }
+    }
+    Serial.printf("  Job run: kind=%s budget=%lu polls=%lu limit=%lu\n",
+                  kind.c_str(),
+                  budget,
+                  polls,
+                  limit);
+    printStatus(st);
+    updateManualPollMode();
+    printJobState("run");
+    return;
+  }
+
+  if (sub == "getraw") {
+    printRawMeasurementSnapshot();
+    printJobState("getraw");
+    return;
+  }
+
+  if (sub == "get") {
+    LSM6DS3TR::Measurement m;
+    const LSM6DS3TR::Status st = device.getMeasurement(m);
+    if (st.ok()) {
+      printMeasurement(m);
+    }
+    printStatus(st);
+    printJobState("get");
+    return;
+  }
+
+  if (sub == "cancel") {
+    cancelPending();
+    manualPollMode = false;
+    Serial.println("  Job manual mode cleared.");
+    printJobState("cancel");
+    return;
+  }
+
+  Serial.println("  Expected job [status|auto|start|req|poll|run|get|getraw|cancel]");
+}
+
 bool readRegisterSnapshot(const uint8_t* regs, uint8_t* values, size_t count) {
   for (size_t i = 0; i < count; ++i) {
     LSM6DS3TR::Status st = device.readRegisterValue(regs[i], values[i]);
@@ -1512,6 +1798,7 @@ void printHelp() {
   cli::printHelpItem("drv1", "Show one-line health view");
   cli::printHelpItem("cfg / settings", "Show current cached configuration");
   cli::printHelpItem("refresh", "Refresh cached config from device registers");
+  cli::printHelpItem("job ...", "Manual staged poll diagnostics (status/start/poll/run/get/cancel)");
   cli::printHelpItem("verbose [0|1]", "Toggle or set verbose mode");
 
   cli::printHelpSection("Measurement");
@@ -1630,6 +1917,8 @@ void processCommand(const String& line) {
     printSettings();
   } else if (cmd == "refresh") {
     printStatus(device.refreshCachedConfig());
+  } else if (cmd == "job") {
+    processJobCommand(tokens, count);
   } else if (cmd == "verbose") {
     bool value = !verboseMode;
     if (count >= 2 && !parseBoolToken(tokens[1], value)) {
@@ -2224,7 +2513,9 @@ void setup() {
 }
 
 void loop() {
-  device.tick(millis());
+  if (!manualPollMode) {
+    device.tick(millis());
+  }
 
   if (stressStats.active && stressRemaining > 0 && !pendingRead) {
     const LSM6DS3TR::Status st = scheduleMeasurement();
