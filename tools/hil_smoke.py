@@ -16,6 +16,9 @@ DEFAULT_BAUD = 115200
 DEFAULT_COMMAND_TIMEOUT_S = 15.0
 SELFTEST_TIMEOUT_S = 120.0
 SOAK_DURATION_S = 8 * 60 * 60
+SOAK_SIMPLE_TIMEOUT_S = 5.0
+SOAK_STRESS_TIMEOUT_S = 30.0
+SOAK_RECOVER_TIMEOUT_S = 30.0
 PROMPT_RE = re.compile(r"(?:^|\r?\n)>\s*$")
 
 DEFAULT_COMMANDS = [
@@ -642,22 +645,22 @@ def benchmark_plan(count: int) -> list[CommandSpec]:
 
 def soak_cycle(stress_count: int) -> list[CommandSpec]:
     return [
-        CommandSpec("SOAK-RAW", "soak/data", "raw", expected=("Raw:",)),
-        CommandSpec("SOAK-READ", "soak/data", "read", expected=("Sample:", "g", "dps", "C")),
-        CommandSpec("SOAK-ACCEL", "soak/data", "accel", expected=("Accel",)),
-        CommandSpec("SOAK-GYRO", "soak/data", "gyro", expected=("Gyro",)),
-        CommandSpec("SOAK-TEMP", "soak/data", "temp", expected=("Temp",)),
-        CommandSpec("SOAK-STATUS", "soak/diagnostics", "status", expected=("STATUS_REG",)),
-        CommandSpec("SOAK-FIFO", "soak/fifo", "fifo", expected=("FIFO",)),
-        CommandSpec("SOAK-PROBE", "soak/diagnostics", "probe", expected=("Status:", "OK")),
-        CommandSpec("SOAK-HEALTH", "soak/diagnostics", "health", expected=("State:", "READY")),
-        CommandSpec("SOAK-CFG", "soak/config", "settings", expected=("Driver state:", "READY")),
-        CommandSpec("SOAK-SRC1", "soak/diagnostics", "funcsrc1", expected=("0x",)),
-        CommandSpec("SOAK-TS", "soak/functions", "tsread", expected=("Timestamp")),
-        CommandSpec("SOAK-STEPS", "soak/functions", "steps", expected=("Step")),
-        CommandSpec("SOAK-STRESS", "soak/stress", f"stress {stress_count}", expected=("Stress Summary", "Errors:"), timeout_s=120.0),
-        CommandSpec("SOAK-MIX", "soak/stress", f"stress_mix {stress_count}", expected=("Mixed Stress Summary", "Errors:"), timeout_s=120.0),
-        CommandSpec("SOAK-RECOVER", "soak/recovery", "recover", expected=("Status:", "OK"), timeout_s=30.0),
+        CommandSpec("SOAK-RAW", "soak/data", "raw", expected=("Raw:",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-READ", "soak/data", "read", expected=("Sample:", "g", "dps", "C"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-ACCEL", "soak/data", "accel", expected=("Accel",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-GYRO", "soak/data", "gyro", expected=("Gyro",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-TEMP", "soak/data", "temp", expected=("Temp",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-STATUS", "soak/diagnostics", "status", expected=("STATUS_REG",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-FIFO", "soak/fifo", "fifo", expected=("FIFO",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-PROBE", "soak/diagnostics", "probe", expected=("Status:", "OK"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-HEALTH", "soak/diagnostics", "health", expected=("State:", "READY"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-CFG", "soak/config", "settings", expected=("Driver state:", "READY"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-SRC1", "soak/diagnostics", "funcsrc1", expected=("0x",), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-TS", "soak/functions", "tsread", expected=("Timestamp"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-STEPS", "soak/functions", "steps", expected=("Step"), timeout_s=SOAK_SIMPLE_TIMEOUT_S),
+        CommandSpec("SOAK-STRESS", "soak/stress", f"stress {stress_count} quiet", expected=("RESULT stress", "errors=0", "state=READY"), timeout_s=SOAK_STRESS_TIMEOUT_S),
+        CommandSpec("SOAK-MIX", "soak/stress", f"stress_mix {stress_count} quiet", expected=("RESULT stress_mix", "fail=0", "state=READY"), timeout_s=SOAK_STRESS_TIMEOUT_S),
+        CommandSpec("SOAK-RECOVER", "soak/recovery", "recover", expected=("Status:", "OK"), timeout_s=SOAK_RECOVER_TIMEOUT_S),
     ]
 
 
@@ -693,6 +696,23 @@ def open_serial(args: argparse.Namespace):
     return serial.Serial(args.port, args.baud, timeout=args.read_timeout)
 
 
+def discard_serial_input(port, args: argparse.Namespace, transcript: list[str], label: str) -> None:
+    transcript.append(f"\n<<< discard pending serial: {label} >>>\n")
+    try:
+        port.reset_input_buffer()
+    except Exception:
+        pass
+    time.sleep(args.command_delay)
+    try:
+        pending = getattr(port, "in_waiting", 0)
+        if pending:
+            discarded = port.read(pending).decode("utf-8", errors="replace")
+            if discarded:
+                transcript.append(discarded)
+    except Exception:
+        pass
+
+
 def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list[str]) -> StepResult:
     timeout_s = spec.timeout_s if spec.timeout_s is not None else args.command_timeout
     command_start = time.monotonic()
@@ -706,7 +726,7 @@ def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list
         for _ in range(args.retry_no_prompt):
             port.write(b"\n")
             port.flush()
-            output += read_until_idle_or_prompt(port, args.command_timeout, args.idle_timeout, args.stop_on_prompt)
+            output += read_until_idle_or_prompt(port, timeout_s, args.idle_timeout, args.stop_on_prompt)
             if output.strip():
                 break
 
@@ -724,6 +744,7 @@ def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list
             output += extra
             transcript.append(extra)
             if prompt_seen(output):
+                prompt_recovered = True
                 break
         if args.late_prompt_grace > 0 and not prompt_seen(output):
             transcript.append("\n<<< late prompt drain >>>\n")
@@ -732,6 +753,8 @@ def run_step(port, spec: CommandSpec, args: argparse.Namespace, transcript: list
             )
             output += extra
             transcript.append(extra)
+            if prompt_seen(output):
+                prompt_recovered = True
         if args.resync_on_prompt_loss and not prompt_seen(output):
             transcript.append("\n<<< prompt resync: health >>>\n")
             port.write(b"health\n")
@@ -873,6 +896,7 @@ def try_soak_resync(port, args: argparse.Namespace, transcript: list[str], seque
             time.sleep(args.reconnect_delay)
             port.open()
             time.sleep(args.reconnect_delay)
+            discard_serial_input(port, args, transcript, f"soak resync {sequence}-{attempt}")
             spec = CommandSpec(
                 test_id=f"SOAK-RESYNC-{sequence:06d}-{attempt}",
                 feature="soak/reconnect",
@@ -934,16 +958,20 @@ def run_soak(args: argparse.Namespace) -> tuple[int, str, list[StepResult], list
                 )
                 result = run_step(port, spec, args, transcript)
                 resync_results: list[StepResult] = []
-                recovered_prompt_loss = False
-                if result.outcome == "FAIL" and "Prompt not seen" in result.notes:
-                    recovered_prompt_loss, resync_results = try_soak_resync(
+                needs_resync = (
+                    result.outcome == "UNKNOWN"
+                    or (result.outcome == "FAIL" and "Prompt not seen" in result.notes)
+                )
+                recovered_stream = False
+                if needs_resync:
+                    recovered_stream, resync_results = try_soak_resync(
                         port, args, transcript, iteration
                     )
-                    if recovered_prompt_loss:
+                    if recovered_stream:
                         result.outcome = "UNKNOWN"
                         result.notes = (
                             result.notes
-                            + "; serial prompt lost, bounded reconnect health check passed"
+                            + "; serial stream resynced with bounded health check"
                         )
 
                 results.append(result)
@@ -952,6 +980,9 @@ def run_soak(args: argparse.Namespace) -> tuple[int, str, list[StepResult], list
                     results.append(resync_result)
                     print_result(resync_result, args.verbose)
 
+                if needs_resync and not recovered_stream:
+                    failed = True
+                    return 1, boot_text, results, transcript
                 if result.outcome == "FAIL":
                     failed = True
                     return 1, boot_text, results, transcript

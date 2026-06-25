@@ -1,0 +1,43 @@
+[
+  {
+    "test_id": "CMD-001",
+    "feature": "custom",
+    "command": "stress 50 quiet",
+    "expected": "No failure tokens",
+    "observed": "RESULT stress total=50 polls=458 reads=52 errors=0 accel=50 gyro=50 temp=26 health_success=584 health_fail=0 state=READY",
+    "elapsed_s": 0.5470000000204891,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-002",
+    "feature": "custom",
+    "command": "stress_mix 500 quiet",
+    "expected": "No failure tokens",
+    "observed": "RESULT stress_mix total=500 ok=500 fail=0 health_success=500 health_fail=0 state=READY",
+    "elapsed_s": 0.2190000000409782,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [],
+    "failures": [],
+    "prompt_seen": true
+  },
+  {
+    "test_id": "CMD-003",
+    "feature": "custom",
+    "command": "health",
+    "expected": "No failure tokens",
+    "observed": "=== Driver Health === | State: READY | Online: yes | Consecutive failures: 0 | ...",
+    "elapsed_s": 0.09300000010989606,
+    "outcome": "PASS",
+    "notes": "",
+    "tokens": [
+      "OK"
+    ],
+    "failures": [],
+    "prompt_seen": true
+  }
+]
