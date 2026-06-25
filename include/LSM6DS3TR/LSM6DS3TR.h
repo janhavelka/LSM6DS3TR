@@ -29,6 +29,10 @@ struct RawAxes {
 
 /// @brief Three-axis physical sample.
 struct Axes {
+  constexpr Axes() = default;
+  constexpr Axes(float xValue, float yValue, float zValue)
+      : x(xValue), y(yValue), z(zValue) {}
+
   float x = 0.0f;  ///< X-axis value
   float y = 0.0f;  ///< Y-axis value
   float z = 0.0f;  ///< Z-axis value
