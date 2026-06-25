@@ -374,10 +374,12 @@ Current evidence in this repository:
   reset/boot retry, job cancel/manual-mode behavior, FIFO/config/source-register
   commands, calibration, self-test, and short stress
 - closeout targeted COM26 HIL on 2026-06-23 passed 145/145 checks with the
-  final artifacts in
-  [docs/reports/artifacts/hil-COM26-20260623-closeout-targeted-clean4-results.md](docs/reports/artifacts/hil-COM26-20260623-closeout-targeted-clean4-results.md)
-- reset/boot retry and cancel probes are documented in
-  [docs/reports/hil-targeted-poll-COM26-20260623.md](docs/reports/hil-targeted-poll-COM26-20260623.md)
+  final behavior summarized in
+  [docs/reports/hil-evidence-summary.md](docs/reports/hil-evidence-summary.md)
+- release closeout HIL on 2026-06-24 completed a 30-minute quiet soak
+  (2095 PASS, 0 FAIL, 0 UNKNOWN) and a final bounded 10-minute quiet soak
+  (1102 PASS, 0 FAIL, 0 UNKNOWN); remaining prompt recoveries are documented in
+  [docs/reports/hil-evidence-summary.md](docs/reports/hil-evidence-summary.md)
 
 Remaining gates before claiming final field readiness:
 
@@ -386,8 +388,8 @@ Remaining gates before claiming final field readiness:
 - absent-device behavior on the target wiring
 - alternate address `0x6B`
 - live native ESP-IDF HIL, not only Arduino HIL and IDF build/contract checks
-- clean soak where prompt-capture UNKNOWNs are either eliminated or explained
-  with independent serial-link evidence
+- longer soak with independent serial-link evidence and no prompt-recovery notes
+  if that is required as a final field gate
 
 ## Hardware-In-Loop Smoke
 

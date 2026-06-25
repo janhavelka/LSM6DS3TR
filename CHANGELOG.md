@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-25
+
 ### Added
 
 - ESP-IDF component metadata (`CMakeLists.txt`, `idf_component.yml`) for the
@@ -130,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `REG_SENSOR_SYNC_TIME_FRAME` register address to `0x02`
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/LSM6DS3TR/releases/tag/v1.0.0
