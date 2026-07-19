@@ -1540,6 +1540,39 @@ void test_self_test_preserves_primary_and_restoration_failures() {
                           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
 }
 
+void test_self_test_restoration_deadline_preserves_primary_failure() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  (void)configure(driver, bus);
+  bus.clearTrace();
+  bus.addFault(1, Status::Error(Err::I2C_NACK_DATA, "primary", -301));
+  const uint64_t deadline = bus.nowMs + 100U;
+  OperationToken token;
+  TEST_ASSERT_TRUE(driver
+                       .startSelfTest(SelfTestRequest{1},
+                                      OperationTiming{bus.nowMs, deadline}, token)
+                       .inProgress());
+  const PollResult restoring = driver.poll(bus.nowMs, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
+                          static_cast<uint8_t>(restoring.state));
+
+  bus.nowMs = deadline;
+  const PollResult terminal = driver.poll(bus.nowMs, 1);
+  const OperationResult result = take(driver, token);
+  assertTerminalFailure(terminal, result, Err::DEADLINE_EXPIRED,
+                        OperationState::TIMED_OUT);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                          static_cast<uint8_t>(result.selfTest.primaryStatus.code));
+  TEST_ASSERT_EQUAL_INT32(-301, result.selfTest.primaryStatus.detail);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(Err::OPERATION_INDETERMINATE),
+      static_cast<uint8_t>(result.selfTest.restorationStatus.code));
+  TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
+                          static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
+}
+
 void test_self_test_negative_stimulus_reports_absolute_deltas() {
   FakeBus bus;
   bus.negativeSelfTestStimulus = true;
@@ -2132,6 +2165,7 @@ int main() {
   RUN_TEST(test_self_test_is_staged_bounded_and_restores_configuration);
   RUN_TEST(test_self_test_failures_are_bounded_at_every_transfer_stage);
   RUN_TEST(test_self_test_preserves_primary_and_restoration_failures);
+  RUN_TEST(test_self_test_restoration_deadline_preserves_primary_failure);
   RUN_TEST(test_self_test_negative_stimulus_reports_absolute_deltas);
   RUN_TEST(test_self_test_cancel_during_settle_is_bus_silent_and_unknown);
   RUN_TEST(test_self_test_intermittent_not_ready_uses_bounded_bus_silent_cadence);

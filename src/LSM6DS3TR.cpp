@@ -1591,8 +1591,11 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
       _validAfterUptimeMs = _validAfterBeforeOperationMs;
     }
     if (_job == JobKind::SELF_TEST) {
-      _workingResult.selfTest.primaryStatus =
-          Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired");
+      if (_primaryStatus.ok()) {
+        _primaryStatus =
+            Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired");
+      }
+      _workingResult.selfTest.primaryStatus = _primaryStatus;
       _workingResult.selfTest.restorationStatus =
           Status::Error(Err::OPERATION_INDETERMINATE,
                         "Restoration not completed before deadline");
