@@ -277,7 +277,7 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
   if (samples == 0U || samples > 100U) return 0U;
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
-         69U;
+         75U;
 }
 
 uint32_t maximumCalibrationTransactions(uint16_t samples) {
@@ -714,9 +714,10 @@ Status LSM6DS3TR::startFifoPurge(const FifoPurgeRequest& request,
 
 void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
   const uint8_t registers[MANAGED_REGISTER_COUNT] = {
-      cmd::REG_FUNC_CFG_ACCESS, cmd::REG_FIFO_CTRL1, cmd::REG_FIFO_CTRL2,
+      cmd::REG_FUNC_CFG_ACCESS, cmd::REG_SENSOR_SYNC_TIME_FRAME,
+      cmd::REG_SENSOR_SYNC_RES_RATIO, cmd::REG_FIFO_CTRL1, cmd::REG_FIFO_CTRL2,
       cmd::REG_FIFO_CTRL3, cmd::REG_FIFO_CTRL4, cmd::REG_FIFO_CTRL5,
-      cmd::REG_INT1_CTRL, cmd::REG_INT2_CTRL,
+      cmd::REG_DRDY_PULSE_CFG_G, cmd::REG_INT1_CTRL, cmd::REG_INT2_CTRL,
       cmd::REG_CTRL1_XL, cmd::REG_CTRL2_G, cmd::REG_CTRL3_C,
       cmd::REG_CTRL4_C, cmd::REG_CTRL5_C, cmd::REG_CTRL6_C,
       cmd::REG_CTRL7_G, cmd::REG_CTRL8_XL, cmd::REG_CTRL9_XL,
@@ -726,7 +727,7 @@ void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
       cmd::REG_MD2_CFG, cmd::REG_X_OFS_USR, cmd::REG_Y_OFS_USR,
       cmd::REG_Z_OFS_USR};
   const uint8_t values[MANAGED_REGISTER_COUNT] = {
-      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       buildCtrl1(profile), buildCtrl2(profile), buildCtrl3(profile),
       buildCtrl4(profile), 0, buildCtrl6(profile), buildCtrl7(profile),
       buildCtrl8(profile), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1755,7 +1756,8 @@ bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
 
 bool LSM6DS3TR::_safeDiagnosticWrite(uint8_t reg, uint8_t value) {
   const bool writable =
-      reg == cmd::REG_FUNC_CFG_ACCESS || reg == cmd::REG_SENSOR_SYNC_TIME_FRAME ||
+      reg == cmd::REG_FUNC_CFG_ACCESS ||
+      reg == cmd::REG_SENSOR_SYNC_TIME_FRAME ||
       reg == cmd::REG_SENSOR_SYNC_RES_RATIO ||
       (reg >= cmd::REG_FIFO_CTRL1 && reg <= cmd::REG_DRDY_PULSE_CFG_G) ||
       (reg >= cmd::REG_INT1_CTRL && reg <= cmd::REG_INT2_CTRL) ||

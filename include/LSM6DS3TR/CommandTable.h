@@ -15,8 +15,8 @@ static constexpr uint8_t WHO_AM_I_VALUE = 0x6A;
 static constexpr uint8_t REG_FUNC_CFG_ACCESS = 0x01;
 
 // Sensor sync
-static constexpr uint8_t REG_SENSOR_SYNC_TIME_FRAME = 0x02;
-static constexpr uint8_t REG_SENSOR_SYNC_RES_RATIO = 0x04;
+static constexpr uint8_t REG_SENSOR_SYNC_TIME_FRAME = 0x04;
+static constexpr uint8_t REG_SENSOR_SYNC_RES_RATIO = 0x05;
 
 // FIFO control
 static constexpr uint8_t REG_FIFO_CTRL1 = 0x06;

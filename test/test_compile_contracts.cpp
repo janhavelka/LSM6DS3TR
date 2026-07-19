@@ -19,6 +19,11 @@ static_assert(DISABLED == 0x4C534D36,
 
 using namespace LSM6DS3TR;
 
+static_assert(cmd::REG_SENSOR_SYNC_TIME_FRAME == 0x04u,
+              "SENSOR_SYNC_TIME_FRAME must match the LSM6DS3TR-C register map");
+static_assert(cmd::REG_SENSOR_SYNC_RES_RATIO == 0x05u,
+              "SENSOR_SYNC_RES_RATIO must match the LSM6DS3TR-C register map");
+
 static_assert(std::is_trivially_copyable<Status>::value,
               "Status must remain fixed-memory and trivially copyable");
 static_assert(std::is_trivially_copyable<DriverConfig>::value,

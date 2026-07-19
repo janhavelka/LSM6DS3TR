@@ -522,13 +522,16 @@ void test_configure_enforces_budget_and_verifies_before_generation_increment() {
                    result.configuration.state == ConfigurationState::KNOWN);
 }
 
-void test_complete_bypass_profile_clears_all_fifo_control_registers() {
+void test_complete_profile_clears_all_disabled_subsystems() {
   FakeBus bus;
+  bus.regs[cmd::REG_SENSOR_SYNC_TIME_FRAME] = 0xFF;
+  bus.regs[cmd::REG_SENSOR_SYNC_RES_RATIO] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL1] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL2] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL3] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL4] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL5] = 0xFF;
+  bus.regs[cmd::REG_DRDY_PULSE_CFG_G] = 0xFF;
   LSM6DS3TR::LSM6DS3TR driver;
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
@@ -536,6 +539,15 @@ void test_complete_bypass_profile_clears_all_fifo_control_registers() {
     TEST_ASSERT_EQUAL_HEX8(0u, bus.regs[reg]);
     TEST_ASSERT_LESS_THAN(bus.traceCount, findWrite(bus, reg));
   }
+  TEST_ASSERT_EQUAL_HEX8(0u, bus.regs[cmd::REG_SENSOR_SYNC_TIME_FRAME]);
+  TEST_ASSERT_EQUAL_HEX8(0u, bus.regs[cmd::REG_SENSOR_SYNC_RES_RATIO]);
+  TEST_ASSERT_EQUAL_HEX8(0u, bus.regs[cmd::REG_DRDY_PULSE_CFG_G]);
+  TEST_ASSERT_LESS_THAN(bus.traceCount,
+                        findWrite(bus, cmd::REG_SENSOR_SYNC_TIME_FRAME));
+  TEST_ASSERT_LESS_THAN(bus.traceCount,
+                        findWrite(bus, cmd::REG_SENSOR_SYNC_RES_RATIO));
+  TEST_ASSERT_LESS_THAN(bus.traceCount,
+                        findWrite(bus, cmd::REG_DRDY_PULSE_CFG_G));
 }
 
 void test_configure_failure_at_every_transport_stage_has_precise_effect_state() {
@@ -1986,6 +1998,56 @@ void test_diagnostic_bounds_and_raw_write_invalidation_are_explicit() {
   TEST_ASSERT_EQUAL_UINT64(bus.nowMs, diagnostics.lastTransportUptimeMs);
 }
 
+void test_diagnostic_sync_writes_invalidate_and_reconcile_exact_addresses() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  (void)configure(driver, bus);
+  bus.clearTrace();
+
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(Err::INVALID_PARAM),
+      static_cast<uint8_t>(driver.diagnosticWriteRegister(0x02U, 0x11U,
+                                                           bus.nowMs)
+                               .code));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(Err::INVALID_PARAM),
+      static_cast<uint8_t>(driver.diagnosticWriteRegister(0x03U, 0x22U,
+                                                           bus.nowMs)
+                               .code));
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.transferCalls);
+
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
+      cmd::REG_SENSOR_SYNC_TIME_FRAME, 0x33U, bus.nowMs).ok());
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
+      cmd::REG_SENSOR_SYNC_RES_RATIO, 0x44U, bus.nowMs).ok());
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
+      cmd::REG_DRDY_PULSE_CFG_G, 0x80U, bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT32(3U, bus.transferCalls);
+  TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_TIME_FRAME,
+                         bus.trace[0].startReg);
+  TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_RES_RATIO,
+                         bus.trace[1].startReg);
+  TEST_ASSERT_EQUAL_HEX8(cmd::REG_DRDY_PULSE_CFG_G,
+                         bus.trace[2].startReg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
+                          static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
+
+  OperationToken token;
+  TEST_ASSERT_TRUE(driver.startReconcile(timing(bus), token).inProgress());
+  const PollResult terminal = runToTerminal(driver, bus);
+  const OperationResult result = take(driver, token);
+  assertTerminalFailure(terminal, result, Err::CONFIGURATION_MISMATCH,
+                        OperationState::FAILED);
+  TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_TIME_FRAME,
+                         result.configuration.mismatchRegister);
+
+  (void)configure(driver, bus);
+  TEST_ASSERT_EQUAL_HEX8(0U, bus.regs[cmd::REG_SENSOR_SYNC_TIME_FRAME]);
+  TEST_ASSERT_EQUAL_HEX8(0U, bus.regs[cmd::REG_SENSOR_SYNC_RES_RATIO]);
+  TEST_ASSERT_EQUAL_HEX8(0U, bus.regs[cmd::REG_DRDY_PULSE_CFG_G]);
+}
+
 void test_ambiguous_diagnostic_write_invalidates_without_hidden_refresh() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR driver;
@@ -2187,7 +2249,7 @@ int main() {
   RUN_TEST(test_probe_failures_are_precise_and_never_gate_later_work);
   RUN_TEST(test_probe_deadline_and_uint64_boundary_are_safe);
   RUN_TEST(test_configure_enforces_budget_and_verifies_before_generation_increment);
-  RUN_TEST(test_complete_bypass_profile_clears_all_fifo_control_registers);
+  RUN_TEST(test_complete_profile_clears_all_disabled_subsystems);
   RUN_TEST(test_configure_failure_at_every_transport_stage_has_precise_effect_state);
   RUN_TEST(test_ambiguous_write_effect_is_observable_and_never_retried);
   RUN_TEST(test_configuration_readback_mismatch_reports_exact_register_values);
@@ -2231,6 +2293,7 @@ int main() {
   RUN_TEST(test_calibration_three_not_ready_checks_fail_without_mutating_configuration);
   RUN_TEST(test_all_other_hardware_entry_points_are_excluded_by_active_job);
   RUN_TEST(test_diagnostic_bounds_and_raw_write_invalidation_are_explicit);
+  RUN_TEST(test_diagnostic_sync_writes_invalidate_and_reconcile_exact_addresses);
   RUN_TEST(test_ambiguous_diagnostic_write_invalidates_without_hidden_refresh);
   RUN_TEST(test_power_down_is_explicit_fallible_and_partial_failure_is_indeterminate);
   RUN_TEST(test_power_down_is_available_from_unconfigured_and_unknown_states);

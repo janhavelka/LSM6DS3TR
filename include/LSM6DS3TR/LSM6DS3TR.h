@@ -251,11 +251,11 @@ struct DriverDiagnostics {
 
 // Pure, allocation-free validation, timing, and conversion helpers.
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 1;
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 61;
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 67;
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 79;
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 80;
-static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 31;
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 85;
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 86;
+static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 34;
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 4;
 Status validateDriverConfig(const DriverConfig& config);
 Status validateProfile(const DeviceProfile& profile);
@@ -348,7 +348,7 @@ public:
   ///@}
 
 private:
-  static constexpr uint8_t MANAGED_REGISTER_COUNT = 30;
+  static constexpr uint8_t MANAGED_REGISTER_COUNT = 33;
   static constexpr uint8_t MAX_DIAGNOSTIC_READ = 32;
   static constexpr uint16_t MAX_SELF_TEST_SAMPLES = 100;
   static constexpr uint16_t MAX_CALIBRATION_SAMPLES = 1000;

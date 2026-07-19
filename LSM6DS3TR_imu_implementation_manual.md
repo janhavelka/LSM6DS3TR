@@ -298,8 +298,8 @@ All registers are 8-bit. Default values indicated where documented. Address spac
 | Addr | Name | Type | Default | Description | Source |
 |------|------|------|---------|-------------|--------|
 | 01h | FUNC_CFG_ACCESS | R/W | 00h | Access embedded function registers; XL_HM_MODE bit (b4) selects accel power mode | LSM6DS3TR-C_datasheet.pdf, p45 |
-| 02h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | LSM6DS3TR-C_datasheet.pdf, p46 |
-| 04h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | LSM6DS3TR-C_datasheet.pdf, p46 |
+| 04h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | LSM6DS3TR-C_datasheet.pdf, p53 |
+| 05h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | LSM6DS3TR-C_datasheet.pdf, p54 |
 | 06h | FIFO_CTRL1 | R/W | 00h | FIFO threshold low [FTH_7:0] | LSM6DS3TR-C_datasheet.pdf, p46 |
 | 07h | FIFO_CTRL2 | R/W | 00h | FIFO threshold high [FTH_10:8], TIMER_PEDO_FIFO_EN/DRDY, FIFO_TEMP_EN | LSM6DS3TR-C_datasheet.pdf, p47 |
 | 08h | FIFO_CTRL3 | R/W | 00h | Gyro/accel FIFO decimation [DEC_FIFO_GYRO, DEC_FIFO_XL] | LSM6DS3TR-C_datasheet.pdf, p47 |
