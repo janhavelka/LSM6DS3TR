@@ -12,7 +12,8 @@ state.
 ## Contract At A Glance
 
 - `bind()` and `unbind()` perform zero I2C.
-- Every hardware procedure is a staged, tokened operation.
+- Every production and maintenance hardware procedure is a staged, tokened
+  operation. Advanced diagnostics are the explicit one-transaction exception.
 - `poll(nowMs, maxTransactions)` never uses more than the caller's transport
   budget. A time-only wait stage uses zero callbacks.
 - Every job also has a hard total callback ceiling; the accepted ceiling and
@@ -96,6 +97,9 @@ Advance the accepted operation only from the bus owner:
 if (imu.operationActive()) {
   const auto progress = imu.poll(applicationUptimeMs(), 1);
   // progress.transactionsUsed is 0 or 1 with this budget.
+  // progress.transactions/progress.transactionLimit are cumulative.
+  // During self-test cleanup, ACTIVE plus a failed progress.status exposes
+  // the primary error before a later poll performs restoration I2C.
   // progress.waiting means time or sensor data must advance; do not busy-spin.
 }
 
@@ -121,7 +125,9 @@ chip ID invalidates any prior verified provenance.
 An operation starter validates its request, timing, binding, exclusivity, and
 pending-result state before hardware access. An accepted operation receives a
 nonzero `OperationToken`. The application retains that token until it takes the
-terminal result.
+terminal result. Tokens are 64-bit values sized for practical non-reuse over a
+driver instance's operating lifetime; they are correlation identities, not
+durable identifiers across driver recreation or restart.
 
 ```text
 start -> ACTIVE -> poll in caller-sized chunks -> terminal result -> take once
@@ -149,8 +155,11 @@ The driver does not read a framework clock.
 The transaction budget counts callback invocations, not CPU-only state
 transitions. A callback is synchronous, so the application must set
 `i2cTimeoutMs` to a value acceptable for its owner task. A deadline cannot
-preempt a callback already in flight; terminal observation can therefore be
-delayed by owner scheduling plus at most the active bounded callback.
+preempt synchronous work already in flight. `poll()` receives one `nowMs`
+snapshot and may execute its entire owner-granted `maxTransactions` chunk
+before the owner supplies a newer time. Terminal deadline observation can
+therefore be delayed by owner scheduling plus that complete callback chunk,
+with every callback individually bounded by `i2cTimeoutMs`.
 
 Use `maxTransactions = 1` for a shared owner loop unless a maintenance window
 explicitly grants a larger chunk. Passing zero advances CPU/time-only state but
@@ -160,24 +169,30 @@ Total callback ceilings are part of the public contract:
 
 | Operation | Maximum transport callbacks |
 | --- | ---: |
-| Probe | 1 |
-| Configure | 67 |
+| Probe | 2 |
+| Configure | 68 |
 | Sample | 66 |
-| Reset or boot | 85 |
-| Recover | 86 |
-| Reconcile | 34 |
-| Power-down | 4 |
+| Reset or boot | 88 |
+| Recover | 87 |
+| Reconcile | 35 |
+| Power-down | 8 worst case; 6 when already in the main bank |
 | Self-test | `maximumSelfTestTransactions(samples)` |
 | Calibration | `maximumCalibrationTransactions(samples)` |
 | FIFO purge | `maximumFifoPurgeTransactions(maxWords)` |
 
 The three calculation helpers return zero for an invalid requested count.
 Transaction-limit exhaustion is terminal and never causes a hidden retry.
+Each `PollResult` reports callbacks used by that call and cumulatively, the hard
+limit, and the current progress status. During self-test restoration after a
+primary fault, operation state remains active while progress status preserves
+that fault.
 Ready-checked sampling permits at most 65 STATUS reads; if readiness is still
 absent it fails `DATA_NOT_READY`, preserving the 66th callback for the burst
 when readiness succeeds. Reset and boot permit at most 16 command-bit read
 polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 66 callbacks for full
-profile reapply/readback; recovery adds its one probe callback.
+profile reapply/readback. Their ceiling also includes the verified main-bank
+clear, identity validation, and command preparation; recovery instead includes
+a main-bank precheck and identity validation before its preparation writes.
 
 ## Operation Classes
 
@@ -185,7 +200,7 @@ profile reapply/readback; recovery adds its one probe callback.
 | --- | --- | --- |
 | Steady state | `startSample`, `startProbe` | Zero-I2C admission, caller deadline, and per-poll transaction cap. Ready-checked samples may wait and poll status; direct samples are labelled unverified. |
 | Runtime multi-step | `startConfigure`, `startReset`, `startBoot`, `startRecover`, `startReconcile`, `startPowerDown` | Progress, deadline, cancellation, partial-effect reporting, and configuration readback share one operation model. Reset/boot contain a bus-silent 15 ms device-inaccessible gate rather than a delay. |
-| Maintenance/diagnostic | `startSelfTest`, `startCalibration`, `startFifoPurge` | Explicit deadline and caller budget. Self-test averages 1..100 samples per phase; calibration accepts 1..1000 samples; purge discards at most 1..2048 FIFO words. These are not ordinary measurement-loop calls. |
+| Maintenance/diagnostic | `startSelfTest`, `startCalibration`, `startFifoPurge` | Explicit deadline and caller budget. Self-test averages 5..100 samples per phase; calibration accepts 1..1000 samples; purge discards at most 1..2048 FIFO words. These are not ordinary measurement-loop calls. |
 | Advanced single transaction | `diagnosticReadRegister`, `diagnosticReadBlock`, `diagnosticWriteRegister` | Serialized application diagnostics only. Maximum block read is 32 bytes. No call is accepted during a job. Writes are restricted and invalidate configuration provenance. |
 
 The chip has no nonvolatile programming procedure in this library. Calibration
@@ -200,6 +215,13 @@ gyro sleep, user offsets, FIFO-disabled policy, and interrupts-disabled policy.
 Low-power/normal mode is limited to 208 Hz for both sensors; 1.6 Hz is valid
 only for the accelerometer in low-power/normal mode. Invalid combinations are
 rejected before I2C.
+Gyro LPF1 requires high-performance mode. Gyro high-pass profiles are not
+supported in production because the authoritative settling tables exclude
+them; the named `GyroHpfMode` values remain register facts for diagnostics and
+future typed support. Accelerometer slope/high-pass output and the
+interrupt-specific 6D low-pass path are also not supported production snapshot
+settings. User offsets are limited to -127..127 so the reserved -128 encoding
+cannot enter the managed image.
 
 Configuration state is explicit:
 
@@ -213,13 +235,24 @@ Configuration state is explicit:
 verified power-down transition, never after a partial or ambiguous effect.
 Samples capture the generation and exact accelerometer/gyro full scales from
 their known profile. This prevents an old raw sample from being converted with
-a new scale.
+a new scale. The sample sequence is a 64-bit saturating counter sized to retain
+practical ordering for the driver's operating lifetime; it is not persistent
+across driver recreation or restart.
 
 `startReconcile()` reads and compares the supported register image without
 blindly replaying an ambiguous write. `startRecover()` is a caller-requested
 device procedure; it does not recover the I2C bus or own backoff policy.
 `DriverDiagnostics` contains passive evidence only.
-Reconcile also validates WHO_AM_I before its 33 managed-register reads.
+WHO_AM_I is meaningful only in the main register bank. Probe, configure,
+reconcile, recover, and FIFO purge therefore read `FUNC_CFG_ACCESS` first and
+fail with unknown configuration if an alternate bank is selected. Configure,
+reconcile, and FIFO purge validate identity next, before the first profile
+write, the 33 managed-register reads, or FIFO access; recovery validates
+identity before any reset/boot preparation write. Reset and boot explicitly
+select the main bank, read it back, and validate identity before other register
+access. Power-down conditionally performs the same clear/readback when its
+precheck finds an alternate bank, then validates identity before writing either
+ODR register.
 
 `startPowerDown()` is admitted from any bound, idle configuration state. It
 writes exact zero values to `CTRL1_XL` and `CTRL2_G`, reads both back, and on
@@ -247,6 +280,14 @@ all axes and sensors share one conversion instant. Products needing strict
 same-cycle vectors require a separately validated DRDY/FIFO policy.
 Whenever temperature is requested in ready-checked mode, its own `TDA` status
 bit is required, including mixed motion-plus-temperature requests.
+Between unsuccessful STATUS checks, polling uses a bus-silent gate rounded up
+from the slowest requested quantity's conversion cadence. Motion uses its
+configured ODR. Per AN5130, temperature uses 12.5 Hz only when the gyro is
+powered down and the accelerometer is in low-power/normal mode at 12.5 Hz,
+26 Hz for the equivalent 26 Hz case, and 52 Hz otherwise. A sleeping gyro with
+a non-power-down ODR can still support temperature; sleep excludes angular-rate
+sampling, not temperature sampling. This avoids a fixed busy-poll cadence while
+preserving the 65-check ceiling.
 
 Conversion is pure and does not read mutable driver state:
 
@@ -267,20 +308,33 @@ Self-test returns baseline, stimulus, delta, pass flags, primary status, and
 restoration status. If restoration cannot be proved, configuration becomes
 unknown.
 
-For these maintenance jobs, the caller's absolute deadline is the maximum wall
-time; it is never renewed. Self-test contains four fixed, bus-silent settle
-gates totalling 1,060 ms. Each discard or collected sample then receives at
-most three STATUS checks and one data read, with a 3 ms zero-I2C gate after a
-read. Three failed readiness checks produce `DATA_NOT_READY` and route through
-the reserved full-profile restoration budget. Its callback ceiling is
-`16 * (samples + 5) + 75`. A verified gyro-sleep profile is explicitly woken
-for the gyro phase and fully restored afterward.
+For these maintenance jobs, the caller's absolute deadline is never renewed.
+It bounds the scheduling window observed at poll boundaries; it cannot preempt
+an owner-granted synchronous callback chunk. Size it from the documented waits,
+total callback ceiling, per-callback transport timeout, maximum per-poll budget,
+and owner scheduling delay.
+
+The self-test sample count applies independently to the baseline and stimulated
+averages for both sensors. Each of those four phases first discards five
+samples. Four fixed, bus-silent settle gates total 1,060 ms. Every discarded or
+collected sample receives at most three STATUS checks and one data read, with a
+3 ms zero-I2C gate after a read. Three failed readiness checks produce
+`DATA_NOT_READY` and route through the reserved full-profile restoration
+budget. The poll that first reports a primary self-test failure performs no
+restoration I2C; operation state remains active while its progress status
+reports the primary error, so the owner observes a boundary before a later poll
+begins restoration. The callback ceiling is `16 * (samples + 5) + 80`.
+Self-test temporarily removes the managed user-offset contribution, establishes
+the required sensor modes,
+and powers down the opposite sensor where required. A verified gyro-sleep
+profile is explicitly woken for the gyro phase, and the complete original
+profile is restored afterward.
 
 Calibration likewise allows at most three STATUS checks per collected sample.
 It uses a zero-I2C gate equal to the configured sensor ODR period, rounded up
 to milliseconds, after each non-final data read and between readiness checks.
 It finishes after exactly the requested valid sample count and has a ceiling
-of `4 * samples + 16`. Neither maintenance procedure retries a failed transfer
+of `4 * samples`. Neither maintenance procedure retries a failed transfer
 or writes nonvolatile memory. Gyroscope calibration rejects a sleeping gyro
 before I2C; waking and later restoring it is an explicit self-test procedure,
 not hidden calibration policy.
@@ -290,9 +344,11 @@ sensor-native axes; the driver never assumes Z-up or a product mounting
 orientation. Bias values are finite-checked. The caller decides mounting
 transforms and durable calibration policy.
 
-`startFifoPurge()` destroys unread FIFO data. Its result reports initial
+`startFifoPurge()` first verifies the main register bank, live device identity,
+and the managed IF_INC/BDU prerequisites, then
+destroys unread FIFO data. Its result reports initial
 unread count/pattern, discarded words, final unread count, overrun, and
-truncation. It performs at most `maxWords + 2` callbacks, retries none, and
+truncation. It performs at most `maxWords + 5` callbacks, retries none, and
 completes only after the final FIFO status read or a terminal failure. It is
 not a FIFO acquisition or waveform API.
 
@@ -302,12 +358,20 @@ Diagnostic register reads do not populate production caches. An accepted raw
 write invalidates verified configuration and sample provenance even when the
 transport reports success, because arbitrary register changes cannot be
 represented as the verified `DeviceProfile`.
+Diagnostic writes use a per-register writable mask and reject read-only
+registers, reserved bits, bank switching, destructive reset/boot and I2C
+disable controls, and invalid ODR/full-scale/FIFO/self-test/offset encodings.
+These checks return `INVALID_PARAM` without I2C. Passing a safety check does not
+make the write part of the production profile contract.
 
 Keep diagnostic access out of normal sensor adapters. It exists for controlled
 bring-up and service work, not application configuration recipes.
 Sensor-sync and DRDY-pulse configuration are managed and read back as zero by
 the production profile. Accepted diagnostic writes to those registers
 invalidate configuration provenance, and reconciliation detects the mismatch.
+`CommandTable.h` exposes chip protocol constants for such controlled work; a
+constant's presence is not a claim that version 2 provides a typed production
+profile for that feature.
 
 ## Concurrency, ISR, And Ownership
 
@@ -346,6 +410,7 @@ pio test -e native
 pio run -e esp32s3dev
 pio run -e esp32s2dev
 pio pkg pack
+python tools/check_package_contract.py
 ```
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
@@ -361,21 +426,19 @@ brownout, held-bus, `0x6B`, and long-soak hardware gates remain external.
 
 ## Migrating From 1.x
 
-Version 2 is intentionally breaking:
+Version 2 is intentionally breaking. Every removed version 1 feature has an
+explicit replacement or restriction:
 
-- Replace `Config` plus `begin()` with zero-I2C `DriverConfig` plus `bind()`,
-  then explicitly start probe/configuration jobs.
-- Replace `tick()`, synchronous setters, blocking reset/recovery/self-test, and
-  cached measurement getters with `start*`, `poll`, and tokened `takeResult`.
-- Replace driver `READY/DEGRADED/OFFLINE` policy with application-owned health;
-  use passive `DriverDiagnostics` as evidence.
-- Replace mutable-state conversion with `RawSampleResult` plus pure
-  `convertSample()`.
-- Replace FIFO configuration/drain claims with FIFO-disabled profiles and the
-  destructive maintenance purge, unless a future typed acquisition API is
-  implemented.
-- Replace interrupt/event raw recipes with a product-approved typed profile in
-  a future version. Version 2 production profiles require interrupts disabled.
+| Version 1 surface | Version 2 replacement or restriction |
+| --- | --- |
+| `Config`, `begin()`, and `end()` | Use zero-I2C `DriverConfig` plus `bind()`/`unbind()`, then explicitly start probe, configure, or power-down operations. |
+| `tick()`, blocking reset/recover/self-test/calibration, and synchronous ODR/full-scale/filter setters | Use the matching `start*`, caller-budgeted `poll()`, and tokened `takeResult()`. Apply runtime settings as one replayable `DeviceProfile`. |
+| Synchronous raw motion/temperature reads and cached measurement getters | Use `startSample()` in ready-checked or explicitly direct-unverified mode. The terminal `RawSampleResult` carries validity, freshness, scale, sequence, and configuration provenance. |
+| Mutable-state conversion and software bias getters/setters | Use pure `convertSample()` and `applyBias()`. `startCalibration()` returns a candidate bias; the application owns its validation context, persistence, version, and later application. |
+| Driver `READY/DEGRADED/OFFLINE` admission and automatic recovery policy | Use passive `DriverDiagnostics` as evidence. The external owner controls absence, health, retry, backoff, and bus recovery. |
+| FIFO configuration and drain APIs | Production profiles require FIFO bypass. Only the bounded, destructive purge remains; typed FIFO acquisition needs a future replayable profile and decoder. |
+| Interrupt routes, tap/wake/free-fall/6D/tilt/wrist/significant-motion, pedometer and step-counter control/source APIs | Unsupported as version 2 production configuration. Controlled diagnostic reads may aid service work, but production use requires a future typed, fully replayable profile and board electrical contract. |
+| Timestamp control/readout and sensor-hub configuration/output APIs | Unsupported as version 2 production configuration. Do not rebuild these features from raw recipes in an application adapter; add a typed, bounded library profile when a current product needs them. |
 
 ## TunnelMonitor Integration Status
 
@@ -388,6 +451,13 @@ ODR/range/filter profile, calibration policy, sample schema, or capacity
 extension. No TunnelMonitor integration should be inferred until those product
 decisions and contract changes are approved. See
 <a href="docs/TUNNELMONITOR_NODE_SUITABILITY_AUDIT.md">the suitability re-audit</a>.
+
+A future TunnelMonitor adapter must disable the owner's generic automatic
+retry around an LSM6 transport callback. One callback is exactly one physical
+attempt and has already advanced the driver state. After consuming the terminal
+result, the owner may recover the bus and explicitly start probe, reconcile,
+recover, or a new requested operation according to the reported hardware-effect
+evidence. It must never blindly replay an ambiguous write.
 
 ## Version Metadata
 

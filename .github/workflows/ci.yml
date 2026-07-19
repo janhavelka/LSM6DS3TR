@@ -98,7 +98,9 @@ jobs:
         run: python tools/check_chip_docs_coverage.py
 
       - name: Validate library package
-        run: pio pkg pack
+        run: |
+          pio pkg pack
+          python tools/check_package_contract.py
 
   esp-idf-build:
     runs-on: ubuntu-latest

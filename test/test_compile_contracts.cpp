@@ -23,6 +23,14 @@ static_assert(cmd::REG_SENSOR_SYNC_TIME_FRAME == 0x04u,
               "SENSOR_SYNC_TIME_FRAME must match the LSM6DS3TR-C register map");
 static_assert(cmd::REG_SENSOR_SYNC_RES_RATIO == 0x05u,
               "SENSOR_SYNC_RES_RATIO must match the LSM6DS3TR-C register map");
+static_assert(static_cast<uint8_t>(GyroHpfMode::HZ_0_016) == 0u,
+              "16 mHz gyro HPF must encode HPM_G=00");
+static_assert(static_cast<uint8_t>(GyroHpfMode::HZ_0_065) == 1u,
+              "65 mHz gyro HPF must encode HPM_G=01");
+static_assert(static_cast<uint8_t>(GyroHpfMode::HZ_0_260) == 2u,
+              "260 mHz gyro HPF must encode HPM_G=10");
+static_assert(static_cast<uint8_t>(GyroHpfMode::HZ_1_040) == 3u,
+              "1.040 Hz gyro HPF must encode HPM_G=11");
 
 static_assert(std::is_trivially_copyable<Status>::value,
               "Status must remain fixed-memory and trivially copyable");
@@ -32,6 +40,12 @@ static_assert(std::is_trivially_copyable<DeviceProfile>::value,
               "A profile must remain a fixed-memory value type");
 static_assert(std::is_trivially_copyable<OperationToken>::value,
               "Operation tokens must remain trivially copyable");
+static_assert(std::is_same<decltype(OperationToken{}.value), uint64_t>::value,
+              "Operation tokens must remain 64-bit correlation identities");
+static_assert(std::is_same<decltype(RawSampleResult{}.sequence), uint64_t>::value,
+              "Raw sample sequences must remain 64-bit");
+static_assert(std::is_same<decltype(ConvertedSample{}.sequence), uint64_t>::value,
+              "Converted sample sequences must remain 64-bit");
 static_assert(std::is_trivially_copyable<PollResult>::value,
               "Poll results must remain fixed-memory values");
 static_assert(std::is_trivially_copyable<OperationResult>::value,

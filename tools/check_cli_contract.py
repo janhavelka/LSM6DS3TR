@@ -38,6 +38,10 @@ OWNER_SAFE_TOKENS = [
     "DriverConfig",
     "OperationTiming",
     "OperationToken",
+    "#include <cinttypes>",
+    'accepted token=%" PRIu64',
+    'sample sequence=%" PRIu64',
+    'result token=%" PRIu64',
     "startProbe",
     "startConfigure",
     "startSample",
@@ -49,6 +53,16 @@ OWNER_SAFE_TOKENS = [
     "diagnosticReadRegister",
     "SensorAddress::SA0_GND",
     "INPUT_CHARS_PER_LOOP",
+    "bool inputOverflow = false",
+    "input line too long; discarded",
+    "inputOverflow = true",
+    "validQuantity",
+    "validMode",
+    "expected sample [all|accel|gyro|temp] [ready|direct]",
+    "selftest [5..100]",
+    "samples < 5U",
+    "samples == 0U",
+    "extra != nullptr",
 ]
 
 FORBIDDEN_V1_TOKENS = [
@@ -92,6 +106,22 @@ def main() -> int:
         fail("Arduino example must demonstrate one-transaction owner polling")
     if "serviced < INPUT_CHARS_PER_LOOP" not in text:
         fail("Arduino console work must be bounded per owner-loop iteration")
+    if "if (inputOverflow)" not in text:
+        fail("Arduino CLI must discard an entire overlength input line")
+    if re.search(
+        r'else if \(strcmp\(command, "sample"\).*?'
+        r'!validQuantity \|\| !validMode \|\| extra != nullptr',
+        text,
+        re.DOTALL,
+    ) is None:
+        fail("Arduino sample command must reject invalid or extra arguments")
+    if re.search(
+        r'else if \(strcmp\(command, "calxl"\).*?'
+        r'samples == 0U\)\) \|\|\s*extra != nullptr',
+        text,
+        re.DOTALL,
+    ) is None:
+        fail("Arduino calibration commands must reject zero or extra arguments")
 
     print("CLI contract PASSED")
     return 0

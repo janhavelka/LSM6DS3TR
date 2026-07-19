@@ -110,8 +110,8 @@ struct Status {
 - I2C address configurable: 0x6A (SA0=GND) or 0x6B (SA0=VDD).
 - `startProbe()` checks WHO_AM_I (expect 0x6A) at the configured address.
   `startConfigure()` repeats identity validation before its first write.
-- A positive WHO_AM_I mismatch from probe, configure, reconcile, or recover
-  invalidates prior verified configuration provenance.
+- A positive WHO_AM_I mismatch from probe, configure, reset, boot, reconcile,
+  recover, or FIFO purge invalidates prior verified configuration provenance.
 - Support accelerometer full-scale: ±2g, ±4g, ±8g, ±16g.
 - Support gyroscope full-scale: ±125dps, ±250dps, ±500dps, ±1000dps, ±2000dps.
 - Configurable ODR: power-down, 1.6 Hz (accel LP only), 12.5–6660 Hz.
@@ -180,6 +180,9 @@ The driver follows one fixed-memory, owner-scheduled operation model:
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
   and reserve the complete 66-callback profile reapply/readback budget.
+  Reset/boot use at most 88 callbacks, recovery 87, and FIFO purge
+  `maxWords + 5`; all validate identity before their first destructive device
+  action after bank selection is proved.
 - Self-test and calibration allow at most three status checks per required
   sample. Self-test inserts 3 ms post-sample gates; calibration gates by the
   configured ODR period rounded up to milliseconds.

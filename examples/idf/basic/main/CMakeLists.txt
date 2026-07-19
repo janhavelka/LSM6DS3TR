@@ -1,7 +1,7 @@
 idf_component_register(
   SRCS
     "main.cpp"
-  INCLUDE_DIRS "." "../../../.."
+  INCLUDE_DIRS "."
   REQUIRES LSM6DS3TR esp_driver_i2c esp_timer freertos
 )
 

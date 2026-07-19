@@ -147,7 +147,7 @@ bool acceptedStart(const Status& status, OperationToken token) {
     return false;
   }
   pendingToken = token;
-  printf("accepted token=%" PRIu32 "\n", token.value);
+  printf("accepted token=%" PRIu64 "\n", token.value);
   return true;
 }
 
@@ -158,7 +158,7 @@ void printSample(const RawSampleResult& raw) {
     printStatus(status);
     return;
   }
-  printf("sample sequence=%" PRIu32 " generation=%" PRIu32
+  printf("sample sequence=%" PRIu64 " generation=%" PRIu32
          " valid=0x%02X fresh=0x%02X read_ms=%" PRIu64 "\n",
          converted.sequence, converted.configGeneration, converted.validMask,
          converted.freshMask, converted.readUptimeMs);
@@ -183,7 +183,7 @@ bool startConfigure(uint64_t now) {
 }
 
 void printTerminal(const OperationResult& result) {
-  printf("result token=%" PRIu32 " kind=%s state=%s transactions=%" PRIu32
+  printf("result token=%" PRIu64 " kind=%s state=%s transactions=%" PRIu32
          "/%" PRIu32 " changed=%s\n",
          result.token.value, jobName(result.kind), stateName(result.state),
          result.transactions, result.transactionLimit,
@@ -248,7 +248,7 @@ bool parseUnsigned(const char* text, uint32_t maximum, uint32_t& out) {
 
 void printHelp() {
   puts("Owner-safe: probe configure sample [all|accel|gyro|temp] [ready|direct]");
-  puts("Owner-safe: reset boot recover reconcile powerdown selftest [1..100]");
+  puts("Owner-safe: reset boot recover reconcile powerdown selftest [5..100]");
   puts("Maintenance: calxl [1..1000] calg [1..1000] purge <1..2048>");
   puts("Lifecycle: bind unbind cancel status version help");
   puts("Advanced diagnostics: rreg <reg> wreg <reg> <value> dump <reg> <1..32>");
@@ -292,6 +292,17 @@ void processCommand(char* line) {
     SampleRequest request{};
     const char* quantity = strtok_r(nullptr, " \t", &save);
     const char* mode = strtok_r(nullptr, " \t", &save);
+    const char* extra = strtok_r(nullptr, " \t", &save);
+    const bool validQuantity =
+        quantity == nullptr || strcmp(quantity, "all") == 0 ||
+        strcmp(quantity, "accel") == 0 || strcmp(quantity, "gyro") == 0 ||
+        strcmp(quantity, "temp") == 0;
+    const bool validMode = mode == nullptr || strcmp(mode, "ready") == 0 ||
+                           strcmp(mode, "direct") == 0;
+    if (!validQuantity || !validMode || extra != nullptr) {
+      puts("expected sample [all|accel|gyro|temp] [ready|direct]");
+      return;
+    }
     if (quantity != nullptr && strcmp(quantity, "accel") == 0) request.quantityMask = SAMPLE_ACCELERATION;
     if (quantity != nullptr && strcmp(quantity, "gyro") == 0) request.quantityMask = SAMPLE_ANGULAR_RATE;
     if (quantity != nullptr && strcmp(quantity, "temp") == 0) request.quantityMask = SAMPLE_TEMPERATURE;
@@ -312,8 +323,8 @@ void processCommand(char* line) {
   } else if (strcmp(command, "selftest") == 0) {
     uint32_t samples = 5;
     const char* argument = strtok_r(nullptr, " \t", &save);
-    if (argument != nullptr && (!parseUnsigned(argument, 100, samples) || samples == 0U)) {
-      puts("expected selftest [1..100]");
+    if (argument != nullptr && (!parseUnsigned(argument, 100, samples) || samples < 5U)) {
+      puts("expected selftest [5..100]");
       return;
     }
     OperationToken token{};
@@ -322,7 +333,10 @@ void processCommand(char* line) {
   } else if (strcmp(command, "calxl") == 0 || strcmp(command, "calg") == 0) {
     uint32_t samples = 32;
     const char* argument = strtok_r(nullptr, " \t", &save);
-    if (argument != nullptr && (!parseUnsigned(argument, 1000, samples) || samples == 0U)) {
+    const char* extra = strtok_r(nullptr, " \t", &save);
+    if ((argument != nullptr &&
+         (!parseUnsigned(argument, 1000, samples) || samples == 0U)) ||
+        extra != nullptr) {
       puts("expected calibration sample count 1..1000");
       return;
     }
@@ -407,6 +421,7 @@ esp_err_t configureI2c() {
 void cliLoop() {
   char input[INPUT_CAPACITY]{};
   size_t length = 0;
+  bool inputOverflow = false;
   puts("type help for commands");
   while (true) {
     serviceOperation(nowMs());
@@ -417,15 +432,22 @@ void cliLoop() {
       continue;
     }
     if (c == '\b' || c == 0x7F) {
-      if (length > 0U) --length;
+      if (!inputOverflow && length > 0U) --length;
     } else if (c == '\n' || c == '\r') {
-      if (length > 0U) {
+      if (inputOverflow) {
+        puts("input line too long; discarded");
+      } else if (length > 0U) {
         input[length] = '\0';
         processCommand(input);
-        length = 0;
       }
+      length = 0;
+      inputOverflow = false;
+    } else if (inputOverflow) {
+      continue;
     } else if (length + 1U < INPUT_CAPACITY) {
       input[length++] = static_cast<char>(c);
+    } else {
+      inputOverflow = true;
     }
   }
 }

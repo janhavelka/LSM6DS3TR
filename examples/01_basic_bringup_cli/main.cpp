@@ -23,6 +23,7 @@ OperationToken pendingToken{};
 bool configureAfterProbe = false;
 char input[INPUT_CAPACITY]{};
 size_t inputLength = 0;
+bool inputOverflow = false;
 uint32_t previousMillis = 0;
 uint64_t millisEpoch = 0;
 
@@ -92,7 +93,7 @@ bool acceptedStart(const Status& status, OperationToken token) {
     return false;
   }
   pendingToken = token;
-  Serial.printf("accepted token=%lu\n", static_cast<unsigned long>(token.value));
+  Serial.printf("accepted token=%" PRIu64 "\n", token.value);
   return true;
 }
 
@@ -104,8 +105,8 @@ void printSample(const RawSampleResult& raw) {
     return;
   }
 
-  Serial.printf("sample sequence=%lu generation=%lu valid=0x%02X fresh=0x%02X read_ms=%" PRIu64 "\n",
-                static_cast<unsigned long>(converted.sequence),
+  Serial.printf("sample sequence=%" PRIu64 " generation=%lu valid=0x%02X fresh=0x%02X read_ms=%" PRIu64 "\n",
+                converted.sequence,
                 static_cast<unsigned long>(converted.configGeneration),
                 converted.validMask, converted.freshMask,
                 converted.readUptimeMs);
@@ -131,8 +132,8 @@ bool startDefaultConfigure(uint64_t now) {
 }
 
 void printTerminalResult(const OperationResult& result) {
-  Serial.printf("result token=%lu kind=%s state=%s transactions=%lu/%lu changed=%s\n",
-                static_cast<unsigned long>(result.token.value), jobName(result.kind),
+  Serial.printf("result token=%" PRIu64 " kind=%s state=%s transactions=%lu/%lu changed=%s\n",
+                result.token.value, jobName(result.kind),
                 operationStateName(result.state),
                 static_cast<unsigned long>(result.transactions),
                 static_cast<unsigned long>(result.transactionLimit),
@@ -215,7 +216,7 @@ bool parseUnsigned(const char* text, uint32_t maximum, uint32_t& out) {
 
 void printHelp() {
   Serial.println("Owner-safe: probe configure sample [all|accel|gyro|temp] [ready|direct]");
-  Serial.println("Owner-safe: reset boot recover reconcile powerdown selftest [1..100]");
+  Serial.println("Owner-safe: reset boot recover reconcile powerdown selftest [5..100]");
   Serial.println("Maintenance: calxl [1..1000] calg [1..1000] purge <1..2048>");
   Serial.println("Lifecycle: bind unbind cancel status version help");
   Serial.println("Advanced diagnostics: rreg <reg> wreg <reg> <value> dump <reg> <1..32>");
@@ -276,6 +277,17 @@ void handleCommand(char* line) {
     SampleRequest request{};
     const char* quantity = strtok_r(nullptr, " \t", &save);
     const char* mode = strtok_r(nullptr, " \t", &save);
+    const char* extra = strtok_r(nullptr, " \t", &save);
+    const bool validQuantity =
+        quantity == nullptr || strcmp(quantity, "all") == 0 ||
+        strcmp(quantity, "accel") == 0 || strcmp(quantity, "gyro") == 0 ||
+        strcmp(quantity, "temp") == 0;
+    const bool validMode = mode == nullptr || strcmp(mode, "ready") == 0 ||
+                           strcmp(mode, "direct") == 0;
+    if (!validQuantity || !validMode || extra != nullptr) {
+      Serial.println("expected sample [all|accel|gyro|temp] [ready|direct]");
+      return;
+    }
     if (quantity != nullptr && strcmp(quantity, "accel") == 0) {
       request.quantityMask = SAMPLE_ACCELERATION;
     } else if (quantity != nullptr && strcmp(quantity, "gyro") == 0) {
@@ -301,8 +313,8 @@ void handleCommand(char* line) {
     uint32_t samples = 5;
     const char* argument = strtok_r(nullptr, " \t", &save);
     if (argument != nullptr &&
-        (!parseUnsigned(argument, 100, samples) || samples == 0U)) {
-      Serial.println("expected selftest [1..100]");
+        (!parseUnsigned(argument, 100, samples) || samples < 5U)) {
+      Serial.println("expected selftest [5..100]");
       return;
     }
     SelfTestRequest request{static_cast<uint16_t>(samples)};
@@ -311,7 +323,10 @@ void handleCommand(char* line) {
   } else if (strcmp(command, "calxl") == 0 || strcmp(command, "calg") == 0) {
     uint32_t samples = 32;
     const char* argument = strtok_r(nullptr, " \t", &save);
-    if (argument != nullptr && !parseUnsigned(argument, 1000, samples)) {
+    const char* extra = strtok_r(nullptr, " \t", &save);
+    if ((argument != nullptr &&
+         (!parseUnsigned(argument, 1000, samples) || samples == 0U)) ||
+        extra != nullptr) {
       Serial.println("expected calibration sample count 1..1000");
       return;
     }
@@ -381,12 +396,22 @@ void serviceInput() {
     const char c = static_cast<char>(Serial.read());
     if (c == '\r') continue;
     if (c == '\n') {
-      input[inputLength] = '\0';
-      handleCommand(input);
+      if (inputOverflow) {
+        Serial.println("input line too long; discarded");
+      } else {
+        input[inputLength] = '\0';
+        handleCommand(input);
+      }
       inputLength = 0;
+      inputOverflow = false;
       continue;
     }
-    if (inputLength + 1U < INPUT_CAPACITY) input[inputLength++] = c;
+    if (inputOverflow) continue;
+    if (inputLength + 1U < INPUT_CAPACITY) {
+      input[inputLength++] = c;
+    } else {
+      inputOverflow = true;
+    }
   }
 }
 

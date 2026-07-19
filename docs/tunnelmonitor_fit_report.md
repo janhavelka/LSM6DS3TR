@@ -12,9 +12,9 @@ Version 2 supplies the mechanics required by an external single I2C owner:
   budget;
 - a hard total callback ceiling for every accepted operation;
 - bus-silent cancellation;
-- nonzero operation tokens and exactly-once terminal results;
-- valid/fresh masks, sequence, configuration generation, read uptime, and full
-  scale in each atomic raw sample;
+- 64-bit nonzero operation tokens and exactly-once terminal results;
+- valid/fresh masks, a 64-bit sequence, configuration generation, read uptime,
+  and full scale in each atomic raw sample;
 - explicit verified, settling, and unknown configuration state;
 - partial/ambiguous hardware-effect reporting;
 - passive diagnostics without driver-owned offline, retry, recovery, or health
@@ -36,6 +36,8 @@ This shape can be called from TunnelMonitor's `I2cTask` private adapter without
 adding a second task or exposing library types through public firmware
 contracts. Each normal owner poll should grant one transport callback and
 retain the exact application request identity together with the library token.
+The 64-bit token and sample sequence provide practical non-reuse/order for one
+driver lifetime but are not persistent firmware identities across restart.
 
 ## Product Integration Is Not Approved
 
@@ -64,6 +66,11 @@ No application contract was invented or modified during the library work.
   polls.
 - Queue expiry must cancel the library job and consume its matching terminal
   result; it must not merely stop polling.
+- The adapter must opt out of `I2cTask`'s generic automatic backend retry for
+  each LSM6 transport callback. One callback is one physical attempt and has
+  already advanced the library operation. After taking a terminal result, the
+  owner may recover the bus and explicitly start probe, reconcile, recover, or
+  a new requested operation. It must not replay an ambiguous write.
 - Firmware result identity must retain its existing request ID, submission
   token, device, and operation and correlate those with the library token.
 - Raw register access must not enter the production adapter.

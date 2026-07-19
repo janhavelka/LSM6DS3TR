@@ -156,7 +156,6 @@ static constexpr uint8_t BIT_BLE = 1;
 static constexpr uint8_t MASK_BLE = 0x02;
 static constexpr uint8_t BIT_SW_RESET = 0;
 static constexpr uint8_t MASK_SW_RESET = 0x01;
-static constexpr uint8_t CTRL3_C_DEFAULT = 0x04;
 
 // CTRL4_C
 static constexpr uint8_t BIT_DEN_XL_EN = 7;
@@ -193,8 +192,8 @@ static constexpr uint8_t BIT_HP_EN_G = 6;
 static constexpr uint8_t MASK_HP_EN_G = 0x40;
 static constexpr uint8_t BIT_HPM_G = 4;
 static constexpr uint8_t MASK_HPM_G = 0x30;
-static constexpr uint8_t BIT_HP_G_RST = 3;
-static constexpr uint8_t MASK_HP_G_RST = 0x08;
+static constexpr uint8_t BIT_ROUNDING_STATUS = 3;
+static constexpr uint8_t MASK_ROUNDING_STATUS = 0x08;
 
 // CTRL8_XL
 static constexpr uint8_t BIT_LPF2_XL_EN = 7;

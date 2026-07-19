@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boot, recovery, reconciliation, power-down, self-test, calibration, and
   destructive FIFO purge.
 - Absolute 64-bit operation deadlines, caller-selected transport budgets,
-  hard total callback ceilings, bus-silent cancellation, nonzero operation
-  tokens, and exactly-once terminal result delivery.
-- Atomic raw sample results with validity/freshness masks, sequence,
+  hard total callback ceilings, bus-silent cancellation, 64-bit nonzero
+  operation tokens, and exactly-once terminal result delivery.
+- Atomic raw sample results with validity/freshness masks, a 64-bit sequence,
   configuration generation, read uptime, and immutable full-scale provenance.
 - Explicit configuration states, verified profile readback, settling gates,
   mismatch diagnostics, and ambiguous/partial hardware-effect reporting.
@@ -39,14 +39,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Self-test and calibration enforce three-check per-sample readiness limits and
   zero-I2C sampling cadence; self-test reserves its full restoration budget
   and explicitly wakes then restores a configured sleeping gyro.
+- Poll progress now includes cumulative callback use and its hard ceiling.
+  Self-test exposes a failed primary status at a bus-silent poll boundary before
+  a later poll begins restoration.
+- Public callback ceilings are probe 2, configure 68, sample 66, reset/boot 88,
+  recover 87, reconcile 35, and power-down 8 worst case (6 from the main bank).
+  Self-test remains `16 * (samples + 5) + 80`, calibration is `4 * samples`,
+  and FIFO purge is `maxWords + 5`.
+- Ready-checked sampling spaces unsuccessful status reads by the slowest
+  requested cadence instead of a fixed 1 ms loop. Motion follows its configured
+  ODR; temperature follows the AN5130 12.5/26/52 Hz cases and remains available
+  from a non-power-down sleeping gyro.
 - Calibration requires an explicit expected acceleration vector instead of
   assuming a Z-up product installation.
 - Diagnostic raw register access is one-transaction, excluded during active
-  jobs, and invalidates configuration provenance on accepted writes.
+  jobs, and invalidates configuration provenance on accepted writes. Writes
+  now enforce per-register masks and reject reserved bits or illegal encodings
+  before I2C.
 - Arduino and native ESP-IDF examples now demonstrate the same compact
   token/start/poll/cancel/take command surface with fixed input buffers.
+- The examples reject entire overlength command lines and validate sample and
+  calibration arguments exactly instead of executing truncated/defaulted input.
 - PlatformIO Core, pioarduino platform archive, and CI ESP-IDF version are
   pinned. The IDF component supports the ESP-IDF 5.4 line.
+- Library packages use an explicit minimal export whitelist, with archive
+  contents enforced by a CI contract check.
 
 ### Fixed
 
@@ -65,8 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Partitioned total callback limits so sampling reserves its burst and
   reset/boot/recovery reserve a complete profile replay/readback budget.
 - Made configure validate WHO_AM_I before its first write and made positive
-  chip-ID mismatches from probe, configure, reconcile, and recovery invalidate
-  prior verified provenance. Reconcile checks identity before managed readback.
+  chip-ID mismatches from probe, configure, reset, boot, reconcile, recovery,
+  and FIFO purge invalidate prior verified provenance. Reconcile checks
+  identity before managed readback.
+- Added main-register-bank prechecks before identity-dependent operations.
+  Reset/boot verify an explicit bank clear; power-down does so conditionally
+  when its precheck finds an alternate bank, then validates identity before its
+  ODR writes. Public ceilings include these callbacks.
 - Added the required bus-silent boot/reset inaccessible interval and verified
   profile replay/readback.
 - Rejected non-finite or invalid calibration inputs and removed the public
@@ -76,8 +98,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the sensor-sync register addresses to `TIME_FRAME=0x04` and
   `RES_RATIO=0x05`. Sensor-sync and DRDY-pulse controls are now managed and
   verified as zero; diagnostic writes invalidate provenance for reconciliation.
+- Corrected gyro high-pass cutoff names/encodings as register facts and made
+  high-pass production profiles explicitly unsupported because authoritative
+  settling tables exclude them. Also restricted offset and snapshot-profile
+  combinations whose register effects were not safely represented.
+- Made settling calculations account for documented accelerometer discard
+  counts and gyro turn-on/filter delay instead of using a coarse fixed bound.
+- Made self-test use at least five averaged samples per phase, temporarily
+  remove user-offset effects, establish the required opposite-sensor modes,
+  preserve the exact original profile, and reserve the corrected restoration
+  ceiling.
+- Made conversion reject internally inconsistent raw provenance while carrying
+  sample quality into converted output.
+- Made FIFO purge verify device identity and IF_INC/BDU before consuming data,
+  and treat an overrun's zero encoded unread count as full/data-lost state; it
+  also verifies the main bank and its public ceiling is `maxWords + 5`.
+- Made passive diagnostic time identify the last transport error specifically,
+  rather than moving on successful transfers.
 - Synchronized `library.json`, `Version.h`, `idf_component.yml`, and Doxygen
   project versions from one source.
+- Removed unrelated TunnelMonitor dependency-pin generation from the library's
+  version metadata script.
 
 ### Removed
 

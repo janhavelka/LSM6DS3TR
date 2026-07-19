@@ -32,7 +32,7 @@ struct IntegerAxes {
 
 /// @brief Identity allocated to one accepted operation. Zero is never issued.
 struct OperationToken {
-  uint32_t value = 0;
+  uint64_t value = 0;
 
   constexpr bool valid() const { return value != 0; }
 };
@@ -114,29 +114,30 @@ struct SampleRequest {
 
 /// @brief Atomic raw sample plus the immutable interpretation provenance.
 struct RawSampleResult {
+  uint64_t readUptimeMs = 0;
+  uint64_t sequence = 0;
   RawAxes accel = {};
   RawAxes gyro = {};
   int16_t temperatureRaw = 0;
   uint8_t validMask = 0;
   uint8_t freshMask = 0;
   SampleQuality quality = SampleQuality::DIRECT_UNVERIFIED;
-  uint32_t sequence = 0;
   uint32_t configGeneration = 0;
-  uint64_t readUptimeMs = 0;
   AccelFs accelFullScale = AccelFs::G_2;
   GyroFs gyroFullScale = GyroFs::DPS_250;
 };
 
 /// @brief Converted fixed-unit representation. Conversion never reads driver state.
 struct ConvertedSample {
+  uint64_t readUptimeMs = 0;
+  uint64_t sequence = 0;
   IntegerAxes accelMicroG = {};
   IntegerAxes gyroMicroDps = {};
   int32_t temperatureMilliC = 0;
   uint8_t validMask = 0;
   uint8_t freshMask = 0;
-  uint32_t sequence = 0;
+  SampleQuality quality = SampleQuality::DIRECT_UNVERIFIED;
   uint32_t configGeneration = 0;
-  uint64_t readUptimeMs = 0;
 };
 
 struct ProbeResult {
@@ -154,7 +155,7 @@ struct ConfigurationResult {
 };
 
 struct SelfTestRequest {
-  uint16_t samples = 5;  ///< Average count per baseline/stimulus phase, 1..100.
+  uint16_t samples = 5;  ///< Average count per baseline/stimulus phase, 5..100.
 };
 
 struct SelfTestResult {
@@ -178,7 +179,9 @@ enum class CalibrationKind : uint8_t {
 /// @brief Bounded sensor-native calibration request.
 ///
 /// expectedAccelerationG makes mounting/orientation policy explicit; for
-/// example, a Z-up fixture supplies {0, 0, 1}. The driver never assumes Z-up.
+/// example, a Z-up fixture supplies {0, 0, 1}. Accelerometer calibration
+/// requires a finite vector with magnitude 0.8..1.2 g. The driver never
+/// assumes Z-up. Gyroscope calibration ignores the vector.
 struct CalibrationRequest {
   CalibrationKind kind = CalibrationKind::GYROSCOPE_BIAS;
   uint16_t samples = 32;  ///< 1..1000.
@@ -227,10 +230,12 @@ struct OperationResult {
 
 /// @brief Result of one poll call.
 struct PollResult {
+  Status status = Status::Ok();
   OperationToken token = {};
+  uint16_t transactions = 0;       ///< Cumulative callbacks used by this job.
+  uint16_t transactionLimit = 0;   ///< Hard callback ceiling for this job.
   JobKind kind = JobKind::NONE;
   OperationState state = OperationState::IDLE;
-  Status status = Status::Ok();
   uint8_t transactionsUsed = 0;
   bool waiting = false;  ///< True when time/data must advance; no hidden sleep occurs.
 };
@@ -240,7 +245,7 @@ struct DriverDiagnostics {
   uint32_t transportSuccesses = 0;
   uint32_t transportFailures = 0;
   Status lastTransportError = Status::Ok();
-  uint64_t lastTransportUptimeMs = 0;
+  uint64_t lastTransportErrorUptimeMs = 0;
   uint32_t configGeneration = 0;
   ConfigurationState configurationState = ConfigurationState::UNCONFIGURED;
   uint64_t validAfterUptimeMs = 0;
@@ -250,13 +255,13 @@ struct DriverDiagnostics {
 };
 
 // Pure, allocation-free validation, timing, and conversion helpers.
-static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 1;
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 67;
+static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 68;
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 85;
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 86;
-static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 34;
-static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 4;
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 88;
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 87;
+static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;
+static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 8;
 Status validateDriverConfig(const DriverConfig& config);
 Status validateProfile(const DeviceProfile& profile);
 uint64_t odrPeriodUs(Odr odr);
@@ -385,7 +390,7 @@ private:
   bool _active = false;
   bool _resultPending = false;
   OperationToken _token = {};
-  uint32_t _nextToken = 1;
+  uint64_t _nextToken = 1;
   bool _tokenExhausted = false;
   JobKind _job = JobKind::NONE;
   uint16_t _step = 0;
@@ -397,6 +402,7 @@ private:
   uint32_t _operationTransactionLimit = 0;
   bool _transactionUsed = false;
   bool _waiting = false;
+  bool _pollBoundary = false;
   bool _hardwareStateMayHaveChanged = false;
   bool _configurationMayBeUnknown = false;
   ConfigurationState _configurationStateBeforeOperation =
@@ -408,6 +414,7 @@ private:
 
   DeviceProfile _desiredProfile = {};
   DeviceProfile _verifiedProfile = {};
+  DeviceProfile _selfTestRestoreProfile = {};
   bool _hasDesiredProfile = false;
   bool _hasVerifiedProfile = false;
   ConfigurationState _configurationState = ConfigurationState::UNCONFIGURED;
@@ -419,7 +426,7 @@ private:
   uint8_t _mismatchExpected = 0;
   uint8_t _mismatchObserved = 0;
 
-  uint32_t _sampleSequence = 0;
+  uint64_t _sampleSequence = 0;
   SampleRequest _sampleRequest = {};
   uint8_t _sampleStatus = 0;
 
@@ -440,7 +447,7 @@ private:
   uint32_t _transportSuccesses = 0;
   uint32_t _transportFailures = 0;
   Status _lastTransportError = Status::Ok();
-  uint64_t _lastTransportUptimeMs = 0;
+  uint64_t _lastTransportErrorUptimeMs = 0;
 };
 
 }  // namespace LSM6DS3TR

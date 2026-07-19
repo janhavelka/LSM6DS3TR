@@ -47,12 +47,26 @@ REQUIRED_IDF_TOKENS = [
     "clearerr(stdin)",
     "char input[",
     "OperationTiming",
+    "#include <cinttypes>",
+    'accepted token=%" PRIu64',
+    'sample sequence=%" PRIu64',
+    'result token=%" PRIu64',
     "startConfigure",
     "startSample",
     "imu.poll(now, 1)",
     "takeResult",
     "cancelActiveJob",
     "SensorAddress::SA0_GND",
+    "bool inputOverflow = false",
+    "input line too long; discarded",
+    "inputOverflow = true",
+    "validQuantity",
+    "validMode",
+    "expected sample [all|accel|gyro|temp] [ready|direct]",
+    "selftest [5..100]",
+    "samples < 5U",
+    "samples == 0U",
+    "extra != nullptr",
 ]
 
 FORBIDDEN_PATTERNS = [
@@ -100,6 +114,8 @@ def main() -> int:
     for component in ("LSM6DS3TR", "esp_driver_i2c", "esp_timer", "freertos"):
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"IDF CMake missing required component '{component}'")
+    if '"../../../.."' in cmake_text:
+        fail("IDF example must consume only the component's exported public headers")
     for pattern in FORBIDDEN_PATTERNS:
         if re.search(pattern, combined):
             fail(f"forbidden Arduino/legacy token present: {pattern}")
@@ -113,6 +129,20 @@ def main() -> int:
         fail(f"native CLI command set incomplete: {sorted(set(COMMANDS) - idf_commands)}")
     if arduino_commands != idf_commands:
         fail("Arduino and ESP-IDF owner-safe command sets differ")
+    if re.search(
+        r'else if \(strcmp\(command, "sample"\).*?'
+        r'!validQuantity \|\| !validMode \|\| extra != nullptr',
+        main_text,
+        re.DOTALL,
+    ) is None:
+        fail("native sample command must reject invalid or extra arguments")
+    if re.search(
+        r'else if \(strcmp\(command, "calxl"\).*?'
+        r'samples == 0U\)\) \|\|\s*extra != nullptr',
+        main_text,
+        re.DOTALL,
+    ) is None:
+        fail("native calibration commands must reject zero or extra arguments")
 
     print("IDF example contract PASSED")
     return 0

@@ -21,9 +21,19 @@ uint32_t saturatingIncrement(uint32_t value) {
   return value == std::numeric_limits<uint32_t>::max() ? value : value + 1U;
 }
 
+uint64_t saturatingIncrement64(uint64_t value) {
+  return value == std::numeric_limits<uint64_t>::max() ? value : value + 1U;
+}
+
 uint64_t saturatingAdd(uint64_t lhs, uint64_t rhs) {
   const uint64_t maximum = std::numeric_limits<uint64_t>::max();
   return rhs > maximum - lhs ? maximum : lhs + rhs;
+}
+
+uint64_t saturatingMultiply(uint64_t lhs, uint64_t rhs) {
+  if (lhs == 0U || rhs == 0U) return 0U;
+  const uint64_t maximum = std::numeric_limits<uint64_t>::max();
+  return lhs > maximum / rhs ? maximum : lhs * rhs;
 }
 
 bool finiteAxes(const Axes& axes) {
@@ -33,6 +43,10 @@ bool finiteAxes(const Axes& axes) {
 bool boundedAxes(const Axes& axes, float maximum) {
   return finiteAxes(axes) && std::fabs(axes.x) <= maximum &&
          std::fabs(axes.y) <= maximum && std::fabs(axes.z) <= maximum;
+}
+
+float axesMagnitudeSquared(const Axes& axes) {
+  return axes.x * axes.x + axes.y * axes.y + axes.z * axes.z;
 }
 
 bool validOdrValue(Odr odr) {
@@ -98,7 +112,113 @@ bool gyroOdrAllowed(Odr odr, GyroPowerMode mode) {
 }
 
 bool validHpf(GyroHpfMode mode) {
-  return static_cast<uint8_t>(mode) <= static_cast<uint8_t>(GyroHpfMode::HZ_16_32);
+  return static_cast<uint8_t>(mode) <= static_cast<uint8_t>(GyroHpfMode::HZ_1_040);
+}
+
+bool validSampleQuality(SampleQuality quality) {
+  switch (quality) {
+    case SampleQuality::READY_CHECKED:
+    case SampleQuality::DIRECT_UNVERIFIED:
+    case SampleQuality::CONFIG_UNKNOWN:
+    case SampleQuality::SETTLING:
+      return true;
+    default:
+      return false;
+  }
+}
+
+uint16_t gyroSettleSamples(const DeviceProfile& profile) {
+  switch (profile.gyroOdr) {
+    case Odr::HZ_12_5: return 2;
+    case Odr::HZ_26: return 3;
+    case Odr::HZ_52: return 3;
+    case Odr::HZ_104: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
+    case Odr::HZ_208: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
+    case Odr::HZ_416: return profile.gyroFilter.lpf1Enabled ? 5 : 3;
+    case Odr::HZ_833: return profile.gyroFilter.lpf1Enabled ? 7 : 3;
+    case Odr::HZ_1660: return 135;
+    case Odr::HZ_3330: return 270;
+    case Odr::HZ_6660: return 540;
+    case Odr::POWER_DOWN:
+    case Odr::HZ_1_6:
+    default: return 0;
+  }
+}
+
+uint64_t sampleReadyPollDelayMs(const DeviceProfile& profile,
+                                const SampleRequest& request) {
+  uint64_t slowestPeriodUs = 0;
+  auto include = [&slowestPeriodUs](Odr odr) {
+    const uint64_t period = odrPeriodUs(odr);
+    if (period > slowestPeriodUs) slowestPeriodUs = period;
+  };
+  if ((request.quantityMask & SAMPLE_ACCELERATION) != 0U) {
+    include(profile.accelOdr);
+  }
+  if ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U) {
+    include(profile.gyroOdr);
+  }
+  if ((request.quantityMask & SAMPLE_TEMPERATURE) != 0U) {
+    uint64_t temperaturePeriodUs = odrPeriodUs(Odr::HZ_52);
+    if (profile.gyroOdr == Odr::POWER_DOWN &&
+        profile.accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL) {
+      if (profile.accelOdr == Odr::HZ_12_5) {
+        temperaturePeriodUs = odrPeriodUs(Odr::HZ_12_5);
+      } else if (profile.accelOdr == Odr::HZ_26) {
+        temperaturePeriodUs = odrPeriodUs(Odr::HZ_26);
+      }
+    }
+    if (temperaturePeriodUs > slowestPeriodUs) {
+      slowestPeriodUs = temperaturePeriodUs;
+    }
+  }
+  const uint64_t roundedMs = (slowestPeriodUs + 999U) / 1000U;
+  return roundedMs == 0U ? 1U : roundedMs;
+}
+
+bool diagnosticWritableMask(uint8_t reg, uint8_t& mask) {
+  switch (reg) {
+    case cmd::REG_FUNC_CFG_ACCESS: mask = 0xA0; return true;
+    case cmd::REG_SENSOR_SYNC_TIME_FRAME: mask = 0x0F; return true;
+    case cmd::REG_SENSOR_SYNC_RES_RATIO: mask = 0x03; return true;
+    case cmd::REG_FIFO_CTRL1: mask = 0xFF; return true;
+    case cmd::REG_FIFO_CTRL2: mask = 0xCF; return true;
+    case cmd::REG_FIFO_CTRL3: mask = 0x3F; return true;
+    case cmd::REG_FIFO_CTRL4: mask = 0xFF; return true;
+    case cmd::REG_FIFO_CTRL5: mask = 0x7F; return true;
+    case cmd::REG_DRDY_PULSE_CFG_G: mask = 0xC0; return true;
+    case cmd::REG_INT1_CTRL:
+    case cmd::REG_INT2_CTRL:
+    case cmd::REG_CTRL1_XL:
+    case cmd::REG_CTRL3_C:
+    case cmd::REG_CTRL5_C:
+    case cmd::REG_TAP_CFG:
+    case cmd::REG_TAP_THS_6D:
+    case cmd::REG_INT_DUR2:
+    case cmd::REG_WAKE_UP_DUR:
+    case cmd::REG_FREE_FALL:
+    case cmd::REG_MD1_CFG:
+    case cmd::REG_MD2_CFG:
+      mask = 0xFF;
+      return true;
+    case cmd::REG_WAKE_UP_THS: mask = 0xBF; return true;
+    case cmd::REG_CTRL2_G:
+    case cmd::REG_CTRL4_C: mask = 0xFE; return true;
+    case cmd::REG_CTRL6_C: mask = 0xFB; return true;
+    case cmd::REG_CTRL7_G: mask = 0xF8; return true;
+    case cmd::REG_CTRL8_XL: mask = 0xFD; return true;
+    case cmd::REG_CTRL9_XL: mask = 0xF4; return true;
+    case cmd::REG_CTRL10_C: mask = 0xBF; return true;
+    case cmd::REG_MASTER_CONFIG: mask = 0xDF; return true;
+    case cmd::REG_X_OFS_USR:
+    case cmd::REG_Y_OFS_USR:
+    case cmd::REG_Z_OFS_USR:
+      mask = 0xFF;
+      return true;
+    default:
+      mask = 0;
+      return false;
+  }
 }
 
 bool validOffsetWeight(AccelOffsetWeight weight) {
@@ -233,6 +353,28 @@ Status validateProfile(const DeviceProfile& profile) {
     return Status::Error(Err::UNSUPPORTED_PROFILE,
                          "Production profiles require block data update");
   }
+  if (profile.accelUserOffset.x == std::numeric_limits<int8_t>::min() ||
+      profile.accelUserOffset.y == std::numeric_limits<int8_t>::min() ||
+      profile.accelUserOffset.z == std::numeric_limits<int8_t>::min()) {
+    return Status::Error(Err::INVALID_CONFIG,
+                         "Accelerometer user offsets must be -127..127");
+  }
+  if (profile.gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL &&
+      (profile.gyroFilter.lpf1Enabled || profile.gyroFilter.highPassEnabled)) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "Gyroscope filters require high-performance mode");
+  }
+  if (profile.gyroFilter.highPassEnabled) {
+    return Status::Error(
+        Err::UNSUPPORTED_PROFILE,
+        "Gyroscope high-pass settling is not a production profile contract");
+  }
+  if (profile.accelFilter.highPassSlopeEnabled ||
+      profile.accelFilter.lowPassOn6d) {
+    return Status::Error(
+        Err::UNSUPPORTED_PROFILE,
+        "Slope/high-pass output and 6D filtering are not production sample profiles");
+  }
   if (profile.fifo.enabled || profile.interrupts.enabled) {
     return Status::Error(Err::UNSUPPORTED_PROFILE,
                          "FIFO acquisition and interrupt routing are not enabled profiles");
@@ -261,33 +403,39 @@ uint64_t odrPeriodUs(Odr odr) {
 }
 
 uint64_t requiredSettleUs(const DeviceProfile& profile) {
-  uint64_t settle = 0;
+  uint64_t settle = 0U;
   const uint64_t accelPeriod = odrPeriodUs(profile.accelOdr);
   if (accelPeriod != 0U) {
-    settle = accelPeriod > std::numeric_limits<uint64_t>::max() / 2U
-                 ? std::numeric_limits<uint64_t>::max()
-                 : accelPeriod * 2U;
+    const uint64_t accelSamples = profile.accelFilter.lpf2Enabled ? 40U : 14U;
+    settle = saturatingMultiply(accelPeriod, accelSamples);
   }
-  if (profile.gyroOdr != Odr::POWER_DOWN && settle < 100000U) {
-    settle = 100000U;
+  if (profile.gyroOdr != Odr::POWER_DOWN) {
+    uint64_t gyroSettle = 70000U;
+    if (!profile.gyroSleepEnabled) {
+      gyroSettle = saturatingAdd(
+          gyroSettle,
+          saturatingMultiply(odrPeriodUs(profile.gyroOdr),
+                             gyroSettleSamples(profile)));
+    }
+    if (gyroSettle > settle) settle = gyroSettle;
   }
   return settle;
 }
 
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
-  if (samples == 0U || samples > 100U) return 0U;
+  if (samples < 5U || samples > 100U) return 0U;
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
-         75U;
+         80U;
 }
 
 uint32_t maximumCalibrationTransactions(uint16_t samples) {
   if (samples == 0U || samples > 1000U) return 0U;
-  return 4U * static_cast<uint32_t>(samples) + 16U;
+  return 4U * static_cast<uint32_t>(samples);
 }
 
 uint32_t maximumFifoPurgeTransactions(uint16_t maxWords) {
   if (maxWords == 0U || maxWords > 2048U) return 0U;
-  return static_cast<uint32_t>(maxWords) + 2U;
+  return static_cast<uint32_t>(maxWords) + 5U;
 }
 
 Status accelSensitivityMicroGPerLsb(AccelFs fullScale, int32_t& out) {
@@ -344,9 +492,15 @@ int32_t decodeTemperatureMilliC(int16_t raw) {
 }
 
 Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
+  if (raw.validMask == 0U || (raw.validMask & ~SAMPLE_ALL) != 0U ||
+      (raw.freshMask & ~raw.validMask) != 0U ||
+      !validSampleQuality(raw.quality)) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid raw sample provenance");
+  }
   ConvertedSample candidate{};
   candidate.validMask = raw.validMask;
   candidate.freshMask = raw.freshMask;
+  candidate.quality = raw.quality;
   candidate.sequence = raw.sequence;
   candidate.configGeneration = raw.configGeneration;
   candidate.readUptimeMs = raw.readUptimeMs;
@@ -384,6 +538,13 @@ Status validateCalibrationRequest(const CalibrationRequest& request) {
       request.limits.gyroMaxPeakToPeakDps > 2000.0f) {
     return Status::Error(Err::INVALID_PARAM, "Invalid calibration limits or fixture vector");
   }
+  if (request.kind == CalibrationKind::ACCELEROMETER_BIAS) {
+    const float magnitudeSquared = axesMagnitudeSquared(request.expectedAccelerationG);
+    if (magnitudeSquared < 0.64f || magnitudeSquared > 1.44f) {
+      return Status::Error(Err::INVALID_PARAM,
+                           "Expected acceleration magnitude must be 0.8..1.2 g");
+    }
+  }
   return Status::Ok();
 }
 
@@ -418,7 +579,7 @@ Status LSM6DS3TR::bind(const DriverConfig& config) {
   _transportSuccesses = 0;
   _transportFailures = 0;
   _lastTransportError = Status::Ok();
-  _lastTransportUptimeMs = 0;
+  _lastTransportErrorUptimeMs = 0;
   return Status::Ok();
 }
 
@@ -458,7 +619,7 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   const Status check = _checkStart(timing);
   if (!check.ok()) return check;
   _token = OperationToken{_nextToken};
-  if (_nextToken == std::numeric_limits<uint32_t>::max()) {
+  if (_nextToken == std::numeric_limits<uint64_t>::max()) {
     _tokenExhausted = true;
   } else {
     ++_nextToken;
@@ -484,6 +645,7 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   }
   _transactionUsed = false;
   _waiting = false;
+  _pollBoundary = false;
   _hardwareStateMayHaveChanged = false;
   _configurationMayBeUnknown = false;
   _configurationStateBeforeOperation = _configurationState;
@@ -544,11 +706,13 @@ Status LSM6DS3TR::startSample(const SampleRequest& request,
   if (((request.quantityMask & SAMPLE_ACCELERATION) != 0U &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
       ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
-       _verifiedProfile.gyroOdr == Odr::POWER_DOWN) ||
+       (_verifiedProfile.gyroOdr == Odr::POWER_DOWN ||
+        _verifiedProfile.gyroSleepEnabled)) ||
       ((request.quantityMask & SAMPLE_TEMPERATURE) != 0U &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN &&
        _verifiedProfile.gyroOdr == Odr::POWER_DOWN)) {
-    return Status::Error(Err::INVALID_PARAM, "Requested quantity is powered down");
+    return Status::Error(Err::INVALID_PARAM,
+                         "Requested quantity is powered down or sleeping");
   }
   if (!_verifiedProfile.blockDataUpdate) {
     return Status::Error(Err::CONFIGURATION_UNKNOWN, "Managed samples require BDU");
@@ -572,7 +736,7 @@ Status LSM6DS3TR::startReset(const OperationTiming& timing, OperationToken& toke
   if (status.inProgress()) {
     _configurationState = ConfigurationState::APPLYING;
     _prepareManagedImage(_desiredProfile);
-    _substep = 1;
+    _substep = 0;
     _readyPolls = 0;
   }
   return status;
@@ -589,7 +753,7 @@ Status LSM6DS3TR::startBoot(const OperationTiming& timing, OperationToken& token
   if (status.inProgress()) {
     _configurationState = ConfigurationState::APPLYING;
     _prepareManagedImage(_desiredProfile);
-    _substep = 1;
+    _substep = 0;
     _readyPolls = 0;
   }
   return status;
@@ -644,8 +808,8 @@ Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
   token = {};
   const Status admission = _checkStart(timing);
   if (!admission.ok()) return admission;
-  if (request.samples == 0U || request.samples > MAX_SELF_TEST_SAMPLES) {
-    return Status::Error(Err::INVALID_PARAM, "Self-test samples must be 1..100");
+  if (request.samples < 5U || request.samples > MAX_SELF_TEST_SAMPLES) {
+    return Status::Error(Err::INVALID_PARAM, "Self-test samples must be 5..100");
   }
   const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
@@ -653,6 +817,7 @@ Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
   if (status.inProgress()) {
     _operationTransactionLimit = maximumSelfTestTransactions(request.samples);
     _selfTestRequest = request;
+    _selfTestRestoreProfile = _verifiedProfile;
     _configurationState = ConfigurationState::APPLYING;
     _primaryStatus = Status::Ok();
     _readyPolls = 0;
@@ -753,12 +918,12 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
   Status status = normalizeTransport(_driverConfig.i2cWriteRead(
       static_cast<uint8_t>(_driverConfig.address), &tx, 1, data, length,
       _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
-  _lastTransportUptimeMs = nowMs;
   if (status.ok()) {
     _transportSuccesses = saturatingIncrement(_transportSuccesses);
   } else {
     _transportFailures = saturatingIncrement(_transportFailures);
     _lastTransportError = status;
+    _lastTransportErrorUptimeMs = nowMs;
   }
   return status;
 }
@@ -785,12 +950,12 @@ Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
   Status status = normalizeTransport(_driverConfig.i2cWrite(
       static_cast<uint8_t>(_driverConfig.address), payload, length + 1U,
       _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
-  _lastTransportUptimeMs = nowMs;
   if (status.ok()) {
     _transportSuccesses = saturatingIncrement(_transportSuccesses);
   } else {
     _transportFailures = saturatingIncrement(_transportFailures);
     _lastTransportError = status;
+    _lastTransportErrorUptimeMs = nowMs;
   }
   return status;
 }
@@ -818,6 +983,18 @@ void LSM6DS3TR::_invalidateConfiguration() {
 }
 
 Status LSM6DS3TR::_stepProbe(uint64_t nowMs, bool) {
+  if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status = _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "WHO_AM_I unavailable outside the main register bank");
+    }
+    _step = 1;
+    return inProgressStatus();
+  }
   uint8_t whoAmI = 0;
   const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
   if (!status.ok()) return status;
@@ -834,6 +1011,21 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
   if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
        (reconcileOnly && _job == JobKind::RECONCILE)) &&
       _substep == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "Configuration requires the main register bank");
+    }
+    _substep = 1;
+    return inProgressStatus();
+  }
+  if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
+       (reconcileOnly && _job == JobKind::RECONCILE)) &&
+      _substep == 1U) {
     uint8_t whoAmI = 0;
     const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
     if (!status.ok()) return status;
@@ -843,7 +1035,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       _invalidateConfiguration();
       return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
     }
-    _substep = 1;
+    _substep = 2;
     return inProgressStatus();
   }
 
@@ -898,14 +1090,26 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     _workingResult.configuration.mismatchRegister = 0;
     _workingResult.configuration.expectedValue = 0;
     _workingResult.configuration.observedValue = 0;
-    _verifiedProfile = _desiredProfile;
+    _verifiedProfile = _job == JobKind::SELF_TEST ? _selfTestRestoreProfile
+                                                   : _desiredProfile;
     _hasVerifiedProfile = true;
-    _configGeneration = saturatingIncrement(_configGeneration);
-    const uint64_t settleUs = requiredSettleUs(_verifiedProfile);
-    const uint64_t settleMs = (settleUs + 999U) / 1000U;
-    _validAfterUptimeMs = saturatingAdd(nowMs, settleMs);
-    _configurationState = settleMs == 0U ? ConfigurationState::KNOWN
-                                         : ConfigurationState::SETTLING;
+    if (!reconcileOnly) {
+      _configGeneration = saturatingIncrement(_configGeneration);
+    }
+    uint64_t settleMs = 0U;
+    if (reconcileOnly &&
+        _configurationStateBeforeOperation == ConfigurationState::KNOWN) {
+      _validAfterUptimeMs = _validAfterBeforeOperationMs;
+      _configurationState = ConfigurationState::KNOWN;
+    } else {
+      const uint64_t settleUs = requiredSettleUs(_verifiedProfile);
+      settleMs = settleUs == std::numeric_limits<uint64_t>::max()
+                     ? settleUs
+                     : (settleUs + 999U) / 1000U;
+      _validAfterUptimeMs = saturatingAdd(nowMs, settleMs);
+      _configurationState = settleMs == 0U ? ConfigurationState::KNOWN
+                                           : ConfigurationState::SETTLING;
+    }
     _configurationMayBeUnknown = false;
     _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 1U);
     if (settleMs != 0U) {
@@ -940,7 +1144,7 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
     if (!status.ok()) return status;
     uint8_t required = 0;
     if ((_sampleRequest.quantityMask & SAMPLE_ACCELERATION) != 0U)
-      required = static_cast<uint8_t>(required | cmd::MASK_XLDA);
+      required = cmd::MASK_XLDA;
     if ((_sampleRequest.quantityMask & SAMPLE_ANGULAR_RATE) != 0U)
       required = static_cast<uint8_t>(required | cmd::MASK_GDA);
     if ((_sampleRequest.quantityMask & SAMPLE_TEMPERATURE) != 0U)
@@ -951,7 +1155,8 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
         return Status::Error(Err::DATA_NOT_READY,
                              "Sample data was not ready within 65 checks");
       }
-      _waitUntilMs = saturatingAdd(nowMs, 1U);
+      _waitUntilMs = saturatingAdd(
+          nowMs, sampleReadyPollDelayMs(_verifiedProfile, _sampleRequest));
       _waiting = true;
       return inProgressStatus();
     }
@@ -973,7 +1178,7 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
   sample.freshMask = 0;
   if (_sampleRequest.checkDataReady) {
     if ((_sampleStatus & cmd::MASK_XLDA) != 0U)
-      sample.freshMask = static_cast<uint8_t>(sample.freshMask | SAMPLE_ACCELERATION);
+      sample.freshMask = SAMPLE_ACCELERATION;
     if ((_sampleStatus & cmd::MASK_GDA) != 0U)
       sample.freshMask = static_cast<uint8_t>(sample.freshMask | SAMPLE_ANGULAR_RATE);
     if ((_sampleStatus & cmd::MASK_TDA) != 0U)
@@ -983,7 +1188,7 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
   sample.quality = _sampleRequest.checkDataReady
                        ? SampleQuality::READY_CHECKED
                        : SampleQuality::DIRECT_UNVERIFIED;
-  _sampleSequence = saturatingIncrement(_sampleSequence);
+  _sampleSequence = saturatingIncrement64(_sampleSequence);
   sample.sequence = _sampleSequence;
   sample.configGeneration = _configGeneration;
   sample.readUptimeMs = nowMs;
@@ -993,7 +1198,27 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
-  if (recovery && _substep == 0U) {
+  if (_substep == 0U) {
+    if (recovery) {
+      uint8_t access = 0;
+      const Status status =
+          _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+      if (!status.ok()) return status;
+      if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+        _invalidateConfiguration();
+        return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                             "Recovery requires the main register bank");
+      }
+      _substep = 1;
+    } else {
+      const Status status =
+          _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+      if (!status.ok()) return status;
+      _substep = 1;
+    }
+    return inProgressStatus();
+  }
+  if (recovery && _substep == 1U) {
     uint8_t whoAmI = 0;
     const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
     if (!status.ok()) return status;
@@ -1003,38 +1228,65 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
       _invalidateConfiguration();
       return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
     }
-    _substep = 1;
+    _substep = 3;
     return inProgressStatus();
   }
-  if (_substep == 1U) {
-    const uint8_t gyroOff = static_cast<uint8_t>(buildCtrl2(_desiredProfile) &
-                                                 ~cmd::MASK_ODR_G);
-    const Status status = _writeByte(cmd::REG_CTRL2_G, gyroOff, nowMs, true);
+  if (!recovery && _substep == 1U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
     if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _recordMismatch(cmd::REG_FUNC_CFG_ACCESS, 0, access);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Main register bank clear did not verify",
+                           cmd::REG_FUNC_CFG_ACCESS);
+    }
     _substep = 2;
     return inProgressStatus();
   }
   if (_substep == 2U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _substep = 3;
+    return inProgressStatus();
+  }
+  if (_substep == 3U) {
+    const uint8_t gyroOff = static_cast<uint8_t>(buildCtrl2(_desiredProfile) &
+                                                 ~cmd::MASK_ODR_G);
+    const Status status = _writeByte(cmd::REG_CTRL2_G, gyroOff, nowMs, true);
+    if (!status.ok()) return status;
+    _substep = 4;
+    return inProgressStatus();
+  }
+  if (_substep == 4U) {
     const uint8_t accelHighPerformance =
         static_cast<uint8_t>(buildCtrl6(_desiredProfile) & ~cmd::MASK_XL_HM_MODE);
     const Status status =
         _writeByte(cmd::REG_CTRL6_C, accelHighPerformance, nowMs, true);
     if (!status.ok()) return status;
-    _substep = 3;
+    _substep = 5;
     return inProgressStatus();
   }
-  if (_substep == 3U) {
+  if (_substep == 5U) {
     const uint8_t command = static_cast<uint8_t>(buildCtrl3(_desiredProfile) |
                                                  (boot ? cmd::MASK_BOOT
                                                        : cmd::MASK_SW_RESET));
     const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs, true);
     if (!status.ok()) return status;
     _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS);
-    _substep = 4;
+    _substep = 6;
     _waiting = true;
     return inProgressStatus();
   }
-  if (_substep == 4U) {
+  if (_substep == 6U) {
     if (nowMs < _waitUntilMs) {
       _waiting = true;
       return inProgressStatus();
@@ -1055,7 +1307,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
     }
     _readyPolls = 0;
     _step = 0;
-    _substep = 5;
+    _substep = 7;
     _prepareManagedImage(_desiredProfile);
     return inProgressStatus();
   }
@@ -1066,19 +1318,63 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
   constexpr uint8_t ctrl1 = 0;
   constexpr uint8_t ctrl2 = 0;
   if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    _step = (access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U
+                ? 1U
+                : 3U;
+    return inProgressStatus();
+  }
+  if (_step == 1U) {
+    const Status status =
+        _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+    if (!status.ok()) return status;
+    _step = 2;
+    return inProgressStatus();
+  }
+  if (_step == 2U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _recordMismatch(cmd::REG_FUNC_CFG_ACCESS, 0, access);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Main register bank clear did not verify",
+                           cmd::REG_FUNC_CFG_ACCESS);
+    }
+    _step = 3;
+    return inProgressStatus();
+  }
+  if (_step == 3U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _step = 4;
+    return inProgressStatus();
+  }
+  if (_step == 4U) {
     const Status status = _writeByte(cmd::REG_CTRL1_XL, ctrl1, nowMs, true);
     if (!status.ok()) return status;
     ++_step;
     return inProgressStatus();
   }
-  if (_step == 1U) {
+  if (_step == 5U) {
     const Status status = _writeByte(cmd::REG_CTRL2_G, ctrl2, nowMs, true);
     if (!status.ok()) return status;
     ++_step;
     return inProgressStatus();
   }
   uint8_t observed = 0;
-  if (_step == 2U) {
+  if (_step == 6U) {
     const Status status = _read(cmd::REG_CTRL1_XL, &observed, 1, nowMs);
     if (!status.ok()) return status;
     if (observed != ctrl1) {
@@ -1089,7 +1385,7 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
     ++_step;
     return inProgressStatus();
   }
-  if (_step == 3U) {
+  if (_step == 7U) {
     const Status status = _read(cmd::REG_CTRL2_G, &observed, 1, nowMs);
     if (!status.ok()) return status;
     if (observed != ctrl2) {
@@ -1114,7 +1410,8 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _substep = 100;
     _step = 0;
-    _prepareManagedImage(_desiredProfile);
+    _prepareManagedImage(_selfTestRestoreProfile);
+    _pollBoundary = true;
     return inProgressStatus();
   };
 
@@ -1179,12 +1476,27 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 2U) {
-    DeviceProfile testProfile = _desiredProfile;
+    if (_step == 0U) {
+      const Status status = _writeByte(cmd::REG_CTRL6_C, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step >= 1U && _step <= 3U) {
+      const uint8_t reg = static_cast<uint8_t>(
+          cmd::REG_X_OFS_USR + static_cast<uint8_t>(_step - 1U));
+      const Status status = _writeByte(reg, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    DeviceProfile testProfile = _selfTestRestoreProfile;
     testProfile.accelOdr = Odr::HZ_416;
     testProfile.accelFullScale = AccelFs::G_2;
     const Status status =
         _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs, true);
     if (!status.ok()) return routeFailureToRestore(status);
+    _step = 0;
     _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
     _substep = 3;
     _waiting = true;
@@ -1281,12 +1593,18 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
   }
   if (_substep == 11U) {
     if (_step == 0U) {
+      const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      _step = 1;
+      return inProgressStatus();
+    }
+    if (_step == 1U) {
       const uint8_t awakeCtrl4 = static_cast<uint8_t>(
-          buildCtrl4(_desiredProfile) & ~cmd::MASK_SLEEP_G);
+          buildCtrl4(_selfTestRestoreProfile) & ~cmd::MASK_SLEEP_G);
       const Status status =
           _writeByte(cmd::REG_CTRL4_C, awakeCtrl4, nowMs, true);
       if (!status.ok()) return routeFailureToRestore(status);
-      _step = 1;
+      _step = 2;
       return inProgressStatus();
     }
     const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
@@ -1296,7 +1614,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 12U) {
-    DeviceProfile testProfile = _desiredProfile;
+    DeviceProfile testProfile = _selfTestRestoreProfile;
     testProfile.gyroOdr = Odr::HZ_416;
     testProfile.gyroFullScale = GyroFs::DPS_2000;
     const Status status =
@@ -1320,7 +1638,8 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _substep = 100;
     _step = 0;
-    _prepareManagedImage(_desiredProfile);
+    _prepareManagedImage(_selfTestRestoreProfile);
+    if (!_primaryStatus.ok()) _pollBoundary = true;
     return inProgressStatus();
   }
   return routeFailureToRestore(
@@ -1403,7 +1722,7 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
       return Status::Error(Err::CALIBRATION_UNSTABLE,
                            "Accelerometer calibration is unstable");
     }
-    if (!boundedAxes(result.bias, 0.5f)) {
+    if (!finiteAxes(result.bias) || axesMagnitudeSquared(result.bias) > 0.25f) {
       return Status::Error(Err::CALIBRATION_ORIENTATION,
                            "Fixture vector does not match measured orientation");
     }
@@ -1436,9 +1755,49 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
     pattern = static_cast<uint16_t>(data[2]) |
               (static_cast<uint16_t>(data[3] & 0x03U) << 8U);
     overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0U;
+    if (overrun && unread == 0U) unread = 2048U;
   };
 
   if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "FIFO purge requires the main register bank");
+    }
+    _step = 1;
+    return inProgressStatus();
+  }
+  if (_step == 1U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _step = 2;
+    return inProgressStatus();
+  }
+  if (_step == 2U) {
+    uint8_t ctrl3 = 0;
+    const Status status = _read(cmd::REG_CTRL3_C, &ctrl3, 1, nowMs);
+    if (!status.ok()) return status;
+    constexpr uint8_t prerequisites = cmd::MASK_IF_INC | cmd::MASK_BDU;
+    if ((ctrl3 & prerequisites) != prerequisites) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "FIFO purge requires verified IF_INC and BDU");
+    }
+    _step = 3;
+    return inProgressStatus();
+  }
+  if (_step == 3U) {
     uint8_t data[4] = {};
     const Status status = _read(cmd::REG_FIFO_STATUS1, data, sizeof(data), nowMs);
     if (!status.ok()) return status;
@@ -1450,11 +1809,11 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
     _workingResult.fifoPurge.initialPattern = pattern;
     _workingResult.fifoPurge.overrunObserved = overrun;
     _workingResult.fifoPurge.truncated = unread > _fifoPurgeRequest.maxWords;
-    _step = 1;
-    if (unread == 0U) _step = 2;
+    _step = 4;
+    if (unread == 0U) _step = 5;
     return inProgressStatus();
   }
-  if (_step == 1U &&
+  if (_step == 4U &&
       _workingResult.fifoPurge.wordsDiscarded <
           _workingResult.fifoPurge.initialUnreadWords &&
       _workingResult.fifoPurge.wordsDiscarded < _fifoPurgeRequest.maxWords) {
@@ -1469,7 +1828,7 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
         _workingResult.fifoPurge.wordsDiscarded < _fifoPurgeRequest.maxWords) {
       return inProgressStatus();
     }
-    _step = 2;
+    _step = 5;
     return inProgressStatus();
   }
   uint8_t data[4] = {};
@@ -1572,11 +1931,20 @@ PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
     result.kind = _terminalResult.kind;
     result.state = _terminalResult.state;
     result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
   } else {
     result.token = _token;
     result.kind = _job;
     result.state = _active ? OperationState::ACTIVE : OperationState::IDLE;
     result.status = _active ? inProgressStatus() : Status::Ok();
+    if (_active && _job == JobKind::SELF_TEST && _substep == 100U &&
+        !_primaryStatus.ok()) {
+      result.status = _primaryStatus;
+    }
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
   }
   result.transactionsUsed = _transactionUsed ? 1U : 0U;
   result.waiting = _waiting;
@@ -1586,17 +1954,33 @@ PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
 PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
   _pollNowMs = nowMs;
   if (!_bound) {
-    return PollResult{{}, JobKind::NONE, OperationState::IDLE,
-                      Status::Error(Err::NOT_BOUND, "Driver is not bound"), 0, false};
+    PollResult result{};
+    result.status = Status::Error(Err::NOT_BOUND, "Driver is not bound");
+    return result;
   }
   if (!_active) {
     if (_resultPending) {
-      return PollResult{_terminalResult.token, _terminalResult.kind,
-                        _terminalResult.state, _terminalResult.status, 0, false};
+      PollResult result{};
+      result.token = _terminalResult.token;
+      result.kind = _terminalResult.kind;
+      result.state = _terminalResult.state;
+      result.status = _terminalResult.status;
+      result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+      result.transactionLimit =
+          static_cast<uint16_t>(_terminalResult.transactionLimit);
+      return result;
     }
     return PollResult{};
   }
   if (nowMs >= _deadlineMs) {
+    const uint16_t configurationDone =
+        static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+    const bool selfTestUntouched =
+        _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
+    const bool selfTestRestored =
+        _job == JobKind::SELF_TEST && _substep == 100U &&
+        _step > configurationDone && _hasVerifiedProfile &&
+        !_configurationMayBeUnknown;
     if (_configurationMayBeUnknown) {
       _invalidateConfiguration();
     } else if (_configurationState == ConfigurationState::APPLYING) {
@@ -1609,14 +1993,31 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
             Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired");
       }
       _workingResult.selfTest.primaryStatus = _primaryStatus;
-      _workingResult.selfTest.restorationStatus =
-          Status::Error(Err::OPERATION_INDETERMINATE,
-                        "Restoration not completed before deadline");
+      if (selfTestUntouched) {
+        _workingResult.selfTest.restorationStatus = Status::Ok();
+      } else if (selfTestRestored) {
+        _workingResult.selfTest.restorationStatus =
+            configurationState(nowMs) == ConfigurationState::SETTLING
+                ? Status::Error(Err::SETTLING,
+                                "Restored profile is still settling")
+                : Status::Ok();
+      } else {
+        _workingResult.selfTest.restorationStatus =
+            Status::Error(Err::OPERATION_INDETERMINATE,
+                          "Restoration not completed before deadline");
+      }
     }
     _finish(Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired"),
             OperationState::TIMED_OUT);
-    return PollResult{_terminalResult.token, _terminalResult.kind,
-                      _terminalResult.state, _terminalResult.status, 0, false};
+    PollResult result{};
+    result.token = _terminalResult.token;
+    result.kind = _terminalResult.kind;
+    result.state = _terminalResult.state;
+    result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
+    return result;
   }
   if (maxTransactions == 0U) {
     _transactionUsed = false;
@@ -1629,11 +2030,11 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
       safeComputeStep = true;
     } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
                 _job == JobKind::RECOVER) &&
-               _substep >= 5U && _step >= configurationDone) {
+               _substep >= 7U && _step >= configurationDone) {
       safeComputeStep = true;
     } else if (_job == JobKind::SELF_TEST &&
                ((_substep == 3U || _substep == 7U || _substep == 13U ||
-                 _substep == 17U) ||
+                 _substep == 17U || _substep == 20U) ||
                 (_substep == 100U && _step >= configurationDone))) {
       safeComputeStep = true;
     }
@@ -1644,14 +2045,24 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     }
     if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
          _job == JobKind::RECOVER) &&
-        _substep == 4U) {
+        _substep == 6U) {
       _waiting = nowMs < _waitUntilMs;
     } else if ((_job == JobKind::SAMPLE || _job == JobKind::CALIBRATION) &&
                _waitUntilMs != 0U) {
       _waiting = nowMs < _waitUntilMs;
     }
-    return PollResult{_token, _job, OperationState::ACTIVE, inProgressStatus(),
-                      0, _waiting};
+    PollResult result{};
+    result.token = _token;
+    result.kind = _job;
+    result.state = OperationState::ACTIVE;
+    result.status = (_job == JobKind::SELF_TEST && _substep == 100U &&
+                     !_primaryStatus.ok())
+                        ? _primaryStatus
+                        : inProgressStatus();
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
+    result.waiting = _waiting;
+    return result;
   }
 
   uint8_t used = 0;
@@ -1660,16 +2071,34 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     if (used >= maxTransactions) break;
     _transactionUsed = false;
     _waiting = false;
+    _pollBoundary = false;
     result = _pollOne(nowMs);
-    if (_transactionUsed) ++used;
-    if (!_active || _waiting || used >= maxTransactions) break;
+    if (_transactionUsed) {
+      ++used;
+      if (used >= maxTransactions) break;
+    }
+    if (!_active || _waiting || _pollBoundary) break;
   }
   if (_active) {
-    result = PollResult{_token, _job, OperationState::ACTIVE, inProgressStatus(),
-                        used, _waiting};
+    result.token = _token;
+    result.kind = _job;
+    result.state = OperationState::ACTIVE;
+    result.status = (_job == JobKind::SELF_TEST && _substep == 100U &&
+                     !_primaryStatus.ok())
+                        ? _primaryStatus
+                        : inProgressStatus();
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
+    result.waiting = _waiting;
   } else if (_resultPending) {
-    result = PollResult{_terminalResult.token, _terminalResult.kind,
-                        _terminalResult.state, _terminalResult.status, used, false};
+    result.token = _terminalResult.token;
+    result.kind = _terminalResult.kind;
+    result.state = _terminalResult.state;
+    result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
+    result.waiting = false;
   }
   result.transactionsUsed = used;
   return result;
@@ -1679,11 +2108,38 @@ Status LSM6DS3TR::cancelActiveJob(uint64_t nowMs) {
   if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
   if (!_active) return Status::Error(Err::RESULT_NOT_AVAILABLE, "No active operation");
   _pollNowMs = nowMs;
+  const uint16_t configurationDone =
+      static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+  const bool selfTestUntouched =
+      _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
+  const bool selfTestRestored =
+      _job == JobKind::SELF_TEST && _substep == 100U &&
+      _step > configurationDone && _hasVerifiedProfile &&
+      !_configurationMayBeUnknown;
   if (_configurationMayBeUnknown) {
     _invalidateConfiguration();
   } else if (_configurationState == ConfigurationState::APPLYING) {
     _configurationState = _configurationStateBeforeOperation;
     _validAfterUptimeMs = _validAfterBeforeOperationMs;
+  }
+  if (_job == JobKind::SELF_TEST) {
+    if (_primaryStatus.ok()) {
+      _primaryStatus = Status::Error(Err::CANCELLED, "Operation cancelled");
+    }
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    if (selfTestUntouched) {
+      _workingResult.selfTest.restorationStatus = Status::Ok();
+    } else if (selfTestRestored) {
+      _workingResult.selfTest.restorationStatus =
+          configurationState(nowMs) == ConfigurationState::SETTLING
+              ? Status::Error(Err::SETTLING,
+                              "Restored profile is still settling")
+              : Status::Ok();
+    } else {
+      _workingResult.selfTest.restorationStatus =
+          Status::Error(Err::OPERATION_INDETERMINATE,
+                        "Restoration not completed before cancellation");
+    }
   }
   (void)_finish(Status::Error(Err::CANCELLED, "Operation cancelled"),
                 OperationState::CANCELLED);
@@ -1737,7 +2193,7 @@ DriverDiagnostics LSM6DS3TR::diagnostics(uint64_t nowMs) const {
   result.transportSuccesses = _transportSuccesses;
   result.transportFailures = _transportFailures;
   result.lastTransportError = _lastTransportError;
-  result.lastTransportUptimeMs = _lastTransportUptimeMs;
+  result.lastTransportErrorUptimeMs = _lastTransportErrorUptimeMs;
   result.configGeneration = _configGeneration;
   result.configurationState = configurationState(nowMs);
   result.validAfterUptimeMs = _validAfterUptimeMs;
@@ -1755,25 +2211,54 @@ bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
 }
 
 bool LSM6DS3TR::_safeDiagnosticWrite(uint8_t reg, uint8_t value) {
-  const bool writable =
-      reg == cmd::REG_FUNC_CFG_ACCESS ||
-      reg == cmd::REG_SENSOR_SYNC_TIME_FRAME ||
-      reg == cmd::REG_SENSOR_SYNC_RES_RATIO ||
-      (reg >= cmd::REG_FIFO_CTRL1 && reg <= cmd::REG_DRDY_PULSE_CFG_G) ||
-      (reg >= cmd::REG_INT1_CTRL && reg <= cmd::REG_INT2_CTRL) ||
-      (reg >= cmd::REG_CTRL1_XL && reg <= cmd::REG_MASTER_CONFIG) ||
-      (reg >= cmd::REG_TAP_CFG && reg <= cmd::REG_MD2_CFG) ||
-      (reg >= cmd::REG_X_OFS_USR && reg <= cmd::REG_Z_OFS_USR) ||
-      (reg == cmd::REG_TIMESTAMP2 && value == cmd::TIMESTAMP_RESET_VALUE);
-  if (!writable) return false;
+  if (reg == cmd::REG_TIMESTAMP2) return value == cmd::TIMESTAMP_RESET_VALUE;
+  uint8_t writableMask = 0;
+  if (!diagnosticWritableMask(reg, writableMask) ||
+      (value & static_cast<uint8_t>(~writableMask)) != 0U) {
+    return false;
+  }
   if (reg == cmd::REG_FUNC_CFG_ACCESS &&
       (value & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U)
     return false;
+  if (reg == cmd::REG_FIFO_CTRL5) {
+    const uint8_t mode = value & cmd::MASK_FIFO_MODE;
+    const uint8_t odr = static_cast<uint8_t>(
+        (value & cmd::MASK_ODR_FIFO) >> cmd::BIT_ODR_FIFO);
+    if (mode == 2U || mode == 5U || mode == 7U || odr > 10U) return false;
+  }
+  if (reg == cmd::REG_CTRL1_XL &&
+      ((value & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL) > 11U)
+    return false;
+  if (reg == cmd::REG_CTRL2_G) {
+    const uint8_t odr = static_cast<uint8_t>(
+        (value & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
+    if (odr > 10U ||
+        ((value & cmd::MASK_FS_125) != 0U &&
+         (value & cmd::MASK_FS_G) != 0U))
+      return false;
+  }
+  if (reg == cmd::REG_CTRL5_C) {
+    const uint8_t gyroSelfTest = static_cast<uint8_t>(
+        (value & cmd::MASK_ST_G) >> cmd::BIT_ST_G);
+    if ((value & cmd::MASK_ST_XL) == cmd::MASK_ST_XL ||
+        gyroSelfTest == 2U)
+      return false;
+  }
+  if (reg == cmd::REG_CTRL6_C) {
+    constexpr uint8_t TRIGGER_MODE_MASK = 0xE0U;
+    const uint8_t trigger = static_cast<uint8_t>(value & TRIGGER_MODE_MASK);
+    if (trigger != 0x00U && trigger != 0x40U && trigger != 0x60U &&
+        trigger != 0x80U && trigger != 0xC0U)
+      return false;
+  }
   if (reg == cmd::REG_CTRL3_C &&
       ((value & (cmd::MASK_BOOT | cmd::MASK_SW_RESET | cmd::MASK_BLE)) != 0U ||
        (value & cmd::MASK_IF_INC) == 0U))
     return false;
   if (reg == cmd::REG_CTRL4_C && (value & cmd::MASK_I2C_DISABLE) != 0U)
+    return false;
+  if ((reg == cmd::REG_X_OFS_USR || reg == cmd::REG_Y_OFS_USR ||
+       reg == cmd::REG_Z_OFS_USR) && value == 0x80U)
     return false;
   return true;
 }

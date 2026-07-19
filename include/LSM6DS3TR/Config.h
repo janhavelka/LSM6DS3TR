@@ -72,10 +72,10 @@ enum class GyroPowerMode : uint8_t {
 };
 
 enum class GyroHpfMode : uint8_t {
-  HZ_0_0081 = 0,
-  HZ_0_0324 = 1,
-  HZ_2_07 = 2,
-  HZ_16_32 = 3
+  HZ_0_016 = 0,
+  HZ_0_065 = 1,
+  HZ_0_260 = 2,
+  HZ_1_040 = 3
 };
 
 enum class AccelOffsetWeight : uint8_t {
@@ -98,7 +98,7 @@ struct AccelFilterConfig {
 struct GyroFilterConfig {
   bool lpf1Enabled = false;
   bool highPassEnabled = false;
-  GyroHpfMode highPassMode = GyroHpfMode::HZ_0_0081;
+  GyroHpfMode highPassMode = GyroHpfMode::HZ_0_016;
 };
 
 /// @brief FIFO policy represented by the production profile.

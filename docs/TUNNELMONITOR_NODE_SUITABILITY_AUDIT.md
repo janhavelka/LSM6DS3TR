@@ -136,6 +136,13 @@ Operation results include identity, state, status, start/completion uptime,
 actual and maximum transaction counts, and whether hardware may have changed.
 Every job has both an absolute deadline and a hard total callback ceiling;
 transport failures are never retried internally.
+Operation tokens and sample sequences are 64-bit values sized for practical
+non-reuse and ordering over one driver lifetime, not persistent identities
+across restart.
+Every poll snapshot also exposes cumulative callbacks, the ceiling, and its
+current progress status. After a self-test primary failure, operation state
+remains active while poll status preserves that failure at a bus-silent
+boundary before a later poll may start restoration I2C.
 
 Configuration is one replayable `DeviceProfile`. Version 2 supports polling
 snapshots with FIFO and interrupts explicitly disabled. Unsupported enabled
@@ -165,6 +172,33 @@ falsely advertised.
 | LSM6-17 release reproducibility | Yes | One version source and pinned compile inputs | RESOLVED |
 | LSM6-18 TunnelMonitor contracts/capacity | Yes | No contract invented; deliberate firmware work still required | OPEN external integration gate |
 
+## Finding Implementation And Test Traceability
+
+This matrix supplements the detailed evidence below. Severity is the affected
+contract severity revalidated from the original audit; paths and named tests
+are the final implementation evidence rather than the old line numbers.
+
+| Finding | Current evidence and affected contract/severity | Resolution and implementation | Verification and final status |
+| --- | --- | --- | --- |
+| LSM6-01 | TunnelMonitor `BoardPins`, device/operation IDs, measurement schema, and authoritative guidelines contain no approved motion sensor role. Integration blocker. | No product fact was invented; the general chip driver remains independent. | Read-only TunnelMonitor source/contract search and native suite; OPEN external product gate. |
+| LSM6-02 | Version 1 combined binding with hidden multi-I2C lifecycle work. High owner-liveness/latency risk. | Zero-I2C `DriverConfig`, `bind()`/`unbind()`, and staged operations in `Config.h`, `LSM6DS3TR.h`, and `LSM6DS3TR.cpp`. | `test_bind_unbind_and_rebind_are_bus_silent`, `test_probe_budget_zero_then_one_and_exactly_once_result`, configure/reset/recover suites; RESOLVED. |
+| LSM6-03 | Direct operations could overlap staged work and cancellation was not driver-owned. High exclusivity/result-integrity risk. | One active job plus one pending result; diagnostic exclusion; bus-silent cancellation correlated by a 64-bit operation token. | Active/pending exclusion, cancellation, token-width/non-reuse, and all-hardware-entry-point tests; RESOLVED. |
+| LSM6-04 | Version 1 cache could answer a later failed request and lacked per-quantity freshness. High data-integrity risk. | Atomic `RawSampleResult` with valid/fresh masks, 64-bit sequence, generation, uptime, quality, and scale in its matching terminal result; temperature has its own 12.5/26/52 Hz cadence and remains available from a non-power-down sleeping gyro. | Atomic/validity, powered-down combinations, TDA, ready-boundary/cadence, sequence-width/provenance, and stale-sample tests; RESOLVED. |
+| LSM6-05 | Mutable current full scale could reinterpret an older raw cache. High conversion correctness defect. | Full scales travel with each sample; conversion is pure. | `test_convert_sample_is_self_contained_and_preserves_provenance` and `test_sample_conversion_keeps_original_scale_after_reconfigure`; RESOLVED. |
+| LSM6-06 | BDU did not cover every managed multibyte read and did not prove same-cycle vectors. High for strict coherence, medium for snapshots. | Managed reads require verified BDU; direct reads are labelled unverified; documentation narrows physical-coherence claims. | Profile validation, atomic sample, direct-quality, and quantity-mask tests; RESOLVED for polling snapshots. |
+| LSM6-07 | A dirty/partial configuration did not gate interpreted data. High data-integrity risk. | Five-state configuration provenance, verified generation, mismatch evidence, and managed-sample gates. | Configure stage-failure/mismatch/cancellation tests, reconcile test, and `test_unknown_and_settling_configuration_gate_samples_without_i2c`; RESOLVED. |
+| LSM6-08 | Retained sensor state could escape an incomplete desired image after MCU-only restart. High for events, medium for polling scope. | Main-bank prechecks protect identity/profile access; one 33-register supported image clears and verifies disabled FIFO, routes, embedded functions, sensor sync, and DRDY pulse state. Diagnostic writes reject reserved bits and illegal encodings. | Bank-selection/identity ordering, complete-profile, exhaustive stage-fault, diagnostic-write safety, and reconciliation tests; RESOLVED for declared scope. |
+| LSM6-09 | Version 1 reset/boot omitted required modes and the inaccessible interval. High device-state risk. | Staged gyro-off/accel-high-performance command order, 15 ms bus-silent gate, 16 polls, then complete replay/readback. | Reset/boot order, inaccessible-window, cancellation, every-stage failure, and exact poll-boundary tests; RESOLVED. |
+| LSM6-10 | Runtime interpretation-changing writes exposed output before settling. Medium-high measurement-validity risk. | Verified profile records `validAfterUptimeMs`; state remains `SETTLING` and sampling is gated. | `test_configure_terminal_publishes_only_after_settled_and_verified` and unknown/settling gate test; RESOLVED. |
+| LSM6-11 | Driver-owned OFFLINE/recovery policy conflicted with TunnelMonitor's I2C owner. High ownership risk. | Offline admission and hidden recovery removed; precise statuses plus passive diagnostics only. | Precise probe-failure/no-gate test, recover test, and transport-fault suites; RESOLVED. |
+| LSM6-12 | Version 1 FIFO drain discarded untyped words while implying acquisition. High if FIFO is selected. | FIFO-enabled profiles are unsupported; only typed, bounded, explicitly destructive purge remains. | Purge bound/loss, partial cancellation, concurrent arrival, and overrun tests; RESOLVED by restriction. |
+| LSM6-13 | No complete replayable interrupt/event/electrical profile or TunnelMonitor pin exists. Conditional product/safety risk. | Production profile requires all routes/functions disabled; raw constants are not production claims. | Unsupported-profile validation and complete disabled-image test; RESOLVED by restriction. |
+| LSM6-14 | Version 1 self-test/calibration blocked and mixed clock semantics. Medium-high owner-liveness/error-provenance risk. | Staged maintenance jobs use one 64-bit owner clock, public ceilings, cadence gates, visible primary/restoration state, and a bus-silent failure boundary before restore. | Full self-test/calibration staged, every-stage fault, deadline, readiness, cadence, primary/restore, cancellation, and uint64 boundary suites; RESOLVED. |
+| LSM6-15 | Z-up bias capture and unvalidated floats were not installation-safe. Medium-high physical-meaning risk. | Calibration requires an explicit sensor-native gravity vector; finite/bounded validation and pure bias application; mounting/persistence remain application policy. | Bias validation, explicit fixture/orientation, span-overflow, and calibration-stability tests; LIBRARY RESOLVED, product/HIL gate open. |
+| LSM6-16 | Sensitivity units and consumer macro mutation were wrong. Medium API/packaging defect. | Exact micro-unit helpers and fixed-unit conversion; conflicting FIFO enum/workaround removed. | All-scale/int16/temperature helper tests and `test_compile_contracts.cpp` header/trait assertions; RESOLVED. |
+| LSM6-17 | Package versions and toolchains were inconsistent/broad. Medium release/reproducibility gate. | `library.json` source of truth, generated metadata, exact PIO/Core/IDF compile inputs, real IDF CI matrix, and explicit minimal package export contract. | Metadata/CLI/IDF/chip-doc/package guards plus native and S2/S3 builds; RESOLVED subject to recorded remote/local gates. |
+| LSM6-18 | TunnelMonitor has no motion IDs/operations; device health and source capacities are full and schema capacity is finite. Integration blocker. | No application mutation. Integration conditions require stable appended contracts, calculated capacities, copied status, exact identity/token settlement, and one-attempt callbacks. | Read-only contract/capacity checks and TunnelMonitor 1050-case native suite; OPEN external integration gate. |
+
 ## Detailed Finding Dispositions
 
 ### LSM6-01 — TunnelMonitor sensing role
@@ -192,8 +226,11 @@ binding and multiple hidden transfers.
 I2C. `unbind()` is also bus-silent. Probe, configuration, recovery,
 power-down, reset, and boot are explicit staged operations with absolute
 deadlines and caller transaction budgets. Configuration validates WHO_AM_I
-before its first write, and reconcile does so before its 33 managed reads. A
-positive chip-ID mismatch from probe, configure, reconcile, or recover
+before its first write, and reconcile does so before its 33 managed reads. Both
+first prove the main register bank is selected. Probe and recover use the same
+bank-before-identity ordering. A
+positive chip-ID mismatch from probe, configure, reset, boot, reconcile,
+recover, or FIFO purge
 invalidates prior verified provenance.
 
 **Status:** resolved.
@@ -211,10 +248,14 @@ possible writes preserves unknown configuration/hardware-change evidence.
 
 **Resolution:** a sample is contained in its terminal `OperationResult` and
 cannot be taken with another token. `RawSampleResult` includes independent
-valid/fresh masks, quality, sequence, configuration generation, read uptime,
+valid/fresh masks, quality, 64-bit sequence, configuration generation, read uptime,
 and raw fields. Every ready-checked request containing temperature requires
-TDA, including mixed requests. No historical cache is exposed as the answer to
-a later job.
+TDA, including mixed requests. Its AN5130 readiness cadence is 12.5 Hz only for
+a powered-down gyro plus low-power/normal accelerometer at 12.5 Hz, 26 Hz for
+the equivalent 26 Hz case, and 52 Hz otherwise. A sleeping gyro with a
+non-power-down ODR still supports temperature, although angular-rate sampling
+is rejected while it sleeps. No historical cache is exposed as the answer to a
+later job.
 
 **Status:** resolved.
 
@@ -241,8 +282,10 @@ remains a future product/FIFO requirement.
 **Resolution:** `ConfigurationState` is `UNCONFIGURED`, `APPLYING`, `KNOWN`,
 `UNKNOWN`, or `SETTLING`. Managed sampling requires known and settled state.
 Generation increments only after verified profile apply or verified
-power-down, never after a partial/ambiguous effect. Raw diagnostic writes
-invalidate provenance.
+power-down, never after a partial/ambiguous effect. Accepted raw diagnostic
+writes invalidate provenance. Per-register writable masks and semantic checks
+reject reserved bits, bank switching, unsafe controls, and illegal encodings
+without I2C.
 
 **Status:** resolved.
 
@@ -252,8 +295,19 @@ invalidate provenance.
 `DeviceProfile`, built into a complete managed register image, replayed, and
 read back. FIFO and interrupts have explicit disabled-only profile policy;
 enabled requests fail rather than relying on retained raw register state.
-Configure reserves one callback for WHO_AM_I followed by the 66-transfer full
-write/readback image; reconcile reserves one plus its 33 managed reads.
+Gyro high-pass mode names remain correct register-level facts, but enabling the
+filter is an unsupported production profile because authoritative settling
+tables do not cover it.
+Configure reserves one main-bank precheck, one WHO_AM_I read, and the
+66-transfer full write/readback image; reconcile reserves the same two
+prechecks plus its 33 managed reads. Probe and FIFO purge likewise check the
+bank before identity; FIFO purge does so before any destructive read. Recover
+checks both before its first preparation write. Reset and boot explicitly write
+and verify the main-bank selection, then validate identity before other
+register access. Power-down clears and verifies an alternate bank when needed,
+then validates identity before its ODR writes. The corresponding public
+ceilings are probe 2, configure 68, reconcile 35, reset/boot 88, recover 87,
+and power-down 8 worst case; the power-down main-bank path consumes at most 6.
 Sensor-sync and DRDY-pulse controls are explicitly cleared and verified so a
 device state retained across an MCU-only restart cannot escape the profile.
 Low-power/normal ODRs stop at 208 Hz. Power-down is admissible from any bound
@@ -266,7 +320,8 @@ explicit configure or recovery.
 
 ### LSM6-09 — Reset and boot sequencing
 
-**Resolution:** reset/boot/recovery are staged jobs. They prepare required
+**Resolution:** reset/boot/recovery are staged jobs. Reset and boot verify the
+main bank and live identity before preparation writes. They prepare required
 sensor modes, issue the command, enforce the documented 15 ms period with no
 I2C, then poll, replay, and verify the desired profile. No blocking delay is
 inside the core.
@@ -293,7 +348,8 @@ retry, absence, backoff, health, and bus recovery.
 ### LSM6-12 — FIFO acquisition
 
 **Resolution:** incomplete FIFO configuration and word-drain acquisition APIs
-were removed. Production profiles require FIFO disabled. `startFifoPurge()` is
+were removed. Production profiles require FIFO disabled. `startFifoPurge()`
+verifies the main bank, live identity, and IF_INC/BDU before consumption. It is
 explicitly destructive, bounded to 1..2048 requested word reads, and reports
 initial/final counts, starting pattern, overrun, discarded count, and
 truncation.
@@ -323,6 +379,12 @@ discard/collected sample; self-test uses 3 ms post-sample gates and calibration
 uses the rounded configured ODR period. Results preserve primary and
 restoration status; failed restoration invalidates configuration. There is no
 blocking convenience facade in the core.
+
+The fixed ceilings are probe 2, configure 68, sample 66, reset/boot 88,
+recover 87, reconcile 35, and power-down 8 worst case (6 from the main bank).
+Self-test remains `16 * (samples + 5) + 80`, calibration is `4 * samples`, and
+FIFO purge is `maxWords + 5` including its main-bank, identity, and IF_INC/BDU
+prechecks.
 
 **Status:** resolved.
 
@@ -382,7 +444,12 @@ claimed; CI is the actual compile gate.
 firmware must append stable IDs, add a private adapter, calculate profile
 capacities, define copied status and sample schema, and update CSV/replay/cloud
 compatibility together. The adapter must correlate firmware identity with the
-library token and must cancel/take expired work.
+library token and must cancel/take expired work. It must opt out of the current
+owner's generic automatic backend retry around LSM6 callbacks: one callback is
+one physical attempt and has already advanced the library state. Only after
+taking the terminal result may the owner recover the bus and explicitly start
+probe, reconcile, recover, or a new requested operation. An ambiguous write is
+never blindly replayed.
 
 **Status:** open external integration gate.
 
@@ -401,6 +468,11 @@ Before an adapter is authorized, the product must freeze:
 9. sample fields, integer units, schema/profile version;
 10. compile-time inventory, source, health, payload, and sample capacities.
 
+The private adapter must also disable `I2cTask`'s generic same-operation retry
+for LSM6 callbacks. Bus recovery remains owner policy, but it occurs after the
+library terminal result is consumed and is followed by an explicit operation
+chosen from the reported hardware-effect and configuration evidence.
+
 A low-rate polling snapshot is the smallest reasonable first scope. It is not
 an approved product decision merely because the library can now support it.
 
@@ -415,11 +487,14 @@ Local closeout results for the final version 2 working tree:
 | Arduino CLI contract | PASS |
 | ESP-IDF example contract | PASS |
 | Chip-document coverage | PASS |
+| Strict core/compile-contract host compile | PASS, g++ 15.1 C++17 with `-Wall -Wextra -Werror` |
 | Arduino example host syntax check | PASS, g++ 15.1 C++17 |
-| Native fault-injection/contract suite | PASS, 71/71 |
-| ESP32-S3 Arduino build | PASS, RAM 23,216 B, flash 370,322 B |
-| ESP32-S2 Arduino build | PASS, RAM 37,048 B, flash 343,421 B |
+| Cppcheck static analysis | PASS, exhaustive warning/style/performance/portability checks |
+| Native fault-injection/contract suite | PASS, 88/88 |
+| ESP32-S3 Arduino build | PASS, RAM 23,272 B, flash 374,402 B |
+| ESP32-S2 Arduino build | PASS, RAM 37,120 B, flash 347,537 B |
 | PlatformIO package creation | PASS, `LSM6DS3TR-2.0.0.tar.gz` |
+| Package export contract | PASS, exact 20-file whitelist |
 | Doxygen | PASS, zero warnings |
 | `git diff --check` | PASS, no whitespace errors |
 | TunnelMonitor native contract suite | PASS, 1050/1050 at tree-equivalent `b708f51` |

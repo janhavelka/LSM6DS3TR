@@ -48,5 +48,21 @@
   "build": {
     "includeDir": "include",
     "srcDir": "src"
+  },
+  "export": {
+    "include": [
+      "library.json",
+      "README.md",
+      "CHANGELOG.md",
+      "LICENSE",
+      "SECURITY.md",
+      "CMakeLists.txt",
+      "idf_component.yml",
+      "include/**",
+      "src/**",
+      "examples/01_basic_bringup_cli/**",
+      "examples/common/**",
+      "examples/idf/basic/**"
+    ]
   }
 }

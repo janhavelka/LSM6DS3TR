@@ -33,13 +33,13 @@ struct Transfer {
   uint32_t timeoutMs = 0;
   uint64_t atMs = 0;
   Err result = Err::OK;
-  bool writeEffectApplied = false;
+  bool effectApplied = false;
 };
 
 struct TransferFault {
   uint32_t call = 0;
   Status status = Status::Error(Err::I2C_ERROR, "injected transfer failure");
-  bool applyWriteEffect = false;
+  bool applyEffect = false;
   bool consumed = false;
 };
 
@@ -103,11 +103,11 @@ struct FakeBus {
     std::memset(faults, 0, sizeof(faults));
   }
 
-  void addFault(uint32_t call, const Status& status, bool applyWriteEffect = false) {
+  void addFault(uint32_t call, const Status& status, bool applyEffect = false) {
     if (faultCount >= MAX_FAULTS) {
       return;
     }
-    faults[faultCount++] = TransferFault{call, status, applyWriteEffect, false};
+    faults[faultCount++] = TransferFault{call, status, applyEffect, false};
   }
 
   TransferFault* faultForCurrentCall() {
@@ -150,7 +150,7 @@ struct FakeBus {
       return;
     }
     transfer->result = status.code;
-    transfer->writeEffectApplied = effectApplied;
+    transfer->effectApplied = effectApplied;
   }
 
   void setRawSample(int16_t temperature, int16_t gx, int16_t gy, int16_t gz,
@@ -174,9 +174,11 @@ struct FakeBus {
   }
 
   void syncFifoRegisters() {
-    regs[cmd::REG_FIFO_STATUS1] = static_cast<uint8_t>(fifoUnreadWords & 0xFFu);
+    const uint16_t reportedUnread =
+        fifoOverrun && fifoUnreadWords == 2048U ? 0U : fifoUnreadWords;
+    regs[cmd::REG_FIFO_STATUS1] = static_cast<uint8_t>(reportedUnread & 0xFFu);
     regs[cmd::REG_FIFO_STATUS2] =
-        static_cast<uint8_t>((fifoUnreadWords >> 8) & cmd::MASK_DIFF_FIFO_HI);
+        static_cast<uint8_t>((reportedUnread >> 8) & cmd::MASK_DIFF_FIFO_HI);
     if (fifoUnreadWords == 0u) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_EMPTY;
     }
@@ -261,7 +263,7 @@ inline Status fakeWrite(uint8_t address, const uint8_t* data, size_t length,
   }
 
   TransferFault* fault = bus.faultForCurrentCall();
-  if (fault != nullptr && !fault->applyWriteEffect) {
+  if (fault != nullptr && !fault->applyEffect) {
     FakeBus::finishTransfer(transfer, fault->status);
     return fault->status;
   }
@@ -296,7 +298,7 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
   }
 
   TransferFault* fault = bus.faultForCurrentCall();
-  if (fault != nullptr) {
+  if (fault != nullptr && !fault->applyEffect) {
     FakeBus::finishTransfer(transfer, fault->status);
     return fault->status;
   }
@@ -362,6 +364,10 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     bus.syncFifoRegisters();
   }
 
+  if (fault != nullptr) {
+    FakeBus::finishTransfer(transfer, fault->status, true);
+    return fault->status;
+  }
   const Status status = Status::Ok();
   FakeBus::finishTransfer(transfer, status);
   return status;
