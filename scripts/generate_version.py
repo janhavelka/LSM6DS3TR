@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env python3
-"""Synchronize Version.h from library.json and expose build metadata via macros.
+"""Synchronize package versions from library.json and expose build metadata.
 
 Default behavior:
 - when run by PlatformIO as an extra script: sync generated headers if needed and
@@ -8,9 +8,9 @@ Default behavior:
 
 Standalone commands:
   sync
-      Regenerate generated headers only if source metadata changed.
+      Regenerate generated headers and package metadata when needed.
   check
-      Exit with code 1 when generated headers are out of date.
+      Exit with code 1 when generated version metadata is out of date.
   bump patch|minor|major
       Update library.json, then regenerate generated headers.
   set X.Y.Z
@@ -356,6 +356,40 @@ def _render_dependency_versions_header(project_root: Path, namespace: str) -> Op
     return "\n".join(lines)
 
 
+def _render_idf_component_manifest(project_root: Path, version: str) -> str:
+    manifest_path = project_root / "idf_component.yml"
+    manifest = _read_text(manifest_path)
+    rendered, replacement_count = re.subn(
+        r'^version:\s*["\']?[^"\'\r\n]+["\']?\s*$',
+        f'version: "{version}"',
+        manifest,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if replacement_count != 1:
+        raise RuntimeError(
+            f"Expected one top-level version field in {manifest_path}"
+        )
+    return rendered
+
+
+def _render_doxygen_config(project_root: Path, version: str) -> str:
+    doxyfile_path = project_root / "Doxyfile"
+    doxyfile = _read_text(doxyfile_path)
+    rendered, replacement_count = re.subn(
+        r'^PROJECT_NUMBER\s*=.*$',
+        f'PROJECT_NUMBER         = "{version}"',
+        doxyfile,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if replacement_count != 1:
+        raise RuntimeError(
+            f"Expected one PROJECT_NUMBER field in {doxyfile_path}"
+        )
+    return rendered
+
+
 def _expected_outputs(project_root: Path) -> Dict[Path, str]:
     library_json = project_root / "library.json"
     library_data = _load_library_json(library_json)
@@ -365,6 +399,10 @@ def _expected_outputs(project_root: Path) -> Dict[Path, str]:
 
     outputs = {
         namespace_dir / "Version.h": _render_version_header(namespace, version),
+        project_root / "idf_component.yml": _render_idf_component_manifest(
+            project_root, version
+        ),
+        project_root / "Doxyfile": _render_doxygen_config(project_root, version),
     }
 
     dependency_header = _render_dependency_versions_header(project_root, namespace)
