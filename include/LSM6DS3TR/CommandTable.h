@@ -328,8 +328,6 @@ static constexpr uint8_t TIMESTAMP_RESET_VALUE = 0xAA;
 
 // Reset / boot timing
 static constexpr uint32_t BOOT_TIME_MS = 15;
-static constexpr uint32_t SW_RESET_TIMEOUT_MS = 10;
-static constexpr uint16_t SW_RESET_MAX_POLLS = 255;
 
 }  // namespace cmd
 }  // namespace LSM6DS3TR
