@@ -6,88 +6,28 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+ARDUINO_MAIN = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
 IDF_MAIN_DIR = ROOT / "examples" / "idf" / "basic" / "main"
 
-MANDATORY_COMMANDS = [
+COMMANDS = [
     "help",
     "version",
-    "ver",
-    "scan",
-    "begin",
-    "init",
-    "drv",
-    "health",
-    "drv1",
-    "cfg",
-    "settings",
-    "refresh",
-    "job",
-    "verbose",
-    "read",
-    "raw",
-    "accel",
-    "gyro",
-    "temp",
     "status",
-    "tsread",
-    "steps",
-    "fifo",
-    "fifo_read",
-    "stream",
-    "odrxl",
-    "odrg",
-    "fsxl",
-    "fsg",
-    "apm",
-    "gpm",
-    "gsleep",
+    "bind",
+    "unbind",
+    "probe",
+    "configure",
+    "sample",
     "reset",
     "boot",
-    "alpf2",
-    "aslope",
-    "a6d",
-    "glpf1",
-    "ghpf",
-    "ghpfmode",
-    "ts",
-    "tshr",
-    "tsreset",
-    "pedo",
-    "sigmot",
-    "tilt",
-    "wtilt",
-    "stepreset",
-    "ofswt",
-    "offset",
-    "fifo_mode",
-    "fifo_odr",
-    "fifo_xl",
-    "fifo_g",
-    "fifo_th",
-    "fifo_temp",
-    "fifo_step",
-    "fifo_stop",
-    "fifo_high",
-    "cal",
+    "recover",
+    "reconcile",
+    "powerdown",
+    "selftest",
     "calxl",
     "calg",
-    "biasxl",
-    "biasg",
-    "biasreset",
-    "probe",
-    "recover",
-    "whoami",
-    "id",
-    "wusrc",
-    "tapsrc",
-    "6dsrc",
-    "funcsrc1",
-    "funcsrc2",
-    "wtstatus",
-    "shub",
-    "selftest",
-    "stress",
-    "stress_mix",
+    "purge",
+    "cancel",
     "rreg",
     "wreg",
     "dump",
@@ -98,21 +38,21 @@ REQUIRED_IDF_TOKENS = [
     '#include "driver/i2c_master.h"',
     "i2c_new_master_bus",
     "i2c_master_bus_add_device",
-    "i2c_master_probe",
     "i2c_master_transmit",
     "i2c_master_transmit_receive",
     "esp_timer_get_time",
     "vTaskDelay",
     "getchar()",
+    "O_NONBLOCK",
+    "clearerr(stdin)",
     "char input[",
-    "cachedConfigDirty",
-    "parseU32Range",
-    "parseOdrToken",
-    "parseFifoModeToken",
-    "parseFifoDecimationToken",
-    "parseFloat",
-    "FIFO_READ_MAX",
-    "STRESS_COUNT_MAX",
+    "OperationTiming",
+    "startConfigure",
+    "startSample",
+    "imu.poll(now, 1)",
+    "takeResult",
+    "cancelActiveJob",
+    "SensorAddress::SA0_GND",
 ]
 
 FORBIDDEN_PATTERNS = [
@@ -127,6 +67,9 @@ FORBIDDEN_PATTERNS = [
     r"driver/i2c\.h",
     r"i2c_cmd_link",
     r"i2c_driver_install",
+    r"requestMeasurement",
+    r"cachedConfigDirty",
+    r"runSelfTest",
 ]
 
 
@@ -141,30 +84,35 @@ def read(path: pathlib.Path, label: str) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def command_set(text: str) -> set[str]:
+    return {command for command in COMMANDS if re.search(rf'"{re.escape(command)}"', text)}
+
+
 def main() -> int:
     main_text = read(IDF_MAIN_DIR / "main.cpp", "native ESP-IDF main")
     cmake_text = read(IDF_MAIN_DIR / "CMakeLists.txt", "ESP-IDF main CMake")
+    arduino_text = read(ARDUINO_MAIN, "Arduino owner-safe example")
     combined = main_text + "\n" + cmake_text
 
     for token in REQUIRED_IDF_TOKENS:
-      if token not in combined:
-        fail(f"required native ESP-IDF token missing: {token}")
-
+        if token not in combined:
+            fail(f"required native ESP-IDF token missing: {token}")
     for component in ("LSM6DS3TR", "esp_driver_i2c", "esp_timer", "freertos"):
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"IDF CMake missing required component '{component}'")
-
     for pattern in FORBIDDEN_PATTERNS:
         if re.search(pattern, combined):
             fail(f"forbidden Arduino/legacy token present: {pattern}")
-
     for stale in ("ArduinoCompat.cpp", "Arduino.h", "Wire.h"):
         if (IDF_MAIN_DIR / stale).exists():
             fail(f"stale compatibility file remains: {stale}")
 
-    for command in MANDATORY_COMMANDS:
-        if re.search(rf'"{re.escape(command)}"', main_text) is None:
-            fail(f"native CLI missing command '{command}'")
+    idf_commands = command_set(main_text)
+    arduino_commands = command_set(arduino_text)
+    if idf_commands != set(COMMANDS):
+        fail(f"native CLI command set incomplete: {sorted(set(COMMANDS) - idf_commands)}")
+    if arduino_commands != idf_commands:
+        fail("Arduino and ESP-IDF owner-safe command sets differ")
 
     print("IDF example contract PASSED")
     return 0

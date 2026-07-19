@@ -127,31 +127,10 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
 /**
  * @brief Initialize Wire with default pins and frequency.
  */
-inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
-#if defined(ARDUINO_ARCH_ESP32)
-  // Toggle SCL to release any stuck slave
-  pinMode(scl, OUTPUT);
-  pinMode(sda, INPUT_PULLUP);
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(scl, LOW);
-    delayMicroseconds(5);
-    digitalWrite(scl, HIGH);
-    delayMicroseconds(5);
-  }
-  // Generate STOP condition
-  pinMode(sda, OUTPUT);
-  digitalWrite(sda, LOW);
-  delayMicroseconds(5);
-  digitalWrite(scl, HIGH);
-  delayMicroseconds(5);
-  digitalWrite(sda, HIGH);
-  delayMicroseconds(5);
-#endif
-
+inline void initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
   Wire.begin(sda, scl);
   Wire.setClock(freq);
   Wire.setTimeOut(timeoutMs);
-  return true;
 }
 
 }  // namespace transport

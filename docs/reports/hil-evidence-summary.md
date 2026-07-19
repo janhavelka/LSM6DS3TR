@@ -1,5 +1,11 @@
 # HIL Evidence Summary
 
+> **Version scope:** This retained evidence was produced with the version 1.x
+> API and one Arduino fixture. It remains useful chip/fixture history, but it
+> does not validate the version 2 owner-scheduled lifecycle, cancellation,
+> result identity, configuration provenance, or fault-injection contracts.
+> Version 2 requires new HIL before field acceptance.
+
 This file is the compact retained evidence after removing generated prompt files,
 raw serial transcripts, JSON result dumps, Markdown result tables, stdout/stderr
 captures, and PID files. The deleted files were runner artifacts, not source
@@ -27,7 +33,7 @@ inputs needed to build or test the library.
 | 2026-06-24 | 30 min quiet soak | 2095 PASS, 0 FAIL, 0 UNKNOWN | 18 prompt recoveries remained visible in timing/notes; stress payloads reported `errors=0`, `fail=0`, `health_fail=0`, `state=READY`. |
 | 2026-06-24 | 10 min bounded quiet soak | 1102 PASS, 0 FAIL, 0 UNKNOWN | Final release HIL run. Seven prompt recoveries were noted, bounded to about 11 s for simple commands and 36 s for one `stress_mix`; no driver health failures were observed. |
 
-## Culprit And Fix From Intensive Soak
+## Historical Version 1 Culprit And Fix
 
 The failed 20 h run was caused by host serial/CLI prompt framing, not by a
 driver or sensor failure. Evidence:
@@ -38,7 +44,7 @@ driver or sensor failure. Evidence:
 - quiet stress output removed large progress/summary streams;
 - bounded HIL reruns completed with 0 FAIL and 0 UNKNOWN.
 
-Implemented mitigation:
+The version 1 implementation used these mitigations:
 
 - Arduino CLI supports `stress [N] [quiet]` and `stress_mix [N] [quiet]`,
   emitting single-line `RESULT ...` records.
@@ -50,11 +56,12 @@ Implemented mitigation:
 
 ## Final Non-HIL Verification
 
-Before cleanup/tagging, these checks were passing:
+Before the version 1 cleanup/tag, these checks passed at that revision:
 
 - `python tools/check_cli_contract.py`
 - `python tools/check_idf_example_contract.py`
-- `python tools/hil_smoke.py --dry-run --parser-self-test --suite soak --stress-count 500`
+- the then-current `hil_smoke.py` parser self-test and dry-run for its v1 soak
+  suite (the incompatible runner is intentionally not retained in version 2)
 - `pio test -e native` - 113/113 test cases passed
 - `pio run -e esp32s3dev`
 - `pio run -e esp32s2dev`

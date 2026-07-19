@@ -1,59 +1,75 @@
 # LSM6DS3TR TunnelMonitor Fit Report
 
-## Steady-Path APIs
+## Library Mechanics
 
-- Poll-chunked sample acquisition: `requestMeasurement()`, `poll(nowMs, 1)`,
-  `pollBusy()`, `measurementReady()`, `getRawMeasurement()`, and
-  `lastPollStatus()`.
-- Raw integer reads: `readAccelRaw()`, `readGyroRaw()`, `readTemperatureRaw()`, `readAllRaw()`.
-- Cached sample access: `getRawMeasurement()` after a completed request.
-- Local conversion helpers: `convertAccel()`, `convertGyro()`, `convertTemperature()`.
-- Local software-bias helpers: `setAccelBias()`, `accelBias()`, `setGyroBias()`,
-  `gyroBias()`, `correctAccel()`, `correctGyro()`.
+Version 2 supplies the mechanics required by an external single I2C owner:
 
-## Convenience Or Diagnostic APIs
+- zero-I2C `bind()` and `unbind()`;
+- staged probe, configure, sample, reset, boot, recover, reconcile,
+  power-down, self-test, calibration, and FIFO-purge jobs;
+- caller-provided absolute deadline and 64-bit monotonic time;
+- caller-selected transport budget per `poll()`; one is the normal owner
+  budget;
+- a hard total callback ceiling for every accepted operation;
+- bus-silent cancellation;
+- nonzero operation tokens and exactly-once terminal results;
+- valid/fresh masks, sequence, configuration generation, read uptime, and full
+  scale in each atomic raw sample;
+- explicit verified, settling, and unknown configuration state;
+- partial/ambiguous hardware-effect reporting;
+- passive diagnostics without driver-owned offline, retry, recovery, or health
+  admission policy;
+- pure fixed-unit conversion that does not consult mutable driver state.
 
-- `tick()` is compatibility sugar for `poll(nowMs, 1)`.
-- `getMeasurement()` is a convenience conversion wrapper over the cached raw sample.
-- `captureAccelBias()` and `captureGyroBias()` are diagnostic calibration helpers.
-  They are bounded by sample count, data-ready deadlines, and a per-sample poll cap,
-  but they may still issue many blocking I2C transactions in one call.
-- `startAccelBiasCapture()` and `startGyroBiasCapture()` are chunked diagnostic
-  calibration jobs; they are budgeted but still not steady firmware sample paths.
-- `probe()`, `recover()`, `softReset()`, `boot()`, synchronous
-  `refreshCachedConfig()`, direct register access, FIFO configuration, feature
-  setters, and synchronous cache refresh are diagnostic or configuration APIs, not
-  steady polling APIs.
-- `startSoftReset()`, `startBoot()`, `startRefreshCachedConfig()`, and
-  `startFifoDrain(maxWords)` are chunked diagnostic/configuration jobs.
+The application still owns bus locking, pins, task scheduling, queue deadlines,
+transport timeout, retries, bus recovery, absence/backoff, and health policy.
 
-## Instruction Budget Decisions
+## Supported First-Scope Shape
 
-- One register read, register write, or contiguous burst read is one instruction.
-- Delay gates and CPU decode/conversion math consume zero instructions.
-- With `maxInstructions = 1`, status-gated sample acquisition takes one poll for
-  `STATUS_REG` and a later poll for the raw output burst.
-- With `maxInstructions >= 2`, a ready status-gated sample may complete status
-  plus raw burst in one `poll()` call.
-- A not-ready status read stops the current `poll()` call even when budget remains,
-  so repeated readiness polling is visible across calls.
-- FIFO drain reads FIFO status once, then drains each FIFO word as a separate
-  instruction.
+The general library supports a polling snapshot with accelerometer, gyro, and
+temperature validity represented independently; a ready-checked request that
+contains temperature always requires TDA. Production profiles require
+FIFO and interrupts disabled. The destructive FIFO purge is maintenance only;
+it is not waveform acquisition.
 
-## Status Taxonomy Decisions
+This shape can be called from TunnelMonitor's `I2cTask` private adapter without
+adding a second task or exposing library types through public firmware
+contracts. Each normal owner poll should grant one transport callback and
+retain the exact application request identity together with the library token.
 
-- WHO_AM_I transport failures from `begin()` and `probe()` preserve the transport
-  status (`I2C_TIMEOUT`, `I2C_BUS`, `I2C_NACK_ADDR`, `I2C_NACK_DATA`, or
-  `I2C_ERROR`) and `detail`. Only a successful read with the wrong ID returns
-  `CHIP_ID_MISMATCH`.
-- `Err::OFFLINE` is appended for diagnostics, but normal public I2C precondition
-  failures keep the existing family choice and return `BUSY` with
-  "Driver is offline; call recover()". This preserves the synced offline/recovery
-  contract while making the offline state explicit through `driverState()` and
-  `SettingsSnapshot::state`.
-- Cache-affecting setters commit local mirrors only after successful writes. Partial
-  multi-register failures and failed direct writes to managed registers set
-  `cachedConfigDirty()`, signalling that the application should refresh or recover
-  before trusting cached configuration mirrors.
-- `refreshCachedConfig()` stages all decoded register values locally, validates them,
-  and commits only after the full refresh succeeds.
+## Product Integration Is Not Approved
+
+The TunnelMonitor-node checkout inspected at
+`0897f12c1a1369367747d1063936906005391580` has no authoritative LSM6DS3TR-C
+product contract. It does not freeze:
+
+- selected part/profile and required/optional role;
+- SA0 strap/address;
+- polling versus interrupt operation or an interrupt GPIO;
+- mounting transform and rotation convention;
+- ODR, ranges, filters, power modes, or accepted vector skew;
+- calibration storage/validity policy;
+- snapshot, tilt, event, statistics, or waveform meaning;
+- sample fields, units, schema/profile version, status, or health mapping.
+
+Current fixed product contracts also have no motion `DeviceId` or
+`I2cOperation`, and the configured health and measurement-source capacities
+are already full. These are TunnelMonitor product changes, not library changes.
+No application contract was invented or modified during the library work.
+
+## Integration Rules
+
+- Only `I2cTask` may call the library or transport.
+- Start calls must remain zero-I2C; multi-step work advances through owner
+  polls.
+- Queue expiry must cancel the library job and consume its matching terminal
+  result; it must not merely stop polling.
+- Firmware result identity must retain its existing request ID, submission
+  token, device, and operation and correlate those with the library token.
+- Raw register access must not enter the production adapter.
+- TunnelMonitor maps precise library outcomes into its own stable error,
+  health, and copied status contracts.
+- A high-rate FIFO stream must not use the ordinary scalar `I2cResult` queue.
+
+See [TUNNELMONITOR_NODE_SUITABILITY_AUDIT.md](TUNNELMONITOR_NODE_SUITABILITY_AUDIT.md)
+for the complete finding disposition and remaining product/HIL gates.

@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-19
+
+### Added
+
+- Zero-I2C `bind()`/`unbind()` lifecycle with an application-owned
+  `DriverConfig` transport binding.
+- One fixed-memory operation model for probe, configuration, sampling, reset,
+  boot, recovery, reconciliation, power-down, self-test, calibration, and
+  destructive FIFO purge.
+- Absolute 64-bit operation deadlines, caller-selected transport budgets,
+  hard total callback ceilings, bus-silent cancellation, nonzero operation
+  tokens, and exactly-once terminal result delivery.
+- Atomic raw sample results with validity/freshness masks, sequence,
+  configuration generation, read uptime, and immutable full-scale provenance.
+- Explicit configuration states, verified profile readback, settling gates,
+  mismatch diagnostics, and ambiguous/partial hardware-effect reporting.
+- Allocation-free fixed-unit conversion, sensitivity, timing, validation, and
+  calibration helpers independent of mutable driver state.
+- Real ESP-IDF 5.4.0 CI builds for ESP32-S2 and ESP32-S3.
+
+### Changed
+
+- Replaced the managed synchronous/offline driver with an externally scheduled
+  owner-safe driver. Applications own bus locking, retries, health, backoff,
+  and recovery policy.
+- Production configuration is one replayable `DeviceProfile`. Version 2
+  supports polling snapshots and requires FIFO plus interrupts disabled.
+- Reset, boot, self-test, and calibration are staged operations with visible
+  waits and restoration outcomes.
+- Self-test and calibration enforce three-check per-sample readiness limits and
+  zero-I2C sampling cadence; self-test reserves its full restoration budget
+  and explicitly wakes then restores a configured sleeping gyro.
+- Calibration requires an explicit expected acceleration vector instead of
+  assuming a Z-up product installation.
+- Diagnostic raw register access is one-transaction, excluded during active
+  jobs, and invalidates configuration provenance on accepted writes.
+- Arduino and native ESP-IDF examples now demonstrate the same compact
+  token/start/poll/cancel/take command surface with fixed input buffers.
+- PlatformIO Core, pioarduino platform archive, and CI ESP-IDF version are
+  pinned. The IDF component supports the ESP-IDF 5.4 line.
+
+### Fixed
+
+- Prevented stale results from being attributed to a later request through
+  token correlation and exactly-once consumption.
+- Prevented cached raw samples from being converted with a newer full-scale
+  setting by carrying scale provenance in each sample.
+- Prevented interpreted measurements while configuration is unknown or sensor
+  output is settling.
+- Enforced BDU for managed multi-byte samples and independent validity of
+  acceleration, angular-rate, and temperature fields, including TDA readiness
+  for every request containing temperature.
+- Enforced the 208 Hz low-power/normal ceiling for both sensors and made
+  power-down available from any bound idle state while proving only exact zero
+  accelerometer/gyro ODR registers and leaving configuration unconfigured.
+- Partitioned total callback limits so sampling reserves its burst and
+  reset/boot/recovery reserve a complete profile replay/readback budget.
+- Made configure validate WHO_AM_I before its first write and made positive
+  chip-ID mismatches from probe, configure, reconcile, and recovery invalidate
+  prior verified provenance. Reconcile checks identity before managed readback.
+- Added the required bus-silent boot/reset inaccessible interval and verified
+  profile replay/readback.
+- Rejected non-finite or invalid calibration inputs and removed the public
+  `DISABLED`, `LOW`, and `HIGH` macro collisions.
+- Rejected gyroscope bias calibration while the verified gyro is sleeping,
+  without performing I2C.
+- Corrected the sensor-sync register addresses to `TIME_FRAME=0x04` and
+  `RES_RATIO=0x05`. Sensor-sync and DRDY-pulse controls are now managed and
+  verified as zero; diagnostic writes invalidate provenance for reconciliation.
+- Synchronized `library.json`, `Version.h`, `idf_component.yml`, and Doxygen
+  project versions from one source.
+
+### Removed
+
+- Synchronous `begin()`/`end()`/`recover()`, `tick()`, synchronous setters and
+  reads, cached measurement getters, driver-owned `OFFLINE` admission policy,
+  and blocking self-test/calibration APIs.
+- The incomplete FIFO acquisition/configuration surface and raw interrupt/event
+  configuration claims. FIFO purge remains explicitly destructive maintenance.
+- Stale broad CLI helpers and version 1 command-contract requirements.
+- The version 1-only HIL runner; its retained evidence is historical and a new
+  version 2 physical test campaign is required.
+
+### Documentation
+
+- Re-audited every TunnelMonitor suitability finding against the version 2
+  API and the authoritative local TunnelMonitor-node ownership/capacity
+  contracts.
+- Documented operation classes, transaction/deadline behavior, concurrency,
+  ISR restrictions, cancellation, ambiguous effects, provenance, migration,
+  and remaining product/HIL decisions.
+
 ## [1.2.0] - 2026-06-25
 
 ### Added
@@ -129,10 +221,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforced documented accelerometer and gyroscope ODR versus power-mode constraints
 - Enforced documented dependencies for timestamp, embedded functions, FIFO use, and async combined measurements
 - Fixed `recover()` after a failed `begin()` by copying stored config before retrying initialization
-- Fixed `REG_SENSOR_SYNC_TIME_FRAME` register address to `0x02`
+- Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/LSM6DS3TR/releases/tag/v1.0.0

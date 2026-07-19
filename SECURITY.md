@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 2.0.x   | :white_check_mark: |
+| 1.x     | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -25,10 +26,11 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 This library is designed for embedded systems. Security considerations include:
 - No dynamic memory allocation in steady state (reduces attack surface)
 - No network code (networking is out of scope for this library)
-- No persistent storage by default (NVS side effects are opt-in)
+- No persistent storage in the library core
 
 ## Security Best Practices for Users
 
-- Always validate external inputs before passing to `Config`
+- Validate external inputs before constructing `DriverConfig`, `DeviceProfile`,
+  or operation request values
 - Use hardware watchdogs in production deployments
 - Keep dependencies updated
