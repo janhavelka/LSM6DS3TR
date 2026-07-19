@@ -1455,6 +1455,37 @@ void test_self_test_is_staged_bounded_and_restores_configuration() {
                           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
 }
 
+void test_self_test_wakes_and_restores_a_sleeping_gyro_profile() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  DeviceProfile profile = makeProfile();
+  profile.gyroSleepEnabled = true;
+  (void)configure(driver, bus, profile);
+  bus.clearTrace();
+
+  OperationToken token;
+  TEST_ASSERT_TRUE(
+      driver.startSelfTest(SelfTestRequest{1}, timing(bus), token).inProgress());
+  const PollResult terminal = runToTerminal(driver, bus, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
+                          static_cast<uint8_t>(terminal.state));
+  const OperationResult result = take(driver, token);
+  TEST_ASSERT_TRUE(result.selfTest.accelPass);
+  TEST_ASSERT_TRUE(result.selfTest.gyroPass);
+
+  const size_t wakeWrite =
+      findWrite(bus, cmd::REG_CTRL4_C, cmd::MASK_SLEEP_G, 0U);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, wakeWrite);
+  const size_t restoreWrite = findWrite(bus, cmd::REG_CTRL4_C,
+                                        cmd::MASK_SLEEP_G,
+                                        cmd::MASK_SLEEP_G, wakeWrite + 1U);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, restoreWrite);
+  DeviceProfile verified;
+  TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+  TEST_ASSERT_TRUE(verified.gyroSleepEnabled);
+}
+
 void test_self_test_failures_are_bounded_at_every_transfer_stage() {
   FakeBus referenceBus;
   LSM6DS3TR::LSM6DS3TR referenceDriver;
@@ -1747,6 +1778,26 @@ void test_gyro_calibration_is_staged_fixed_count_and_owner_timed() {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.75f, result.calibration.bias.x);
   TEST_ASSERT_FLOAT_WITHIN(0.01f, -4.375f, result.calibration.bias.y);
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, result.calibration.bias.z);
+}
+
+void test_gyro_calibration_rejects_sleeping_sensor_without_i2c() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  DeviceProfile profile = makeProfile();
+  profile.gyroSleepEnabled = true;
+  (void)configure(driver, bus, profile);
+  bus.clearTrace();
+
+  CalibrationRequest request;
+  request.kind = CalibrationKind::GYROSCOPE_BIAS;
+  request.samples = 1;
+  OperationToken token{77};
+  const Status status = driver.startCalibration(request, timing(bus), token);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(status.code));
+  TEST_ASSERT_FALSE(token.valid());
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.transferCalls);
 }
 
 void test_accel_calibration_uses_explicit_fixture_vector_and_rejects_orientation() {
@@ -2163,6 +2214,7 @@ int main() {
   RUN_TEST(test_reset_boot_and_recover_completion_poll_boundaries_are_exact);
   RUN_TEST(test_reset_and_boot_wait_deadlines_saturate_at_uint64_max);
   RUN_TEST(test_self_test_is_staged_bounded_and_restores_configuration);
+  RUN_TEST(test_self_test_wakes_and_restores_a_sleeping_gyro_profile);
   RUN_TEST(test_self_test_failures_are_bounded_at_every_transfer_stage);
   RUN_TEST(test_self_test_preserves_primary_and_restoration_failures);
   RUN_TEST(test_self_test_restoration_deadline_preserves_primary_failure);
@@ -2172,6 +2224,7 @@ int main() {
   RUN_TEST(test_self_test_three_not_ready_checks_restore_known_configuration);
   RUN_TEST(test_self_test_invalid_request_and_timeout_are_zero_retry);
   RUN_TEST(test_gyro_calibration_is_staged_fixed_count_and_owner_timed);
+  RUN_TEST(test_gyro_calibration_rejects_sleeping_sensor_without_i2c);
   RUN_TEST(test_accel_calibration_uses_explicit_fixture_vector_and_rejects_orientation);
   RUN_TEST(test_accel_calibration_int16_span_cannot_overflow_peak_to_peak);
   RUN_TEST(test_calibration_not_ready_retries_and_post_sample_waits_are_bus_silent);

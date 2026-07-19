@@ -277,7 +277,7 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
   if (samples == 0U || samples > 100U) return 0U;
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
-         68U;
+         69U;
 }
 
 uint32_t maximumCalibrationTransactions(uint16_t samples) {
@@ -673,8 +673,10 @@ Status LSM6DS3TR::startCalibration(const CalibrationRequest& request,
   if ((request.kind == CalibrationKind::ACCELEROMETER_BIAS &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
       (request.kind == CalibrationKind::GYROSCOPE_BIAS &&
-       _verifiedProfile.gyroOdr == Odr::POWER_DOWN)) {
-    return Status::Error(Err::INVALID_PARAM, "Calibration sensor is powered down");
+       (_verifiedProfile.gyroOdr == Odr::POWER_DOWN ||
+        _verifiedProfile.gyroSleepEnabled))) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Calibration sensor is powered down or sleeping");
   }
   const Status status = _start(JobKind::CALIBRATION, timing, token);
   if (status.inProgress()) {
@@ -1277,8 +1279,18 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 11U) {
+    if (_step == 0U) {
+      const uint8_t awakeCtrl4 = static_cast<uint8_t>(
+          buildCtrl4(_desiredProfile) & ~cmd::MASK_SLEEP_G);
+      const Status status =
+          _writeByte(cmd::REG_CTRL4_C, awakeCtrl4, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      _step = 1;
+      return inProgressStatus();
+    }
     const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
     if (!status.ok()) return routeFailureToRestore(status);
+    _step = 0;
     ++_substep;
     return inProgressStatus();
   }
