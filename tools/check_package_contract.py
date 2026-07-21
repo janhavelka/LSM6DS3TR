@@ -15,6 +15,7 @@ ROOT_FILES = (
     "CHANGELOG.md",
     "LICENSE",
     "SECURITY.md",
+    "docs/IDF_PORT.md",
     "CMakeLists.txt",
     "idf_component.yml",
 )

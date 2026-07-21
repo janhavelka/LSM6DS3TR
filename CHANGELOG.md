@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Completed Doxygen contracts for the owner-safe public types, helpers,
+  operations, result provenance, and diagnostic boundary.
+- Made undocumented public API, missing parameter documentation, and Doxygen
+  documentation errors fail both clean local generation and CI.
+- Consolidated ESP-IDF guidance into `docs/IDF_PORT.md`, removed the duplicate
+  implementation note, included the maintained guide in package exports, and
+  clarified documentation validation and ownership language across the README
+  and contributor guidance.
+- Added a documentation map that distinguishes maintained contracts from
+  source extracts, generated pages, and historical hardware evidence.
+
 ## [2.0.0] - 2026-07-19
 
 ### Added

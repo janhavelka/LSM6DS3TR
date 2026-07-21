@@ -21,3 +21,8 @@ idf.py build
 CI builds both `esp32s2` and `esp32s3` using exactly ESP-IDF 5.4.0.
 The example pins GPIO 8/9 and address `0x6A` only as application-owned fixture
 defaults; the library owns none of those board choices.
+
+Each transport callback makes one timeout-bounded physical attempt and maps
+the native result to the library `Status`; retry and bus-recovery policy remain
+with the application owner. See the [ESP-IDF port guide](../../../docs/IDF_PORT.md)
+for the complete component and ownership contract.

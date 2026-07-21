@@ -495,7 +495,7 @@ Local closeout results for the final version 2 working tree:
 | ESP32-S2 Arduino build | PASS, RAM 37,120 B, flash 347,537 B |
 | PlatformIO package creation | PASS, `LSM6DS3TR-2.0.0.tar.gz` |
 | Package export contract | PASS, exact 20-file whitelist |
-| Doxygen | PASS, zero warnings |
+| Strict Doxygen API build | PASS; undocumented symbols, missing parameter docs, and warnings are fatal |
 | `git diff --check` | PASS, no whitespace errors |
 | TunnelMonitor native contract suite | PASS, 1050/1050 at tree-equivalent `b708f51` |
 | Local ESP-IDF compile | NOT RUN, `idf.py` unavailable |

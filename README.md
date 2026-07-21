@@ -57,7 +57,8 @@ ESP-IDF 5.4 line; CI compiles the native example with exactly ESP-IDF 5.4.0 for
 ESP32-S2 and ESP32-S3.
 
 Public headers are under `include/LSM6DS3TR/`. Core code does not include
-Arduino or ESP-IDF headers.
+Arduino or ESP-IDF headers. See the [native ESP-IDF port guide](docs/IDF_PORT.md)
+for the component and transport-owner contract.
 
 ## Owner-Safe Quick Start
 
@@ -140,6 +141,15 @@ The terminal states are `SUCCEEDED`, `FAILED`, `CANCELLED`, `TIMED_OUT`, and
 `INDETERMINATE`. `hardwareStateMayHaveChanged` distinguishes failures that
 occurred after hardware could have been affected. A partially applied or
 ambiguous configuration is never presented as verified.
+
+Starter return values describe admission: an accepted operation returns
+`IN_PROGRESS`; validation, binding, exclusivity, or pending-result failures
+are returned immediately without I2C. `PollResult::status` describes current
+progress and is terminal only when its state is terminal. The return value of
+`takeResult()` describes result retrieval; after successful retrieval, inspect
+the delivered `OperationResult::state` and `OperationResult::status` for the
+operation outcome. `Status::msg` always points to static storage, while
+`Status::detail` is error-specific diagnostic context.
 
 Do not discard an accepted request merely because an application-side queue
 deadline expired. Call `cancelActiveJob()`, then take its matching cancelled
@@ -345,12 +355,11 @@ orientation. Bias values are finite-checked. The caller decides mounting
 transforms and durable calibration policy.
 
 `startFifoPurge()` first verifies the main register bank, live device identity,
-and the managed IF_INC/BDU prerequisites, then
-destroys unread FIFO data. Its result reports initial
-unread count/pattern, discarded words, final unread count, overrun, and
-truncation. It performs at most `maxWords + 5` callbacks, retries none, and
-completes only after the final FIFO status read or a terminal failure. It is
-not a FIFO acquisition or waveform API.
+and the managed IF_INC/BDU prerequisites, then destroys unread FIFO data. Its
+result reports initial unread count/pattern, discarded words, final unread
+count, overrun, and truncation. It performs at most `maxWords + 5` callbacks,
+retries none, and completes only after the final FIFO status read or a terminal
+failure. It is not a FIFO acquisition or waveform API.
 
 ## Advanced Diagnostics
 
@@ -406,6 +415,7 @@ python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python tools/check_chip_docs_coverage.py
+python tools/build_docs.py
 pio test -e native
 pio run -e esp32s3dev
 pio run -e esp32s2dev
@@ -416,6 +426,22 @@ python tools/check_package_contract.py
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.0. Hardware-in-loop validation is separate from host and compile
 evidence.
+
+### API Documentation
+
+From a repository checkout, run `python tools/build_docs.py` to remove any
+stale generated pages and build the local reference under
+`docs/doxygen/html/`. The generated tree is intentionally ignored; source
+comments, this README, and the checked-in guides remain authoritative. The
+<a href="docs/README.md">documentation map</a> distinguishes maintained
+contracts from source extracts and historical evidence.
+
+Doxygen is strict for the supported owner-safe API: undocumented public
+symbols, missing parameter documentation, broken documentation commands, and
+warnings fail generation and CI. `CommandTable.h` is intentionally omitted
+from the generated reference because it is a low-level register-fact catalog,
+not a typed production feature contract. Use it only with the controlled
+diagnostic APIs and the cited vendor documentation.
 
 The retained HIL summary under
 <a href="docs/reports/hil-evidence-summary.md">docs/reports/hil-evidence-summary.md</a>

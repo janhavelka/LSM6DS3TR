@@ -11,30 +11,37 @@
 
 #include <stdint.h>
 
+/// @brief Semantic version string override used by generated version constants.
 #ifndef LSM6DS3TR_VERSION_STRING
 #define LSM6DS3TR_VERSION_STRING "2.0.0"
 #endif
 
+/// @brief Build-date override; defaults to the compiler date.
 #ifndef LSM6DS3TR_BUILD_DATE
 #define LSM6DS3TR_BUILD_DATE __DATE__
 #endif
 
+/// @brief Build-time override; defaults to the compiler time.
 #ifndef LSM6DS3TR_BUILD_TIME
 #define LSM6DS3TR_BUILD_TIME __TIME__
 #endif
 
+/// @brief Combined build timestamp override.
 #ifndef LSM6DS3TR_BUILD_TIMESTAMP
 #define LSM6DS3TR_BUILD_TIMESTAMP LSM6DS3TR_BUILD_DATE " " LSM6DS3TR_BUILD_TIME
 #endif
 
+/// @brief Source revision override injected by supported build tooling.
 #ifndef LSM6DS3TR_GIT_COMMIT
 #define LSM6DS3TR_GIT_COMMIT "unknown"
 #endif
 
+/// @brief Source-tree state override injected by supported build tooling.
 #ifndef LSM6DS3TR_GIT_STATUS
 #define LSM6DS3TR_GIT_STATUS "unknown"
 #endif
 
+/// @brief Complete version/build identity override.
 #ifndef LSM6DS3TR_VERSION_FULL
 #define LSM6DS3TR_VERSION_FULL LSM6DS3TR_VERSION_STRING " (" LSM6DS3TR_GIT_COMMIT ", " LSM6DS3TR_BUILD_TIMESTAMP ", " LSM6DS3TR_GIT_STATUS ")"
 #endif

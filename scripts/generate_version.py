@@ -179,30 +179,37 @@ def _render_version_header(namespace: str, version: str) -> str:
 
 #include <stdint.h>
 
+/// @brief Semantic version string override used by generated version constants.
 #ifndef {prefix}_VERSION_STRING
 #define {prefix}_VERSION_STRING "{version}"
 #endif
 
+/// @brief Build-date override; defaults to the compiler date.
 #ifndef {prefix}_BUILD_DATE
 #define {prefix}_BUILD_DATE __DATE__
 #endif
 
+/// @brief Build-time override; defaults to the compiler time.
 #ifndef {prefix}_BUILD_TIME
 #define {prefix}_BUILD_TIME __TIME__
 #endif
 
+/// @brief Combined build timestamp override.
 #ifndef {prefix}_BUILD_TIMESTAMP
 #define {prefix}_BUILD_TIMESTAMP {prefix}_BUILD_DATE " " {prefix}_BUILD_TIME
 #endif
 
+/// @brief Source revision override injected by supported build tooling.
 #ifndef {prefix}_GIT_COMMIT
 #define {prefix}_GIT_COMMIT "unknown"
 #endif
 
+/// @brief Source-tree state override injected by supported build tooling.
 #ifndef {prefix}_GIT_STATUS
 #define {prefix}_GIT_STATUS "unknown"
 #endif
 
+/// @brief Complete version/build identity override.
 #ifndef {prefix}_VERSION_FULL
 #define {prefix}_VERSION_FULL {prefix}_VERSION_STRING " (" {prefix}_GIT_COMMIT ", " {prefix}_BUILD_TIMESTAMP ", " {prefix}_GIT_STATUS ")"
 #endif

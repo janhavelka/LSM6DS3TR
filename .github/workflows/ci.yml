@@ -85,6 +85,11 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio==6.1.18
 
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes doxygen
+
       - name: Check generated version metadata
         run: python scripts/generate_version.py check
 
@@ -96,6 +101,9 @@ jobs:
 
       - name: Enforce chip documentation coverage
         run: python tools/check_chip_docs_coverage.py
+
+      - name: Build strict API documentation
+        run: python tools/build_docs.py
 
       - name: Validate library package
         run: |

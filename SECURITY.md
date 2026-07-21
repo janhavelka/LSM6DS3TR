@@ -24,6 +24,7 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 ## Scope
 
 This library is designed for embedded systems. Security considerations include:
+
 - No dynamic memory allocation in steady state (reduces attack surface)
 - No network code (networking is out of scope for this library)
 - No persistent storage in the library core
@@ -31,6 +32,9 @@ This library is designed for embedded systems. Security considerations include:
 ## Security Best Practices for Users
 
 - Validate external inputs before constructing `DriverConfig`, `DeviceProfile`,
-  or operation request values
-- Use hardware watchdogs in production deployments
-- Keep dependencies updated
+  or operation request values.
+- Serialize all non-const driver calls and keep transport access in one owner.
+- Bound every transport callback with the configured timeout; do not hide
+  retries or ambiguous writes inside callbacks.
+- Use hardware watchdogs in production deployments.
+- Keep dependencies updated.
