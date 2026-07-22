@@ -1,157 +1,60 @@
-/**
- * @file LSM6DS3TR.cpp
- * @brief LSM6DS3TR-C driver implementation.
- */
-
 #include "LSM6DS3TR/LSM6DS3TR.h"
 
 #include <cmath>
-#include <cstring>
+#include <cstdint>
 #include <limits>
 
 namespace LSM6DS3TR {
 namespace {
 
-static constexpr size_t MAX_WRITE_LEN = 16;
-static constexpr size_t MAX_PUBLIC_READ_LEN = 128;
-static constexpr uint32_t RESET_TIMEOUT_MS = 25;
-static constexpr uint32_t BOOT_TIMEOUT_MS = 25;
-static constexpr uint16_t RESET_MAX_POLLS = 255;
-static constexpr uint16_t SAMPLE_READY_MAX_POLLS = 255;
-static constexpr uint16_t CALIBRATION_MAX_POLLS_PER_SAMPLE = 255;
-static constexpr uint16_t SELF_TEST_MAX_SAMPLES = 100;
-static constexpr uint16_t SELF_TEST_READY_MAX_POLLS = 512;
-static constexpr uint16_t SELF_TEST_SETTLE_SAMPLES = 5;
-static constexpr uint32_t SELF_TEST_ACCEL_SETTLE_MS = 100;
-static constexpr uint32_t SELF_TEST_GYRO_SETTLE_MS = 800;
-static constexpr uint32_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 60;
-static constexpr uint32_t SELF_TEST_SETTLE_POLLS_PER_MS = 16;
-static constexpr float SELF_TEST_ACCEL_MIN_MG = 90.0f;
-static constexpr float SELF_TEST_ACCEL_MAX_MG = 1700.0f;
-static constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
-static constexpr float SELF_TEST_GYRO_MAX_DPS = 700.0f;
-static constexpr float SELF_TEST_ACCEL_SENSITIVITY_G_LSB = 0.000061f;
-static constexpr float SELF_TEST_GYRO_SENSITIVITY_DPS_LSB = 0.070f;
+constexpr uint8_t SELF_TEST_DISCARD_SAMPLES = 5;
+constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
+constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 800;
+constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 60;
+constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
+constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
+constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
+constexpr float SELF_TEST_GYRO_MAX_DPS = 700.0f;
+constexpr float MAX_ABS_BIAS = 10000.0f;
 
-class ScopedOfflineI2cAllowance {
-public:
-  explicit ScopedOfflineI2cAllowance(bool& flag, bool allow) : _flag(flag), _old(flag) {
-    _flag = allow;
-  }
-
-  ~ScopedOfflineI2cAllowance() {
-    _flag = _old;
-  }
-
-  ScopedOfflineI2cAllowance(const ScopedOfflineI2cAllowance&) = delete;
-  ScopedOfflineI2cAllowance& operator=(const ScopedOfflineI2cAllowance&) = delete;
-
-private:
-  bool& _flag;
-  bool _old;
-};
-
-static bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
-  return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
+uint32_t saturatingIncrement(uint32_t value) {
+  return value == std::numeric_limits<uint32_t>::max() ? value : value + 1U;
 }
 
-static bool isValidOdrValue(Odr odr) {
-  switch (odr) {
-    case Odr::POWER_DOWN:
-    case Odr::HZ_12_5:
-    case Odr::HZ_26:
-    case Odr::HZ_52:
-    case Odr::HZ_104:
-    case Odr::HZ_208:
-    case Odr::HZ_416:
-    case Odr::HZ_833:
-    case Odr::HZ_1660:
-    case Odr::HZ_3330:
-    case Odr::HZ_6660:
-    case Odr::HZ_1_6:
-      return true;
-    default:
-      return false;
-  }
+uint64_t saturatingIncrement64(uint64_t value) {
+  return value == std::numeric_limits<uint64_t>::max() ? value : value + 1U;
 }
 
-static bool isActiveOdr(Odr odr) {
-  return odr != Odr::POWER_DOWN;
+uint64_t saturatingAdd(uint64_t lhs, uint64_t rhs) {
+  const uint64_t maximum = std::numeric_limits<uint64_t>::max();
+  return rhs > maximum - lhs ? maximum : lhs + rhs;
 }
 
-/// Approximate ODR sample interval in milliseconds (for calibration timeouts).
-static uint32_t odrIntervalMs(Odr odr) {
-  switch (odr) {
-    case Odr::HZ_1_6:  return 625;
-    case Odr::HZ_12_5: return 80;
-    case Odr::HZ_26:   return 39;
-    case Odr::HZ_52:   return 20;
-    case Odr::HZ_104:  return 10;
-    case Odr::HZ_208:  return 5;
-    case Odr::HZ_416:  return 3;
-    case Odr::HZ_833:  return 2;
-    case Odr::HZ_1660: return 1;
-    case Odr::HZ_3330: return 1;
-    case Odr::HZ_6660: return 1;
-    default:           return 0;
-  }
+uint64_t saturatingMultiply(uint64_t lhs, uint64_t rhs) {
+  if (lhs == 0U || rhs == 0U) return 0U;
+  const uint64_t maximum = std::numeric_limits<uint64_t>::max();
+  return lhs > maximum / rhs ? maximum : lhs * rhs;
 }
 
-static bool isAccelOdrSupportedInLowPowerNormal(Odr odr) {
-  switch (odr) {
-    case Odr::POWER_DOWN:
-    case Odr::HZ_1_6:
-    case Odr::HZ_12_5:
-    case Odr::HZ_26:
-    case Odr::HZ_52:
-    case Odr::HZ_104:
-    case Odr::HZ_208:
-      return true;
-    default:
-      return false;
-  }
+bool finiteAxes(const Axes& axes) {
+  return std::isfinite(axes.x) && std::isfinite(axes.y) && std::isfinite(axes.z);
 }
 
-static bool isValidAccelOdr(Odr odr, AccelPowerMode powerMode) {
-  if (!isValidOdrValue(odr)) {
-    return false;
-  }
-
-  if (powerMode == AccelPowerMode::HIGH_PERFORMANCE) {
-    return odr != Odr::HZ_1_6;
-  }
-
-  return isAccelOdrSupportedInLowPowerNormal(odr);
+bool boundedAxes(const Axes& axes, float maximum) {
+  return finiteAxes(axes) && std::fabs(axes.x) <= maximum &&
+         std::fabs(axes.y) <= maximum && std::fabs(axes.z) <= maximum;
 }
 
-static bool isGyroOdrSupportedInLowPowerNormal(Odr odr) {
-  switch (odr) {
-    case Odr::POWER_DOWN:
-    case Odr::HZ_12_5:
-    case Odr::HZ_26:
-    case Odr::HZ_52:
-    case Odr::HZ_104:
-    case Odr::HZ_208:
-      return true;
-    default:
-      return false;
-  }
+float axesMagnitudeSquared(const Axes& axes) {
+  return axes.x * axes.x + axes.y * axes.y + axes.z * axes.z;
 }
 
-static bool isValidGyroOdr(Odr odr, GyroPowerMode powerMode) {
-  if (!isValidOdrValue(odr) || odr == Odr::HZ_1_6) {
-    return false;
-  }
-
-  if (powerMode == GyroPowerMode::HIGH_PERFORMANCE) {
-    return true;
-  }
-
-  return isGyroOdrSupportedInLowPowerNormal(odr);
+bool validOdrValue(Odr odr) {
+  return static_cast<uint8_t>(odr) <= static_cast<uint8_t>(Odr::HZ_1_6);
 }
 
-static bool isValidAccelFs(AccelFs fs) {
-  switch (fs) {
+bool validAccelFs(AccelFs fullScale) {
+  switch (fullScale) {
     case AccelFs::G_2:
     case AccelFs::G_4:
     case AccelFs::G_8:
@@ -162,8 +65,8 @@ static bool isValidAccelFs(AccelFs fs) {
   }
 }
 
-static bool isValidGyroFs(GyroFs fs) {
-  switch (fs) {
+bool validGyroFs(GyroFs fullScale) {
+  switch (fullScale) {
     case GyroFs::DPS_125:
     case GyroFs::DPS_250:
     case GyroFs::DPS_500:
@@ -175,3198 +78,2225 @@ static bool isValidGyroFs(GyroFs fs) {
   }
 }
 
-static bool isValidAccelPowerMode(AccelPowerMode mode) {
-  switch (mode) {
-    case AccelPowerMode::HIGH_PERFORMANCE:
-    case AccelPowerMode::LOW_POWER_NORMAL:
-      return true;
-    default:
-      return false;
-  }
+bool validAccelPower(AccelPowerMode mode) {
+  return mode == AccelPowerMode::HIGH_PERFORMANCE ||
+         mode == AccelPowerMode::LOW_POWER_NORMAL;
 }
 
-static bool isValidGyroPowerMode(GyroPowerMode mode) {
-  switch (mode) {
-    case GyroPowerMode::HIGH_PERFORMANCE:
-    case GyroPowerMode::LOW_POWER_NORMAL:
-      return true;
-    default:
-      return false;
-  }
+bool validGyroPower(GyroPowerMode mode) {
+  return mode == GyroPowerMode::HIGH_PERFORMANCE ||
+         mode == GyroPowerMode::LOW_POWER_NORMAL;
 }
 
-static bool isValidGyroHpfMode(GyroHpfMode mode) {
-  switch (mode) {
-    case GyroHpfMode::HZ_0_0081:
-    case GyroHpfMode::HZ_0_0324:
-    case GyroHpfMode::HZ_2_07:
-    case GyroHpfMode::HZ_16_32:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool isValidAccelOffsetWeight(AccelOffsetWeight weight) {
-  switch (weight) {
-    case AccelOffsetWeight::MG_1:
-    case AccelOffsetWeight::MG_16:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool isValidFifoMode(FifoMode mode) {
-  switch (mode) {
-    case FifoMode::BYPASS:
-    case FifoMode::FIFO:
-    case FifoMode::CONTINUOUS_TO_FIFO:
-    case FifoMode::BYPASS_TO_CONTINUOUS:
-    case FifoMode::CONTINUOUS:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool isValidFifoDecimation(FifoDecimation decimation) {
-  return static_cast<uint8_t>(decimation) <= static_cast<uint8_t>(FifoDecimation::DIV_32);
-}
-
-static bool isValidFifoOdr(Odr odr) {
-  return odr == Odr::POWER_DOWN || isValidGyroOdr(odr, GyroPowerMode::HIGH_PERFORMANCE);
-}
-
-static bool isValidPublicRegisterAddress(uint8_t reg) {
-  return reg <= cmd::REG_Z_OFS_USR;
-}
-
-static bool isValidPublicRegisterBlock(uint8_t startReg, size_t len) {
-  if (len == 0 || len > MAX_PUBLIC_READ_LEN) {
+bool accelOdrAllowed(Odr odr, AccelPowerMode mode) {
+  if (!validOdrValue(odr) || !validAccelPower(mode)) {
     return false;
   }
-  const uint16_t endReg = static_cast<uint16_t>(startReg) + static_cast<uint16_t>(len - 1u);
-  return endReg <= cmd::REG_Z_OFS_USR;
+  if (odr == Odr::HZ_1_6) {
+    return mode == AccelPowerMode::LOW_POWER_NORMAL;
+  }
+  if (mode == AccelPowerMode::LOW_POWER_NORMAL) {
+    return static_cast<uint8_t>(odr) <= static_cast<uint8_t>(Odr::HZ_208);
+  }
+  return true;
 }
 
-static bool isFiniteInRange(float value, float minValue, float maxValue) {
-  return std::isfinite(value) && value >= minValue && value <= maxValue;
+bool gyroOdrAllowed(Odr odr, GyroPowerMode mode) {
+  if (!validOdrValue(odr) || !validGyroPower(mode) || odr == Odr::HZ_1_6) {
+    return false;
+  }
+  if (mode == GyroPowerMode::LOW_POWER_NORMAL) {
+    return static_cast<uint8_t>(odr) <= static_cast<uint8_t>(Odr::HZ_208);
+  }
+  return true;
 }
 
-static bool isValidCalibrationLimits(const CalibrationLimits& limits) {
-  return isFiniteInRange(limits.accelMaxPeakToPeakG, 0.001f, 4.0f) &&
-         isFiniteInRange(limits.accelMaxHorizontalMeanG, 0.0f, 4.0f) &&
-         isFiniteInRange(limits.accelMinZMeanG, -4.0f, 4.0f) &&
-         isFiniteInRange(limits.accelMaxZMeanG, -4.0f, 4.0f) &&
-         limits.accelMinZMeanG <= limits.accelMaxZMeanG &&
-         isFiniteInRange(limits.gyroMaxPeakToPeakDps, 0.001f, 2000.0f);
+bool validHpf(GyroHpfMode mode) {
+  return static_cast<uint8_t>(mode) <= static_cast<uint8_t>(GyroHpfMode::HZ_1_040);
 }
 
-static bool isCachedConfigRegister(uint8_t reg) {
+bool validSampleQuality(SampleQuality quality) {
+  switch (quality) {
+    case SampleQuality::READY_CHECKED:
+    case SampleQuality::DIRECT_UNVERIFIED:
+    case SampleQuality::CONFIG_UNKNOWN:
+    case SampleQuality::SETTLING:
+      return true;
+    default:
+      return false;
+  }
+}
+
+uint16_t gyroSettleSamples(const DeviceProfile& profile) {
+  switch (profile.gyroOdr) {
+    case Odr::HZ_12_5: return 2;
+    case Odr::HZ_26: return 3;
+    case Odr::HZ_52: return 3;
+    case Odr::HZ_104: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
+    case Odr::HZ_208: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
+    case Odr::HZ_416: return profile.gyroFilter.lpf1Enabled ? 5 : 3;
+    case Odr::HZ_833: return profile.gyroFilter.lpf1Enabled ? 7 : 3;
+    case Odr::HZ_1660: return 135;
+    case Odr::HZ_3330: return 270;
+    case Odr::HZ_6660: return 540;
+    case Odr::POWER_DOWN:
+    case Odr::HZ_1_6:
+    default: return 0;
+  }
+}
+
+uint64_t sampleReadyPollDelayMs(const DeviceProfile& profile,
+                                const SampleRequest& request) {
+  uint64_t slowestPeriodUs = 0;
+  auto include = [&slowestPeriodUs](Odr odr) {
+    const uint64_t period = odrPeriodUs(odr);
+    if (period > slowestPeriodUs) slowestPeriodUs = period;
+  };
+  if ((request.quantityMask & SAMPLE_ACCELERATION) != 0U) {
+    include(profile.accelOdr);
+  }
+  if ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U) {
+    include(profile.gyroOdr);
+  }
+  if ((request.quantityMask & SAMPLE_TEMPERATURE) != 0U) {
+    uint64_t temperaturePeriodUs = odrPeriodUs(Odr::HZ_52);
+    if (profile.gyroOdr == Odr::POWER_DOWN &&
+        profile.accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL) {
+      if (profile.accelOdr == Odr::HZ_12_5) {
+        temperaturePeriodUs = odrPeriodUs(Odr::HZ_12_5);
+      } else if (profile.accelOdr == Odr::HZ_26) {
+        temperaturePeriodUs = odrPeriodUs(Odr::HZ_26);
+      }
+    }
+    if (temperaturePeriodUs > slowestPeriodUs) {
+      slowestPeriodUs = temperaturePeriodUs;
+    }
+  }
+  const uint64_t roundedMs = (slowestPeriodUs + 999U) / 1000U;
+  return roundedMs == 0U ? 1U : roundedMs;
+}
+
+bool diagnosticWritableMask(uint8_t reg, uint8_t& mask) {
   switch (reg) {
+    case cmd::REG_FUNC_CFG_ACCESS: mask = 0xA0; return true;
+    case cmd::REG_SENSOR_SYNC_TIME_FRAME: mask = 0x0F; return true;
+    case cmd::REG_SENSOR_SYNC_RES_RATIO: mask = 0x03; return true;
+    case cmd::REG_FIFO_CTRL1: mask = 0xFF; return true;
+    case cmd::REG_FIFO_CTRL2: mask = 0xCF; return true;
+    case cmd::REG_FIFO_CTRL3: mask = 0x3F; return true;
+    case cmd::REG_FIFO_CTRL4: mask = 0xFF; return true;
+    case cmd::REG_FIFO_CTRL5: mask = 0x7F; return true;
+    case cmd::REG_DRDY_PULSE_CFG_G: mask = 0xC0; return true;
+    case cmd::REG_INT1_CTRL:
+    case cmd::REG_INT2_CTRL:
     case cmd::REG_CTRL1_XL:
-    case cmd::REG_CTRL2_G:
     case cmd::REG_CTRL3_C:
-    case cmd::REG_CTRL4_C:
-    case cmd::REG_CTRL6_C:
-    case cmd::REG_CTRL7_G:
-    case cmd::REG_CTRL8_XL:
-    case cmd::REG_CTRL10_C:
+    case cmd::REG_CTRL5_C:
+    case cmd::REG_TAP_CFG:
+    case cmd::REG_TAP_THS_6D:
+    case cmd::REG_INT_DUR2:
     case cmd::REG_WAKE_UP_DUR:
+    case cmd::REG_FREE_FALL:
+    case cmd::REG_MD1_CFG:
+    case cmd::REG_MD2_CFG:
+      mask = 0xFF;
+      return true;
+    case cmd::REG_WAKE_UP_THS: mask = 0xBF; return true;
+    case cmd::REG_CTRL2_G:
+    case cmd::REG_CTRL4_C: mask = 0xFE; return true;
+    case cmd::REG_CTRL6_C: mask = 0xFB; return true;
+    case cmd::REG_CTRL7_G: mask = 0xF8; return true;
+    case cmd::REG_CTRL8_XL: mask = 0xFD; return true;
+    case cmd::REG_CTRL9_XL: mask = 0xF4; return true;
+    case cmd::REG_CTRL10_C: mask = 0xBF; return true;
+    case cmd::REG_MASTER_CONFIG: mask = 0xDF; return true;
     case cmd::REG_X_OFS_USR:
     case cmd::REG_Y_OFS_USR:
     case cmd::REG_Z_OFS_USR:
-    case cmd::REG_FIFO_CTRL1:
-    case cmd::REG_FIFO_CTRL2:
-    case cmd::REG_FIFO_CTRL3:
-    case cmd::REG_FIFO_CTRL4:
-    case cmd::REG_FIFO_CTRL5:
+      mask = 0xFF;
       return true;
     default:
+      mask = 0;
       return false;
   }
 }
 
-static bool isSafePublicRegisterWrite(uint8_t reg, uint8_t value) {
-  switch (reg) {
-    case cmd::REG_FUNC_CFG_ACCESS:
-      return (value & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) == 0;
-    case cmd::REG_CTRL3_C:
-      return (value & (cmd::MASK_BOOT | cmd::MASK_SW_RESET | cmd::MASK_BLE)) == 0 &&
-             (value & cmd::MASK_IF_INC) != 0;
-    case cmd::REG_CTRL4_C:
-      return (value & cmd::MASK_I2C_DISABLE) == 0;
-    default:
-      return true;
+bool validOffsetWeight(AccelOffsetWeight weight) {
+  return weight == AccelOffsetWeight::MG_1 || weight == AccelOffsetWeight::MG_16;
+}
+
+uint8_t buildCtrl1(const DeviceProfile& profile) {
+  return static_cast<uint8_t>((static_cast<uint8_t>(profile.accelOdr) << cmd::BIT_ODR_XL) |
+                              (static_cast<uint8_t>(profile.accelFullScale) << cmd::BIT_FS_XL));
+}
+
+uint8_t buildCtrl2(const DeviceProfile& profile) {
+  uint8_t value = static_cast<uint8_t>(static_cast<uint8_t>(profile.gyroOdr)
+                                       << cmd::BIT_ODR_G);
+  if (profile.gyroFullScale == GyroFs::DPS_125) {
+    value = static_cast<uint8_t>(value | cmd::MASK_FS_125);
+  } else {
+    value = static_cast<uint8_t>(value |
+                                 (static_cast<uint8_t>(profile.gyroFullScale)
+                                  << cmd::BIT_FS_G));
   }
+  return value;
 }
 
-static bool requiresAccelOdrAtLeast26Hz(Odr odr) {
-  switch (odr) {
-    case Odr::HZ_26:
-    case Odr::HZ_52:
-    case Odr::HZ_104:
-    case Odr::HZ_208:
-    case Odr::HZ_416:
-    case Odr::HZ_833:
-    case Odr::HZ_1660:
-    case Odr::HZ_3330:
-    case Odr::HZ_6660:
-      return true;
-    default:
-      return false;
+uint8_t buildCtrl3(const DeviceProfile& profile) {
+  return static_cast<uint8_t>(cmd::MASK_IF_INC |
+                              (profile.blockDataUpdate ? cmd::MASK_BDU : 0U));
+}
+
+uint8_t buildCtrl4(const DeviceProfile& profile) {
+  return static_cast<uint8_t>((profile.gyroSleepEnabled ? cmd::MASK_SLEEP_G : 0U) |
+                              (profile.gyroFilter.lpf1Enabled
+                                   ? cmd::MASK_LPF1_SEL_G
+                                   : 0U));
+}
+
+uint8_t buildCtrl6(const DeviceProfile& profile) {
+  return static_cast<uint8_t>(
+      (profile.accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL
+           ? cmd::MASK_XL_HM_MODE
+           : 0U) |
+      (profile.accelOffsetWeight == AccelOffsetWeight::MG_16
+           ? cmd::MASK_USR_OFF_W
+           : 0U));
+}
+
+uint8_t buildCtrl7(const DeviceProfile& profile) {
+  return static_cast<uint8_t>(
+      (profile.gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL
+           ? cmd::MASK_G_HM_MODE
+           : 0U) |
+      (profile.gyroFilter.highPassEnabled ? cmd::MASK_HP_EN_G : 0U) |
+      (static_cast<uint8_t>(profile.gyroFilter.highPassMode) << cmd::BIT_HPM_G));
+}
+
+uint8_t buildCtrl8(const DeviceProfile& profile) {
+  return static_cast<uint8_t>(
+      (profile.accelFilter.lpf2Enabled ? cmd::MASK_LPF2_XL_EN : 0U) |
+      (profile.accelFilter.highPassSlopeEnabled ? cmd::MASK_HP_SLOPE_XL_EN : 0U) |
+      (profile.accelFilter.lowPassOn6d ? cmd::MASK_LOW_PASS_ON_6D : 0U));
+}
+
+int16_t decodeInt16(const uint8_t* data) {
+  return static_cast<int16_t>(static_cast<uint16_t>(data[0]) |
+                              (static_cast<uint16_t>(data[1]) << 8U));
+}
+
+RawAxes decodeRawAxes(const uint8_t* data) {
+  return RawAxes{decodeInt16(&data[0]), decodeInt16(&data[2]),
+                 decodeInt16(&data[4])};
+}
+
+Axes rawAxesToFloat(const RawAxes& raw, float sensitivity) {
+  return Axes{static_cast<float>(raw.x) * sensitivity,
+              static_cast<float>(raw.y) * sensitivity,
+              static_cast<float>(raw.z) * sensitivity};
+}
+
+Axes subtractAxes(const Axes& lhs, const Axes& rhs) {
+  return Axes{lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z};
+}
+
+Axes absoluteAxes(const Axes& axes) {
+  return Axes{std::fabs(axes.x), std::fabs(axes.y), std::fabs(axes.z)};
+}
+
+bool axesWithin(const Axes& axes, float minimum, float maximum) {
+  return std::fabs(axes.x) >= minimum && std::fabs(axes.x) <= maximum &&
+         std::fabs(axes.y) >= minimum && std::fabs(axes.y) <= maximum &&
+         std::fabs(axes.z) >= minimum && std::fabs(axes.z) <= maximum;
+}
+
+Status inProgressStatus() {
+  return Status::Error(Err::IN_PROGRESS, "Operation in progress");
+}
+
+Status normalizeTransport(Status status) {
+  if (status.code == Err::IN_PROGRESS) {
+    return Status::Error(Err::I2C_BUSY, "Transport callback returned IN_PROGRESS",
+                         status.detail);
   }
-}
-
-static float accelSensitivityMgLsb(AccelFs fs) {
-  switch (fs) {
-    case AccelFs::G_2:
-      return 0.061f;
-    case AccelFs::G_4:
-      return 0.122f;
-    case AccelFs::G_8:
-      return 0.244f;
-    case AccelFs::G_16:
-      return 0.488f;
-    default:
-      return 0.061f;
-  }
-}
-
-static float gyroSensitivityMdpsLsb(GyroFs fs) {
-  switch (fs) {
-    case GyroFs::DPS_125:
-      return 4.375f;
-    case GyroFs::DPS_250:
-      return 8.75f;
-    case GyroFs::DPS_500:
-      return 17.50f;
-    case GyroFs::DPS_1000:
-      return 35.0f;
-    case GyroFs::DPS_2000:
-      return 70.0f;
-    default:
-      return 8.75f;
-  }
-}
-
-static uint8_t loByte(uint16_t value) {
-  return static_cast<uint8_t>(value & 0xFFu);
-}
-
-static void decodeRawAll(const uint8_t* data, RawMeasurement& out) {
-  out.temperature = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
-  out.gyro.x = static_cast<int16_t>((static_cast<uint16_t>(data[3]) << 8) | data[2]);
-  out.gyro.y = static_cast<int16_t>((static_cast<uint16_t>(data[5]) << 8) | data[4]);
-  out.gyro.z = static_cast<int16_t>((static_cast<uint16_t>(data[7]) << 8) | data[6]);
-  out.accel.x = static_cast<int16_t>((static_cast<uint16_t>(data[9]) << 8) | data[8]);
-  out.accel.y = static_cast<int16_t>((static_cast<uint16_t>(data[11]) << 8) | data[10]);
-  out.accel.z = static_cast<int16_t>((static_cast<uint16_t>(data[13]) << 8) | data[12]);
-}
-
-static void decodeFifoStatus(const uint8_t* data, FifoStatus& out) {
-  out.unreadWords = static_cast<uint16_t>(data[0]) |
-                    (static_cast<uint16_t>(data[1] & cmd::MASK_DIFF_FIFO_HI) << 8);
-  out.watermark = (data[1] & cmd::MASK_FIFO_WATERM) != 0;
-  out.overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0;
-  out.fullSmart = (data[1] & cmd::MASK_FIFO_FULL_SMART) != 0;
-  out.empty = (data[1] & cmd::MASK_FIFO_EMPTY) != 0;
-  out.pattern = static_cast<uint16_t>(data[2]) |
-                (static_cast<uint16_t>(data[3] & 0x03u) << 8);
-}
-
-static Status normalizeTransportStatus(Status st) {
-  if (st.code == Err::IN_PROGRESS) {
-    return Status::Error(Err::I2C_BUSY, "Transport busy", st.detail);
-  }
-  return st;
-}
-
-static float absFloat(float value) {
-  return value < 0.0f ? -value : value;
-}
-
-static bool axisInRange(float value, float minValue, float maxValue) {
-  return value >= minValue && value <= maxValue;
-}
-
-static void addCalibrationSample(const Axes& sample, uint16_t samplesDone,
-                                 double& sumX, double& sumY, double& sumZ,
-                                 float& minX, float& maxX,
-                                 float& minY, float& maxY,
-                                 float& minZ, float& maxZ) {
-  sumX += static_cast<double>(sample.x);
-  sumY += static_cast<double>(sample.y);
-  sumZ += static_cast<double>(sample.z);
-
-  if (samplesDone == 0u) {
-    minX = maxX = sample.x;
-    minY = maxY = sample.y;
-    minZ = maxZ = sample.z;
-    return;
-  }
-
-  if (sample.x < minX) minX = sample.x;
-  if (sample.x > maxX) maxX = sample.x;
-  if (sample.y < minY) minY = sample.y;
-  if (sample.y > maxY) maxY = sample.y;
-  if (sample.z < minZ) minZ = sample.z;
-  if (sample.z > maxZ) maxZ = sample.z;
-}
-
-static Status finalizeAccelCalibration(uint16_t samples,
-                                       double sumX, double sumY, double sumZ,
-                                       float minX, float maxX,
-                                       float minY, float maxY,
-                                       float minZ, float maxZ,
-                                       const CalibrationLimits& limits,
-                                       Axes& out) {
-  const float p2pX = maxX - minX;
-  const float p2pY = maxY - minY;
-  const float p2pZ = maxZ - minZ;
-  if (p2pX > limits.accelMaxPeakToPeakG ||
-      p2pY > limits.accelMaxPeakToPeakG ||
-      p2pZ > limits.accelMaxPeakToPeakG) {
-    return Status::Error(Err::CALIBRATION_UNSTABLE, "Accel calibration unstable");
-  }
-
-  const double n = static_cast<double>(samples);
-  const float meanX = static_cast<float>(sumX / n);
-  const float meanY = static_cast<float>(sumY / n);
-  const float meanZ = static_cast<float>(sumZ / n);
-  if (absFloat(meanX) > limits.accelMaxHorizontalMeanG ||
-      absFloat(meanY) > limits.accelMaxHorizontalMeanG ||
-      meanZ < limits.accelMinZMeanG ||
-      meanZ > limits.accelMaxZMeanG) {
-    return Status::Error(Err::CALIBRATION_ORIENTATION, "Accel calibration orientation");
-  }
-
-  out.x = meanX;
-  out.y = meanY;
-  out.z = meanZ - 1.0f;
-  return Status::Ok();
-}
-
-static Status finalizeGyroCalibration(uint16_t samples,
-                                      double sumX, double sumY, double sumZ,
-                                      float minX, float maxX,
-                                      float minY, float maxY,
-                                      float minZ, float maxZ,
-                                      const CalibrationLimits& limits,
-                                      Axes& out) {
-  const float p2pX = maxX - minX;
-  const float p2pY = maxY - minY;
-  const float p2pZ = maxZ - minZ;
-  if (p2pX > limits.gyroMaxPeakToPeakDps ||
-      p2pY > limits.gyroMaxPeakToPeakDps ||
-      p2pZ > limits.gyroMaxPeakToPeakDps) {
-    return Status::Error(Err::CALIBRATION_UNSTABLE, "Gyro calibration unstable");
-  }
-
-  const double n = static_cast<double>(samples);
-  out.x = static_cast<float>(sumX / n);
-  out.y = static_cast<float>(sumY / n);
-  out.z = static_cast<float>(sumZ / n);
-  return Status::Ok();
-}
-
-static Axes rawToAccelSelfTestAxes(const RawAxes& raw) {
-  return Axes{
-      static_cast<float>(raw.x) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
-      static_cast<float>(raw.y) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
-      static_cast<float>(raw.z) * SELF_TEST_ACCEL_SENSITIVITY_G_LSB,
-  };
-}
-
-static Axes rawToGyroSelfTestAxes(const RawAxes& raw) {
-  return Axes{
-      static_cast<float>(raw.x) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
-      static_cast<float>(raw.y) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
-      static_cast<float>(raw.z) * SELF_TEST_GYRO_SENSITIVITY_DPS_LSB,
-  };
-}
-
-static Axes deltaAxes(const Axes& stimulus, const Axes& baseline) {
-  return Axes{
-      absFloat(stimulus.x - baseline.x),
-      absFloat(stimulus.y - baseline.y),
-      absFloat(stimulus.z - baseline.z),
-  };
-}
-
-static bool accelSelfTestPass(const Axes& delta) {
-  return axisInRange(delta.x * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG) &&
-         axisInRange(delta.y * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG) &&
-         axisInRange(delta.z * 1000.0f, SELF_TEST_ACCEL_MIN_MG, SELF_TEST_ACCEL_MAX_MG);
-}
-
-static bool gyroSelfTestPass(const Axes& delta) {
-  return axisInRange(delta.x, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS) &&
-         axisInRange(delta.y, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS) &&
-         axisInRange(delta.z, SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS);
+  return status;
 }
 
 }  // namespace
 
-Status LSM6DS3TR::begin(const Config& config) {
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-
-  _lastOkMs = 0;
-  _lastErrorMs = 0;
-  _lastError = Status::Ok();
-  _consecutiveFailures = 0;
-  _totalFailures = 0;
-  _totalSuccess = 0;
-  _allowOfflineI2c = false;
-  _cachedConfigDirty = false;
-
-  _measurementRequested = false;
-  _measurementReady = false;
-  _hasSample = false;
-  _sampleTimestampMs = 0;
-  _rawMeasurement = RawMeasurement{};
-
-  _pollJob = PollJob::NONE;
-  _pollStep = 0;
-  _pollCount = 0;
-  _pollNowMs = 0;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  _pollInstructionUsed = false;
-  _pollStartedOffline = false;
-  _lastPollStatus = Status::Ok();
-  _pollWakeUpDur = 0;
-  _fifoDrainMaxWords = 0;
-  _fifoDrainWordsRead = 0;
-  _fifoDrainWordsAvailable = 0;
-  _refreshCtrl1 = 0;
-  _refreshCtrl2 = 0;
-  _refreshCtrl3 = 0;
-  _refreshCtrl4 = 0;
-  _refreshCtrl6 = 0;
-  _refreshCtrl7 = 0;
-  _refreshCtrl8 = 0;
-  _refreshCtrl10 = 0;
-  _refreshWakeUpDur = 0;
-  std::memset(_refreshOffsetData, 0, sizeof(_refreshOffsetData));
-  std::memset(_refreshFifoCtrl, 0, sizeof(_refreshFifoCtrl));
-  _calibrationSamplesTarget = 0;
-  _calibrationSamplesDone = 0;
-  _calibrationPollsForSample = 0;
-  _calibrationSumX = 0.0;
-  _calibrationSumY = 0.0;
-  _calibrationSumZ = 0.0;
-  _calibrationMinX = 0.0f;
-  _calibrationMaxX = 0.0f;
-  _calibrationMinY = 0.0f;
-  _calibrationMaxY = 0.0f;
-  _calibrationMinZ = 0.0f;
-  _calibrationMaxZ = 0.0f;
-
-  _config = Config{};
-  _accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
-  _gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;
-  _gyroSleepEnabled = false;
-  _accelFilterConfig = AccelFilterConfig{};
-  _gyroFilterConfig = GyroFilterConfig{};
-  _timestampEnabled = false;
-  _timestampHighResolution = false;
-  _pedometerEnabled = false;
-  _significantMotionEnabled = false;
-  _tiltEnabled = false;
-  _wristTiltEnabled = false;
-  _accelOffsetWeight = AccelOffsetWeight::MG_1;
-  _accelUserOffset = AccelUserOffset{};
-  _fifoConfig = FifoConfig{};
-  _accelBias = Axes{};
-  _gyroBias = Axes{};
-
+Status validateDriverConfig(const DriverConfig& config) {
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
-    return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
+    return Status::Error(Err::INVALID_CONFIG, "I2C callbacks are required");
   }
-  if (config.i2cTimeoutMs == 0) {
-    return Status::Error(Err::INVALID_CONFIG, "I2C timeout must be > 0");
+  const uint8_t address = static_cast<uint8_t>(config.address);
+  if (address != static_cast<uint8_t>(SensorAddress::SA0_GND) &&
+      address != static_cast<uint8_t>(SensorAddress::SA0_VDD)) {
+    return Status::Error(Err::INVALID_CONFIG, "I2C address must be 0x6A or 0x6B");
   }
-  if (config.i2cAddress != 0x6A && config.i2cAddress != 0x6B) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address");
+  if (config.i2cTimeoutMs == 0U) {
+    return Status::Error(Err::INVALID_CONFIG, "I2C timeout must be nonzero");
   }
-  if (!isValidAccelFs(config.fsXl)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid accel full-scale");
+  return Status::Ok();
+}
+
+Status validateProfile(const DeviceProfile& profile) {
+  if (!validAccelFs(profile.accelFullScale) ||
+      !validGyroFs(profile.gyroFullScale) ||
+      !accelOdrAllowed(profile.accelOdr, profile.accelPowerMode) ||
+      !gyroOdrAllowed(profile.gyroOdr, profile.gyroPowerMode) ||
+      !validHpf(profile.gyroFilter.highPassMode) ||
+      !validOffsetWeight(profile.accelOffsetWeight)) {
+    return Status::Error(Err::INVALID_CONFIG, "Unsupported ODR, range, power, or filter");
   }
-  if (!isValidGyroFs(config.fsG)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid gyro full-scale");
+  if (!profile.blockDataUpdate) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "Production profiles require block data update");
   }
-  if (!isValidAccelPowerMode(config.accelPowerMode)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid accel power mode");
-  }
-  if (!isValidGyroPowerMode(config.gyroPowerMode)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid gyro power mode");
-  }
-  if (!isValidAccelOdr(config.odrXl, config.accelPowerMode)) {
+  if (profile.accelUserOffset.x == std::numeric_limits<int8_t>::min() ||
+      profile.accelUserOffset.y == std::numeric_limits<int8_t>::min() ||
+      profile.accelUserOffset.z == std::numeric_limits<int8_t>::min()) {
     return Status::Error(Err::INVALID_CONFIG,
-                         "Accel 1.6 Hz requires low-power/normal mode; high-performance supports 12.5 Hz+");
+                         "Accelerometer user offsets must be -127..127");
   }
-  if (!isValidGyroOdr(config.odrG, config.gyroPowerMode)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid gyro ODR/power-mode combination");
+  if (profile.gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL &&
+      (profile.gyroFilter.lpf1Enabled || profile.gyroFilter.highPassEnabled)) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "Gyroscope filters require high-performance mode");
   }
-  if (!isValidCalibrationLimits(config.calibrationLimits)) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid calibration limits");
+  if (profile.gyroFilter.highPassEnabled) {
+    return Status::Error(
+        Err::UNSUPPORTED_PROFILE,
+        "Gyroscope high-pass settling is not a production profile contract");
   }
-
-  _config = config;
-  if (_config.offlineThreshold == 0) {
-    _config.offlineThreshold = 1;
+  if (profile.accelFilter.highPassSlopeEnabled ||
+      profile.accelFilter.lowPassOn6d) {
+    return Status::Error(
+        Err::UNSUPPORTED_PROFILE,
+        "Slope/high-pass output and 6D filtering are not production sample profiles");
   }
-  _accelPowerMode = config.accelPowerMode;
-  _gyroPowerMode = config.gyroPowerMode;
-
-  uint8_t chipId = 0;
-  Status st = _readRegisterRaw(cmd::REG_WHO_AM_I, chipId);
-  if (!st.ok()) {
-    return st;
-  }
-  if (chipId != cmd::WHO_AM_I_VALUE) {
-    return Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId);
-  }
-
-  st = _applyConfig();
-  if (!st.ok()) {
-    return st;
-  }
-
-  _initialized = true;
-  _driverState = DriverState::READY;
-  _cachedConfigDirty = false;
-  return Status::Ok();
-}
-
-void LSM6DS3TR::tick(uint32_t nowMs) {
-  (void)poll(nowMs, 1);
-}
-
-void LSM6DS3TR::end() {
-  if (_config.i2cWrite != nullptr) {
-    const uint8_t payloadG[2] = {cmd::REG_CTRL2_G, 0x00};
-    (void)_i2cWriteRaw(payloadG, sizeof(payloadG));
-    const uint8_t payloadXl[2] = {cmd::REG_CTRL1_XL, 0x00};
-    (void)_i2cWriteRaw(payloadXl, sizeof(payloadXl));
-  }
-
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-  _measurementRequested = false;
-  _measurementReady = false;
-  _hasSample = false;
-  _sampleTimestampMs = 0;
-  _rawMeasurement = RawMeasurement{};
-  _pollJob = PollJob::NONE;
-  _pollStep = 0;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  _pollStartedOffline = false;
-  _lastPollStatus = Status::Ok();
-}
-
-Status LSM6DS3TR::probe() {
-  if (_config.i2cWriteRead == nullptr) {
-    return Status::Error(Err::NOT_INITIALIZED, "No transport configured");
-  }
-
-  uint8_t chipId = 0;
-  Status st = _readRegisterRaw(cmd::REG_WHO_AM_I, chipId);
-  if (!st.ok()) {
-    return st;
-  }
-  if (chipId != cmd::WHO_AM_I_VALUE) {
-    return Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId);
+  if (profile.fifo.enabled || profile.interrupts.enabled) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "FIFO acquisition and interrupt routing are not enabled profiles");
   }
   return Status::Ok();
 }
 
-Status LSM6DS3TR::recover() {
-  if (!_initialized) {
-    if (_config.i2cWriteRead == nullptr || _config.i2cWrite == nullptr) {
-      return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-    }
-    const Config config = _config;
-    return begin(config);
+uint64_t odrPeriodUs(Odr odr) {
+  uint64_t milliHz = 0;
+  switch (odr) {
+    case Odr::HZ_1_6: milliHz = 1600; break;
+    case Odr::HZ_12_5: milliHz = 12500; break;
+    case Odr::HZ_26: milliHz = 26000; break;
+    case Odr::HZ_52: milliHz = 52000; break;
+    case Odr::HZ_104: milliHz = 104000; break;
+    case Odr::HZ_208: milliHz = 208000; break;
+    case Odr::HZ_416: milliHz = 416000; break;
+    case Odr::HZ_833: milliHz = 833000; break;
+    case Odr::HZ_1660: milliHz = 1660000; break;
+    case Odr::HZ_3330: milliHz = 3330000; break;
+    case Odr::HZ_6660: milliHz = 6660000; break;
+    case Odr::POWER_DOWN:
+    default: return 0;
   }
-
-  const bool startedOffline = _driverState == DriverState::OFFLINE;
-  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
-  Status result = [this]() -> Status {
-    uint8_t chipId = 0;
-    Status st = readRegister(cmd::REG_WHO_AM_I, chipId);
-    if (!st.ok()) {
-      return st;
-    }
-    if (chipId != cmd::WHO_AM_I_VALUE) {
-      return _recordFailure(Status::Error(Err::CHIP_ID_MISMATCH, "Chip ID mismatch", chipId));
-    }
-
-    return _applyConfig();
-  }();
-  if (startedOffline && !result.ok() && !result.inProgress()) {
-    _reassertOfflineLatch();
-  }
-  return result;
+  return (1000000000ULL + milliHz - 1ULL) / milliHz;
 }
 
-Status LSM6DS3TR::_validateMeasurementRequest(bool checkReady) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+uint64_t requiredSettleUs(const DeviceProfile& profile) {
+  uint64_t settle = 0U;
+  const uint64_t accelPeriod = odrPeriodUs(profile.accelOdr);
+  if (accelPeriod != 0U) {
+    const uint64_t accelSamples = profile.accelFilter.lpf2Enabled ? 40U : 14U;
+    settle = saturatingMultiply(accelPeriod, accelSamples);
   }
-  if (_driverState == DriverState::OFFLINE) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
-  }
-
-  const bool accelActive = isActiveOdr(_config.odrXl);
-  const bool gyroActive = isActiveOdr(_config.odrG);
-  if (!accelActive && !gyroActive) {
-    return Status::Error(Err::INVALID_PARAM, "Both sensors powered down");
-  }
-  if (checkReady && accelActive && gyroActive) {
-    if (!_config.bdu) {
-      return Status::Error(Err::INVALID_PARAM, "Async combined measurement requires BDU");
+  if (profile.gyroOdr != Odr::POWER_DOWN) {
+    uint64_t gyroSettle = 70000U;
+    if (!profile.gyroSleepEnabled) {
+      gyroSettle = saturatingAdd(
+          gyroSettle,
+          saturatingMultiply(odrPeriodUs(profile.gyroOdr),
+                             gyroSettleSamples(profile)));
     }
-    if (_config.odrXl != _config.odrG) {
-      return Status::Error(Err::INVALID_PARAM, "Async combined measurement requires matching ODR");
-    }
+    if (gyroSettle > settle) settle = gyroSettle;
   }
-  return Status::Ok();
+  return settle;
 }
 
-Status LSM6DS3TR::requestMeasurement() {
-  return requestMeasurement(true);
+uint32_t maximumSelfTestTransactions(uint16_t samples) {
+  if (samples < 5U || samples > 100U) return 0U;
+  return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
+         80U;
 }
 
-Status LSM6DS3TR::requestMeasurement(bool checkReady) {
-  Status st = _validateMeasurementRequest(checkReady);
-  if (!st.ok()) {
-    return st;
-  }
-  if (_measurementRequested && !_measurementReady) {
-    return Status::Error(Err::BUSY, "Measurement in progress");
-  }
-  if (pollBusy()) {
-    return Status::Error(Err::BUSY, "Poll job in progress");
-  }
-
-  _measurementReady = false;
-  _measurementRequested = true;
-  _pollJob = PollJob::SAMPLE;
-  _pollStep = checkReady ? 0 : 1;
-  _pollCount = 0;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  _pollInstructionUsed = false;
-  _pollStartedOffline = false;
-  _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
-  return Status::Error(Err::IN_PROGRESS, "Measurement scheduled");
+uint32_t maximumCalibrationTransactions(uint16_t samples) {
+  if (samples == 0U || samples > 1000U) return 0U;
+  return 4U * static_cast<uint32_t>(samples);
 }
 
-bool LSM6DS3TR::pollBusy() const {
-  return _pollJob != PollJob::NONE;
+uint32_t maximumFifoPurgeTransactions(uint16_t maxWords) {
+  if (maxWords == 0U || maxWords > 2048U) return 0U;
+  return static_cast<uint32_t>(maxWords) + 5U;
 }
 
-Status LSM6DS3TR::_startPollJob(uint8_t job, const Status& busyStatus) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  const PollJob pollJob = static_cast<PollJob>(job);
-  if (_driverState == DriverState::OFFLINE && pollJob != PollJob::SOFT_RESET &&
-      pollJob != PollJob::BOOT) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
-  }
-  if (pollBusy() || (_measurementRequested && !_measurementReady)) {
-    return busyStatus;
-  }
-
-  _pollJob = pollJob;
-  _pollStep = 0;
-  _pollCount = 0;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  _pollInstructionUsed = false;
-  _pollStartedOffline = _driverState == DriverState::OFFLINE;
-  _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job scheduled");
-  return _lastPollStatus;
-}
-
-Status LSM6DS3TR::startSoftReset() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  Status st = _startPollJob(static_cast<uint8_t>(PollJob::SOFT_RESET),
-                            Status::Error(Err::BUSY, "Poll job in progress"));
-  if (!st.ok() && !st.inProgress()) {
-    return st;
-  }
-  _measurementRequested = false;
-  _measurementReady = false;
-  _hasSample = false;
-  _sampleTimestampMs = 0;
-  return st;
-}
-
-Status LSM6DS3TR::startBoot() {
-  return _startPollJob(static_cast<uint8_t>(PollJob::BOOT),
-                       Status::Error(Err::BUSY, "Poll job in progress"));
-}
-
-Status LSM6DS3TR::startRefreshCachedConfig() {
-  return _startPollJob(static_cast<uint8_t>(PollJob::REFRESH_CONFIG),
-                       Status::Error(Err::BUSY, "Poll job in progress"));
-}
-
-Status LSM6DS3TR::runSelfTest(SelfTestResult& out, uint16_t samples) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (samples == 0u || samples > SELF_TEST_MAX_SAMPLES) {
-    return Status::Error(Err::INVALID_PARAM, "self-test samples must be 1..100");
-  }
-
-  out = SelfTestResult{};
-
-  uint8_t savedCtrl1 = 0;
-  uint8_t savedCtrl2 = 0;
-  uint8_t savedCtrl5 = 0;
-  uint8_t savedCtrl7 = 0;
-  uint8_t savedCtrl8 = 0;
-  Status st = readRegister(cmd::REG_CTRL1_XL, savedCtrl1);
-  if (!st.ok()) return st;
-  st = readRegister(cmd::REG_CTRL2_G, savedCtrl2);
-  if (!st.ok()) return st;
-  st = readRegister(cmd::REG_CTRL5_C, savedCtrl5);
-  if (!st.ok()) return st;
-  st = readRegister(cmd::REG_CTRL7_G, savedCtrl7);
-  if (!st.ok()) return st;
-  st = readRegister(cmd::REG_CTRL8_XL, savedCtrl8);
-  if (!st.ok()) return st;
-
-  auto restoreRegisters = [this, savedCtrl1, savedCtrl2, savedCtrl5,
-                           savedCtrl7, savedCtrl8]() -> Status {
-    ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
-    Status first = Status::Ok();
-    auto keepFirstFailure = [&first](Status restoreStatus) {
-      if (!restoreStatus.ok() && first.ok()) {
-        first = restoreStatus;
-      }
-    };
-    keepFirstFailure(writeRegister(cmd::REG_CTRL5_C, savedCtrl5));
-    keepFirstFailure(writeRegister(cmd::REG_CTRL8_XL, savedCtrl8));
-    keepFirstFailure(writeRegister(cmd::REG_CTRL7_G, savedCtrl7));
-    keepFirstFailure(writeRegister(cmd::REG_CTRL2_G, savedCtrl2));
-    keepFirstFailure(writeRegister(cmd::REG_CTRL1_XL, savedCtrl1));
-    return first;
-  };
-
-  Status result = Status::Ok();
-  RawAxes baselineRaw;
-  RawAxes stimulusRaw;
-  RawAxes discardRaw;
-
-  st = writeRegister(cmd::REG_CTRL5_C, 0x00);
-  if (!st.ok()) {
-    result = st;
-  }
-  if (result.ok()) {
-    st = writeRegister(cmd::REG_CTRL8_XL, 0x00);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(Odr::HZ_416, AccelFs::G_2));
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _settleSelfTest(SELF_TEST_ACCEL_SETTLE_MS);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _readSelfTestAverage(true, SELF_TEST_SETTLE_SAMPLES, discardRaw);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _readSelfTestAverage(true, samples, baselineRaw);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = writeRegister(cmd::REG_CTRL5_C,
-                       static_cast<uint8_t>(1u << cmd::BIT_ST_XL));
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _settleSelfTest(SELF_TEST_ACCEL_SETTLE_MS);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _readSelfTestAverage(true, SELF_TEST_SETTLE_SAMPLES, discardRaw);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    st = _readSelfTestAverage(true, samples, stimulusRaw);
-    if (!st.ok()) result = st;
-  }
-  if (result.ok()) {
-    out.accelBaseline = rawToAccelSelfTestAxes(baselineRaw);
-    out.accelStimulus = rawToAccelSelfTestAxes(stimulusRaw);
-    out.accelDelta = deltaAxes(out.accelStimulus, out.accelBaseline);
-    out.accelPass = accelSelfTestPass(out.accelDelta);
-    if (!out.accelPass) {
-      result = Status::Error(Err::SELF_TEST_FAIL, "Accel self-test delta out of range");
-    }
-  }
-
-  bool gyroSequenceOk = result.ok() || result.code == Err::SELF_TEST_FAIL;
-  if (gyroSequenceOk) {
-    st = writeRegister(cmd::REG_CTRL5_C, 0x00);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = writeRegister(cmd::REG_CTRL7_G, 0x00);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(Odr::HZ_416, GyroFs::DPS_2000));
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _settleSelfTest(SELF_TEST_GYRO_SETTLE_MS);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _readSelfTestAverage(false, SELF_TEST_SETTLE_SAMPLES, discardRaw);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _readSelfTestAverage(false, samples, baselineRaw);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = writeRegister(cmd::REG_CTRL5_C,
-                       static_cast<uint8_t>(1u << cmd::BIT_ST_G));
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _settleSelfTest(SELF_TEST_GYRO_STIMULUS_SETTLE_MS);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _readSelfTestAverage(false, SELF_TEST_SETTLE_SAMPLES, discardRaw);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    st = _readSelfTestAverage(false, samples, stimulusRaw);
-    if (!st.ok()) {
-      result = st;
-      gyroSequenceOk = false;
-    }
-  }
-  if (gyroSequenceOk) {
-    out.gyroBaseline = rawToGyroSelfTestAxes(baselineRaw);
-    out.gyroStimulus = rawToGyroSelfTestAxes(stimulusRaw);
-    out.gyroDelta = deltaAxes(out.gyroStimulus, out.gyroBaseline);
-    out.gyroPass = gyroSelfTestPass(out.gyroDelta);
-    if (!out.gyroPass && result.ok()) {
-      result = Status::Error(Err::SELF_TEST_FAIL, "Gyro self-test delta out of range");
-    }
-  }
-
-  const Status restoreStatus = restoreRegisters();
-  if (result.ok() && !restoreStatus.ok()) {
-    return restoreStatus;
-  }
-  return result;
-}
-
-Status LSM6DS3TR::startFifoDrain(uint16_t maxWords) {
-  if (maxWords == 0) {
-    return Status::Error(Err::INVALID_PARAM, "maxWords must be > 0");
-  }
-  Status st = _startPollJob(static_cast<uint8_t>(PollJob::FIFO_DRAIN),
-                            Status::Error(Err::BUSY, "Poll job in progress"));
-  if (!st.ok() && !st.inProgress()) {
-    return st;
-  }
-  _fifoDrainMaxWords = maxWords;
-  _fifoDrainWordsRead = 0;
-  _fifoDrainWordsAvailable = 0;
-  return st;
-}
-
-Status LSM6DS3TR::startAccelBiasCapture(uint16_t samples) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (samples == 0 || samples > 10000) {
-    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
-  }
-  if (!isActiveOdr(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Accel ODR is POWER_DOWN");
-  }
-  Status st = _startPollJob(static_cast<uint8_t>(PollJob::ACCEL_CALIBRATION),
-                            Status::Error(Err::BUSY, "Poll job in progress"));
-  if (!st.ok() && !st.inProgress()) {
-    return st;
-  }
-  _calibrationSamplesTarget = samples;
-  _calibrationSamplesDone = 0;
-  _calibrationPollsForSample = 0;
-  _calibrationSumX = 0.0;
-  _calibrationSumY = 0.0;
-  _calibrationSumZ = 0.0;
-  _calibrationMinX = 0.0f;
-  _calibrationMaxX = 0.0f;
-  _calibrationMinY = 0.0f;
-  _calibrationMaxY = 0.0f;
-  _calibrationMinZ = 0.0f;
-  _calibrationMaxZ = 0.0f;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  return st;
-}
-
-Status LSM6DS3TR::startGyroBiasCapture(uint16_t samples) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (samples == 0 || samples > 10000) {
-    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
-  }
-  if (!isActiveOdr(_config.odrG)) {
-    return Status::Error(Err::INVALID_PARAM, "Gyro ODR is POWER_DOWN");
-  }
-  Status st = _startPollJob(static_cast<uint8_t>(PollJob::GYRO_CALIBRATION),
-                            Status::Error(Err::BUSY, "Poll job in progress"));
-  if (!st.ok() && !st.inProgress()) {
-    return st;
-  }
-  _calibrationSamplesTarget = samples;
-  _calibrationSamplesDone = 0;
-  _calibrationPollsForSample = 0;
-  _calibrationSumX = 0.0;
-  _calibrationSumY = 0.0;
-  _calibrationSumZ = 0.0;
-  _calibrationMinX = 0.0f;
-  _calibrationMaxX = 0.0f;
-  _calibrationMinY = 0.0f;
-  _calibrationMaxY = 0.0f;
-  _calibrationMinZ = 0.0f;
-  _calibrationMaxZ = 0.0f;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  return st;
-}
-
-Status LSM6DS3TR::_finishPollJob(const Status& st) {
-  const PollJob finishedJob = _pollJob;
-  const bool startedOffline = _pollStartedOffline;
-  _lastPollStatus = st;
-  if (st.inProgress()) {
-    return st;
-  }
-
-  _pollJob = PollJob::NONE;
-  _pollStep = 0;
-  _pollCount = 0;
-  _pollDeadlineMs = 0;
-  _pollDeadlineArmed = false;
-  _pollInstructionUsed = false;
-  _pollStartedOffline = false;
-  if (startedOffline && !st.ok() &&
-      (finishedJob == PollJob::SOFT_RESET || finishedJob == PollJob::BOOT)) {
-    _reassertOfflineLatch();
-  }
-  return st;
-}
-
-Status LSM6DS3TR::poll(uint32_t nowMs, uint8_t maxInstructions) {
-  _pollNowMs = nowMs;
-  if (!pollBusy()) {
-    return _lastPollStatus;
-  }
-  if (maxInstructions == 0) {
-    _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job in progress");
-    return _lastPollStatus;
-  }
-
-  const bool allowOffline =
-      _pollJob == PollJob::SOFT_RESET || _pollJob == PollJob::BOOT;
-  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, allowOffline);
-
-  uint8_t instructions = 0;
-  while (pollBusy() && instructions < maxInstructions) {
-    _pollInstructionUsed = false;
-    Status st = Status::Ok();
-    switch (_pollJob) {
-      case PollJob::SAMPLE:
-        st = _pollSampleStep();
-        break;
-      case PollJob::SOFT_RESET:
-        st = _pollResetOrBootStep(false);
-        break;
-      case PollJob::BOOT:
-        st = _pollResetOrBootStep(true);
-        break;
-      case PollJob::REFRESH_CONFIG: {
-        bool done = false;
-        st = _pollRefreshStep(_pollStep, done);
-        if (st.ok() && done) {
-          st = _finishPollJob(Status::Ok());
-        }
-        break;
-      }
-      case PollJob::FIFO_DRAIN:
-        st = _pollFifoDrainStep();
-        break;
-      case PollJob::ACCEL_CALIBRATION:
-        st = _pollCalibrationStep(true);
-        break;
-      case PollJob::GYRO_CALIBRATION:
-        st = _pollCalibrationStep(false);
-        break;
-      case PollJob::NONE:
-      default:
-        return _lastPollStatus;
-    }
-
-    if (!st.ok()) {
-      if (st.inProgress()) {
-        _lastPollStatus = st;
-        if (_pollInstructionUsed) {
-          ++instructions;
-        }
-        break;
-      }
-      return _finishPollJob(st);
-    }
-    if (_pollInstructionUsed) {
-      ++instructions;
-    } else if (st.inProgress()) {
-      break;
-    }
-  }
-
-  if (pollBusy()) {
-    _lastPollStatus = Status::Error(Err::IN_PROGRESS, "Poll job in progress");
-    return _lastPollStatus;
-  }
-  return _lastPollStatus;
-}
-
-Status LSM6DS3TR::_pollSampleStep() {
-  if (!_initialized) {
-    _measurementRequested = false;
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (_driverState == DriverState::OFFLINE) {
-    _measurementRequested = false;
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
-  }
-
-  if (_pollStep == 0) {
-    if (!_pollDeadlineArmed) {
-      const Odr odr = isActiveOdr(_config.odrXl) ? _config.odrXl : _config.odrG;
-      _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3U + 100U;
-      _pollDeadlineArmed = true;
-    }
-    if (deadlineReached(_pollNowMs, _pollDeadlineMs)) {
-      _measurementRequested = false;
-      return Status::Error(Err::TIMEOUT, "Measurement ready timeout");
-    }
-    if (_pollCount >= SAMPLE_READY_MAX_POLLS) {
-      _measurementRequested = false;
-      return Status::Error(Err::TIMEOUT, "Measurement ready polling limit",
-                           SAMPLE_READY_MAX_POLLS);
-    }
-
-    uint8_t statusReg = 0;
-    _pollInstructionUsed = true;
-    ++_pollCount;
-    Status st = readRegister(cmd::REG_STATUS_REG, statusReg);
-    if (!st.ok()) {
-      _measurementRequested = false;
-      return st;
-    }
-
-    const bool accelActive = isActiveOdr(_config.odrXl);
-    const bool gyroActive = isActiveOdr(_config.odrG);
-    const bool accelReady = !accelActive || ((statusReg & cmd::MASK_XLDA) != 0);
-    const bool gyroReady = !gyroActive || ((statusReg & cmd::MASK_GDA) != 0);
-    if (!accelReady || !gyroReady) {
-      return Status::Error(Err::IN_PROGRESS, "Measurement not ready");
-    }
-    _pollStep = 1;
-    return Status::Ok();
-  }
-
-  _pollInstructionUsed = true;
-  Status st = _readRawAllWithTimestamp(_pollNowMs);
-  if (!st.ok()) {
-    _measurementRequested = false;
-    return st;
-  }
-  _measurementReady = true;
-  _measurementRequested = false;
-  return _finishPollJob(Status::Ok());
-}
-
-Status LSM6DS3TR::_pollApplyConfigStep(uint8_t step, bool& done) {
-  done = false;
-  _pollInstructionUsed = true;
-  Status st = Status::Ok();
-  switch (step) {
-    case 0:
-      st = writeRegister(
-          cmd::REG_CTRL3_C,
-          static_cast<uint8_t>(cmd::MASK_IF_INC | (_config.bdu ? cmd::MASK_BDU : 0)));
-      break;
-    case 1:
-      st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-      break;
-    case 2:
-      st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-      break;
-    case 3:
-      st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-      break;
-    case 4:
-      st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
-      break;
-    case 5:
-      st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, _config.fsXl));
-      break;
-    case 6:
-      st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, _config.fsG));
-      break;
-    case 7:
-      st = readRegister(cmd::REG_WAKE_UP_DUR, _pollWakeUpDur);
-      break;
-    case 8:
-      _pollWakeUpDur = static_cast<uint8_t>(
-          (_pollWakeUpDur & static_cast<uint8_t>(~cmd::MASK_TIMER_HR)) |
-          (_buildWakeUpDur() & cmd::MASK_TIMER_HR));
-      st = writeRegister(cmd::REG_WAKE_UP_DUR, _pollWakeUpDur);
-      break;
-    case 9:
-      st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-      break;
-    case 10: {
-      const uint8_t offsets[3] = {
-          static_cast<uint8_t>(_accelUserOffset.x),
-          static_cast<uint8_t>(_accelUserOffset.y),
-          static_cast<uint8_t>(_accelUserOffset.z),
-      };
-      st = writeRegs(cmd::REG_X_OFS_USR, offsets, sizeof(offsets));
-      break;
-    }
-    case 11:
-      st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-      break;
-    case 12:
-      st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-      break;
-    case 13:
-      st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-      break;
-    case 14:
-      st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-      break;
-    case 15:
-      st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
-      break;
+Status accelSensitivityMicroGPerLsb(AccelFs fullScale, int32_t& out) {
+  switch (fullScale) {
+    case AccelFs::G_2: out = 61; break;
+    case AccelFs::G_4: out = 122; break;
+    case AccelFs::G_8: out = 244; break;
+    case AccelFs::G_16: out = 488; break;
     default:
-      _pollInstructionUsed = false;
-      _cachedConfigDirty = false;
-      done = true;
-      return Status::Ok();
-  }
-
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    done = true;
-    return st;
-  }
-  _pollStep = static_cast<uint8_t>(step + 1u);
-  if (_pollStep > 15u) {
-    _cachedConfigDirty = false;
-    done = true;
+      return Status::Error(Err::INVALID_PARAM, "Invalid accelerometer full scale");
   }
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_pollResetOrBootStep(bool bootJob) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  if (_pollStep == 0) {
-    if (!bootJob) {
-      _measurementRequested = false;
-      _measurementReady = false;
-      _hasSample = false;
-      _sampleTimestampMs = 0;
-    }
-
-    const uint8_t ctrl3 = static_cast<uint8_t>((bootJob ? cmd::MASK_BOOT : cmd::MASK_SW_RESET) |
-                                               cmd::MASK_IF_INC |
-                                               (_config.bdu ? cmd::MASK_BDU : 0));
-    _pollInstructionUsed = true;
-    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
-    if (!st.ok()) {
-      return st;
-    }
-    _pollDeadlineMs = _pollNowMs + (bootJob ? BOOT_TIMEOUT_MS : RESET_TIMEOUT_MS);
-    _pollDeadlineArmed = true;
-    _pollCount = 0;
-    _pollStep = 1;
-    return Status::Ok();
-  }
-
-  if (_pollStep == 1) {
-    if (deadlineReached(_pollNowMs, _pollDeadlineMs)) {
-      _cachedConfigDirty = true;
-      return _recordFailure(
-          Status::Error(Err::TIMEOUT, bootJob ? "Boot timeout" : "Reset timeout"));
-    }
-    if (_pollCount >= RESET_MAX_POLLS) {
-      _cachedConfigDirty = true;
-      return _recordFailure(Status::Error(
-          Err::TIMEOUT, bootJob ? "Boot polling limit" : "Reset polling limit", RESET_MAX_POLLS));
-    }
-
-    uint8_t ctrl3Read = 0;
-    _pollInstructionUsed = true;
-    ++_pollCount;
-    Status st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
-    if (!st.ok()) {
-      return _recordFailure(st);
-    }
-    const uint8_t bit = bootJob ? cmd::MASK_BOOT : cmd::MASK_SW_RESET;
-    if ((ctrl3Read & bit) == 0) {
-      _pollStep = 2;
-      _pollCount = 0;
-    }
-    return Status::Ok();
-  }
-
-  if (bootJob) {
-    bool done = false;
-    const uint8_t refreshStep = static_cast<uint8_t>(_pollStep - 2u);
-    Status st = _pollRefreshStep(refreshStep, done);
-    if (st.ok() && done) {
-      return _finishPollJob(Status::Ok());
-    }
-    if (!st.ok()) {
-      return st;
-    }
-    _pollStep = static_cast<uint8_t>(refreshStep + 3u);
-    return Status::Ok();
-  }
-
-  bool done = false;
-  const uint8_t applyStep = static_cast<uint8_t>(_pollStep - 2u);
-  Status st = _pollApplyConfigStep(applyStep, done);
-  if (st.ok() && done) {
-    return _finishPollJob(Status::Ok());
-  }
-  if (!st.ok()) {
-    return st;
-  }
-  _pollStep = static_cast<uint8_t>(applyStep + 3u);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::_pollRefreshStep(uint8_t step, bool& done) {
-  done = false;
-  _pollInstructionUsed = true;
-  Status st = Status::Ok();
-  switch (step) {
-    case 0:
-      st = readRegister(cmd::REG_CTRL1_XL, _refreshCtrl1);
-      break;
-    case 1:
-      st = readRegister(cmd::REG_CTRL2_G, _refreshCtrl2);
-      break;
-    case 2:
-      st = readRegister(cmd::REG_CTRL3_C, _refreshCtrl3);
-      break;
-    case 3:
-      st = readRegister(cmd::REG_CTRL4_C, _refreshCtrl4);
-      break;
-    case 4:
-      st = readRegister(cmd::REG_CTRL6_C, _refreshCtrl6);
-      break;
-    case 5:
-      st = readRegister(cmd::REG_CTRL7_G, _refreshCtrl7);
-      break;
-    case 6:
-      st = readRegister(cmd::REG_CTRL8_XL, _refreshCtrl8);
-      break;
-    case 7:
-      st = readRegister(cmd::REG_CTRL10_C, _refreshCtrl10);
-      break;
-    case 8:
-      st = readRegister(cmd::REG_WAKE_UP_DUR, _refreshWakeUpDur);
-      break;
-    case 9:
-      st = readRegs(cmd::REG_X_OFS_USR, _refreshOffsetData, sizeof(_refreshOffsetData));
-      break;
-    case 10:
-      st = readRegs(cmd::REG_FIFO_CTRL1, _refreshFifoCtrl, sizeof(_refreshFifoCtrl));
-      break;
+Status gyroSensitivityMicroDpsPerLsb(GyroFs fullScale, int32_t& out) {
+  switch (fullScale) {
+    case GyroFs::DPS_125: out = 4375; break;
+    case GyroFs::DPS_250: out = 8750; break;
+    case GyroFs::DPS_500: out = 17500; break;
+    case GyroFs::DPS_1000: out = 35000; break;
+    case GyroFs::DPS_2000: out = 70000; break;
     default:
-      _pollInstructionUsed = false;
-      done = true;
-      return _commitStagedCachedConfig();
-  }
-
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    done = true;
-    return st;
-  }
-  _pollStep = static_cast<uint8_t>(step + 1u);
-  if (_pollStep > 10u) {
-    done = true;
-    return _commitStagedCachedConfig();
+      return Status::Error(Err::INVALID_PARAM, "Invalid gyroscope full scale");
   }
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_commitStagedCachedConfig() {
-  const Odr odrXl = static_cast<Odr>((_refreshCtrl1 & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL);
-  const AccelFs fsXl = static_cast<AccelFs>((_refreshCtrl1 & cmd::MASK_FS_XL) >>
-                                            cmd::BIT_FS_XL);
-  const Odr odrG = static_cast<Odr>((_refreshCtrl2 & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
-  const GyroFs fsG = ((_refreshCtrl2 & cmd::MASK_FS_125) != 0)
-                         ? GyroFs::DPS_125
-                         : static_cast<GyroFs>((_refreshCtrl2 & cmd::MASK_FS_G) >>
-                                               cmd::BIT_FS_G);
-  const AccelPowerMode accelPowerMode = (_refreshCtrl6 & cmd::MASK_XL_HM_MODE) != 0
-                                            ? AccelPowerMode::LOW_POWER_NORMAL
-                                            : AccelPowerMode::HIGH_PERFORMANCE;
-  const GyroPowerMode gyroPowerMode = (_refreshCtrl7 & cmd::MASK_G_HM_MODE) != 0
-                                          ? GyroPowerMode::LOW_POWER_NORMAL
-                                          : GyroPowerMode::HIGH_PERFORMANCE;
-  const Odr fifoOdr = static_cast<Odr>((_refreshFifoCtrl[4] & cmd::MASK_ODR_FIFO) >>
-                                       cmd::BIT_ODR_FIFO);
-  const FifoMode fifoMode = static_cast<FifoMode>(_refreshFifoCtrl[4] & cmd::MASK_FIFO_MODE);
-
-  if (!isValidAccelFs(fsXl) || !isValidAccelOdr(odrXl, accelPowerMode) ||
-      !isValidGyroFs(fsG) || !isValidGyroOdr(odrG, gyroPowerMode) ||
-      !isValidFifoOdr(fifoOdr) || !isValidFifoMode(fifoMode)) {
-    _cachedConfigDirty = true;
-    return Status::Error(Err::INVALID_CONFIG, "Invalid cached register state");
+Status decodeAcceleration(const RawAxes& raw, AccelFs fullScale, IntegerAxes& outMicroG) {
+  int32_t sensitivity = 0;
+  const Status status = accelSensitivityMicroGPerLsb(fullScale, sensitivity);
+  if (!status.ok()) {
+    return status;
   }
-
-  _config.odrXl = odrXl;
-  _config.fsXl = fsXl;
-  _config.odrG = odrG;
-  _config.fsG = fsG;
-  _config.bdu = (_refreshCtrl3 & cmd::MASK_BDU) != 0;
-
-  _gyroSleepEnabled = (_refreshCtrl4 & cmd::MASK_SLEEP_G) != 0;
-  _gyroFilterConfig.lpf1Enabled = (_refreshCtrl4 & cmd::MASK_LPF1_SEL_G) != 0;
-
-  _accelPowerMode = accelPowerMode;
-  _accelOffsetWeight = (_refreshCtrl6 & cmd::MASK_USR_OFF_W) != 0
-                           ? AccelOffsetWeight::MG_16
-                           : AccelOffsetWeight::MG_1;
-
-  _gyroPowerMode = gyroPowerMode;
-  _gyroFilterConfig.highPassEnabled = (_refreshCtrl7 & cmd::MASK_HP_EN_G) != 0;
-  _gyroFilterConfig.highPassMode =
-      static_cast<GyroHpfMode>((_refreshCtrl7 & cmd::MASK_HPM_G) >> cmd::BIT_HPM_G);
-
-  _accelFilterConfig.lpf2Enabled = (_refreshCtrl8 & cmd::MASK_LPF2_XL_EN) != 0;
-  _accelFilterConfig.highPassSlopeEnabled = (_refreshCtrl8 & cmd::MASK_HP_SLOPE_XL_EN) != 0;
-  _accelFilterConfig.lowPassOn6d = (_refreshCtrl8 & cmd::MASK_LOW_PASS_ON_6D) != 0;
-
-  _timestampEnabled = (_refreshCtrl10 & (1u << cmd::BIT_TIMER_EN)) != 0;
-  _pedometerEnabled = (_refreshCtrl10 & (1u << cmd::BIT_PEDO_EN)) != 0;
-  _tiltEnabled = (_refreshCtrl10 & (1u << cmd::BIT_TILT_EN)) != 0;
-  _wristTiltEnabled = (_refreshCtrl10 & (1u << cmd::BIT_WRIST_TILT_EN)) != 0;
-  _significantMotionEnabled = (_refreshCtrl10 & (1u << cmd::BIT_SIGN_MOTION_EN)) != 0;
-  _timestampHighResolution = (_refreshWakeUpDur & cmd::MASK_TIMER_HR) != 0;
-
-  _accelUserOffset.x = static_cast<int8_t>(_refreshOffsetData[0]);
-  _accelUserOffset.y = static_cast<int8_t>(_refreshOffsetData[1]);
-  _accelUserOffset.z = static_cast<int8_t>(_refreshOffsetData[2]);
-
-  _fifoConfig.threshold = static_cast<uint16_t>(_refreshFifoCtrl[0]) |
-                          (static_cast<uint16_t>(_refreshFifoCtrl[1] &
-                                                 cmd::MASK_FIFO_THRESHOLD_HI) << 8);
-  _fifoConfig.storeTimestampStep =
-      (_refreshFifoCtrl[1] & (1u << cmd::BIT_TIMER_PEDO_FIFO_EN)) != 0;
-  _fifoConfig.storeTemperature = (_refreshFifoCtrl[1] & cmd::MASK_FIFO_TEMP_EN) != 0;
-  _fifoConfig.gyroDecimation =
-      static_cast<FifoDecimation>((_refreshFifoCtrl[2] & cmd::MASK_DEC_FIFO_GYRO) >>
-                                  cmd::BIT_DEC_FIFO_GYRO);
-  _fifoConfig.accelDecimation =
-      static_cast<FifoDecimation>((_refreshFifoCtrl[2] & cmd::MASK_DEC_FIFO_XL) >>
-                                  cmd::BIT_DEC_FIFO_XL);
-  _fifoConfig.stopOnThreshold = (_refreshFifoCtrl[3] & cmd::MASK_STOP_ON_FTH) != 0;
-  _fifoConfig.onlyHighData = (_refreshFifoCtrl[3] & cmd::MASK_ONLY_HIGH_DATA) != 0;
-  _fifoConfig.odr = fifoOdr;
-  _fifoConfig.mode = fifoMode;
-
-  _cachedConfigDirty = false;
+  outMicroG = IntegerAxes{static_cast<int64_t>(raw.x) * sensitivity,
+                          static_cast<int64_t>(raw.y) * sensitivity,
+                          static_cast<int64_t>(raw.z) * sensitivity};
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_pollFifoDrainStep() {
-  if (_pollStep == 0) {
-    uint8_t data[4] = {};
-    _pollInstructionUsed = true;
-    Status st = readRegs(cmd::REG_FIFO_STATUS1, data, sizeof(data));
-    if (!st.ok()) {
-      return st;
-    }
-    FifoStatus status;
-    decodeFifoStatus(data, status);
-    if (status.overrun) {
-      return Status::Error(Err::FIFO_OVERRUN, "FIFO overrun");
-    }
-    if (status.empty || status.unreadWords == 0u) {
-      _fifoDrainWordsAvailable = 0;
-      return _finishPollJob(Status::Ok());
-    }
-    _fifoDrainWordsAvailable = status.unreadWords;
-    _pollStep = 1;
-    return Status::Ok();
+Status decodeAngularRate(const RawAxes& raw, GyroFs fullScale, IntegerAxes& outMicroDps) {
+  int32_t sensitivity = 0;
+  const Status status = gyroSensitivityMicroDpsPerLsb(fullScale, sensitivity);
+  if (!status.ok()) {
+    return status;
   }
+  outMicroDps = IntegerAxes{static_cast<int64_t>(raw.x) * sensitivity,
+                            static_cast<int64_t>(raw.y) * sensitivity,
+                            static_cast<int64_t>(raw.z) * sensitivity};
+  return Status::Ok();
+}
 
-  if (_fifoDrainWordsRead >= _fifoDrainMaxWords ||
-      _fifoDrainWordsRead >= _fifoDrainWordsAvailable) {
-    return _finishPollJob(Status::Ok());
-  }
+int32_t decodeTemperatureMilliC(int16_t raw) {
+  return 25000 + static_cast<int32_t>((static_cast<int64_t>(raw) * 1000) / 256);
+}
 
-  uint8_t data[2] = {};
-  _pollInstructionUsed = true;
-  Status st = readRegs(cmd::REG_FIFO_DATA_OUT_L, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
+Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
+  if (raw.validMask == 0U || (raw.validMask & ~SAMPLE_ALL) != 0U ||
+      (raw.freshMask & ~raw.validMask) != 0U ||
+      !validSampleQuality(raw.quality)) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid raw sample provenance");
   }
-  ++_fifoDrainWordsRead;
-  if (_fifoDrainWordsRead >= _fifoDrainMaxWords ||
-      _fifoDrainWordsRead >= _fifoDrainWordsAvailable) {
-    return _finishPollJob(Status::Ok());
+  ConvertedSample candidate{};
+  candidate.validMask = raw.validMask;
+  candidate.freshMask = raw.freshMask;
+  candidate.quality = raw.quality;
+  candidate.sequence = raw.sequence;
+  candidate.configGeneration = raw.configGeneration;
+  candidate.readUptimeMs = raw.readUptimeMs;
+  if ((raw.validMask & SAMPLE_ACCELERATION) != 0U) {
+    const Status status =
+        decodeAcceleration(raw.accel, raw.accelFullScale, candidate.accelMicroG);
+    if (!status.ok()) return status;
+  }
+  if ((raw.validMask & SAMPLE_ANGULAR_RATE) != 0U) {
+    const Status status =
+        decodeAngularRate(raw.gyro, raw.gyroFullScale, candidate.gyroMicroDps);
+    if (!status.ok()) return status;
+  }
+  if ((raw.validMask & SAMPLE_TEMPERATURE) != 0U) {
+    candidate.temperatureMilliC = decodeTemperatureMilliC(raw.temperatureRaw);
+  }
+  out = candidate;
+  return Status::Ok();
+}
+
+Status validateCalibrationRequest(const CalibrationRequest& request) {
+  if (request.samples == 0U || request.samples > 1000U) {
+    return Status::Error(Err::INVALID_PARAM, "Calibration samples must be 1..1000");
+  }
+  if (request.kind != CalibrationKind::ACCELEROMETER_BIAS &&
+      request.kind != CalibrationKind::GYROSCOPE_BIAS) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid calibration kind");
+  }
+  if (!boundedAxes(request.expectedAccelerationG, 16.0f) ||
+      !std::isfinite(request.limits.accelMaxPeakToPeakG) ||
+      request.limits.accelMaxPeakToPeakG <= 0.0f ||
+      request.limits.accelMaxPeakToPeakG > 4.0f ||
+      !std::isfinite(request.limits.gyroMaxPeakToPeakDps) ||
+      request.limits.gyroMaxPeakToPeakDps <= 0.0f ||
+      request.limits.gyroMaxPeakToPeakDps > 2000.0f) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid calibration limits or fixture vector");
+  }
+  if (request.kind == CalibrationKind::ACCELEROMETER_BIAS) {
+    const float magnitudeSquared = axesMagnitudeSquared(request.expectedAccelerationG);
+    if (magnitudeSquared < 0.64f || magnitudeSquared > 1.44f) {
+      return Status::Error(Err::INVALID_PARAM,
+                           "Expected acceleration magnitude must be 0.8..1.2 g");
+    }
   }
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_pollCalibrationStep(bool accelJob) {
-  const Odr odr = accelJob ? _config.odrXl : _config.odrG;
-  if (_pollStep == 0) {
-    if (!_pollDeadlineArmed) {
-      _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
-      _pollDeadlineArmed = true;
+Status applyBias(Axes& sample, const Axes& bias) {
+  if (!boundedAxes(sample, MAX_ABS_BIAS) || !boundedAxes(bias, MAX_ABS_BIAS)) {
+    return Status::Error(Err::INVALID_PARAM, "Bias and sample must be finite and bounded");
+  }
+  const Axes candidate{sample.x - bias.x, sample.y - bias.y, sample.z - bias.z};
+  if (!boundedAxes(candidate, MAX_ABS_BIAS)) {
+    return Status::Error(Err::INVALID_PARAM, "Bias correction exceeds bounds");
+  }
+  sample = candidate;
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::bind(const DriverConfig& config) {
+  const Status validation = validateDriverConfig(config);
+  if (!validation.ok()) return validation;
+  if (_active) return Status::Error(Err::BUSY, "Operation is active");
+  if (_resultPending)
+    return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
+  _driverConfig = config;
+  _bound = true;
+  _hasDesiredProfile = false;
+  _hasVerifiedProfile = false;
+  _configurationState = ConfigurationState::UNCONFIGURED;
+  _configGeneration = 0;
+  _validAfterUptimeMs = 0;
+  _mismatchRegister = 0;
+  _mismatchExpected = 0;
+  _mismatchObserved = 0;
+  _transportSuccesses = 0;
+  _transportFailures = 0;
+  _lastTransportError = Status::Ok();
+  _lastTransportErrorUptimeMs = 0;
+  return Status::Ok();
+}
+
+void LSM6DS3TR::unbind() {
+  _bound = false;
+  _active = false;
+  _resultPending = false;
+  _token = {};
+  _job = JobKind::NONE;
+  _hasDesiredProfile = false;
+  _hasVerifiedProfile = false;
+  _configurationState = ConfigurationState::UNCONFIGURED;
+  _configGeneration = 0;
+  _validAfterUptimeMs = 0;
+  _workingResult = {};
+  _terminalResult = {};
+  _driverConfig = {};
+}
+
+Status LSM6DS3TR::_checkStart(const OperationTiming& timing) const {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (_active) return Status::Error(Err::BUSY, "Operation is active");
+  if (_resultPending)
+    return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
+  if (_tokenExhausted) {
+    return Status::Error(Err::RESULT_NOT_AVAILABLE, "Operation token space exhausted");
+  }
+  if (timing.deadlineMs <= timing.nowMs) {
+    return Status::Error(Err::INVALID_PARAM, "Deadline must be after start time");
+  }
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
+                        OperationToken& token) {
+  token = {};
+  const Status check = _checkStart(timing);
+  if (!check.ok()) return check;
+  _token = OperationToken{_nextToken};
+  if (_nextToken == std::numeric_limits<uint64_t>::max()) {
+    _tokenExhausted = true;
+  } else {
+    ++_nextToken;
+  }
+  token = _token;
+  _active = true;
+  _job = kind;
+  _step = 0;
+  _substep = 0;
+  _deadlineMs = timing.deadlineMs;
+  _waitUntilMs = 0;
+  _operationTransactions = 0;
+  switch (kind) {
+    case JobKind::PROBE: _operationTransactionLimit = MAX_PROBE_TRANSACTIONS; break;
+    case JobKind::CONFIGURE: _operationTransactionLimit = MAX_CONFIGURE_TRANSACTIONS; break;
+    case JobKind::SAMPLE: _operationTransactionLimit = MAX_SAMPLE_TRANSACTIONS; break;
+    case JobKind::RESET:
+    case JobKind::BOOT: _operationTransactionLimit = MAX_RESET_TRANSACTIONS; break;
+    case JobKind::RECOVER: _operationTransactionLimit = MAX_RECOVER_TRANSACTIONS; break;
+    case JobKind::RECONCILE: _operationTransactionLimit = MAX_RECONCILE_TRANSACTIONS; break;
+    case JobKind::POWER_DOWN: _operationTransactionLimit = MAX_POWER_DOWN_TRANSACTIONS; break;
+    default: _operationTransactionLimit = 1U; break;
+  }
+  _transactionUsed = false;
+  _waiting = false;
+  _pollBoundary = false;
+  _hardwareStateMayHaveChanged = false;
+  _configurationMayBeUnknown = false;
+  _configurationStateBeforeOperation = _configurationState;
+  _validAfterBeforeOperationMs = _validAfterUptimeMs;
+  _workingResult = {};
+  _workingResult.token = _token;
+  _workingResult.kind = kind;
+  _workingResult.state = OperationState::ACTIVE;
+  _workingResult.status = inProgressStatus();
+  _workingResult.startedUptimeMs = timing.nowMs;
+  return inProgressStatus();
+}
+
+Status LSM6DS3TR::startProbe(const OperationTiming& timing, OperationToken& token) {
+  token = {};
+  return _start(JobKind::PROBE, timing, token);
+}
+
+Status LSM6DS3TR::startConfigure(const DeviceProfile& profile,
+                                const OperationTiming& timing,
+                                OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  const Status validation = validateProfile(profile);
+  if (!validation.ok()) return validation;
+  const Status status = _start(JobKind::CONFIGURE, timing, token);
+  if (!status.inProgress()) return status;
+  _desiredProfile = profile;
+  _hasDesiredProfile = true;
+  _configurationState = ConfigurationState::APPLYING;
+  _prepareManagedImage(profile);
+  return status;
+}
+
+Status LSM6DS3TR::_checkReadyForKnownConfiguration(uint64_t nowMs) const {
+  const ConfigurationState state = configurationState(nowMs);
+  if (state == ConfigurationState::SETTLING) {
+    return Status::Error(Err::SETTLING, "Configuration is settling");
+  }
+  if (state != ConfigurationState::KNOWN || !_hasVerifiedProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "Configuration is not verified");
+  }
+  return Status::Ok();
+}
+
+Status LSM6DS3TR::startSample(const SampleRequest& request,
+                             const OperationTiming& timing,
+                             OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (request.quantityMask == 0U || (request.quantityMask & ~SAMPLE_ALL) != 0U) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid sample quantity mask");
+  }
+  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (!ready.ok()) return ready;
+  if (((request.quantityMask & SAMPLE_ACCELERATION) != 0U &&
+       _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
+      ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
+       (_verifiedProfile.gyroOdr == Odr::POWER_DOWN ||
+        _verifiedProfile.gyroSleepEnabled)) ||
+      ((request.quantityMask & SAMPLE_TEMPERATURE) != 0U &&
+       _verifiedProfile.accelOdr == Odr::POWER_DOWN &&
+       _verifiedProfile.gyroOdr == Odr::POWER_DOWN)) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Requested quantity is powered down or sleeping");
+  }
+  if (!_verifiedProfile.blockDataUpdate) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "Managed samples require BDU");
+  }
+  const Status status = _start(JobKind::SAMPLE, timing, token);
+  if (status.inProgress()) {
+    _sampleRequest = request;
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startReset(const OperationTiming& timing, OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (!_hasDesiredProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to restore");
+  }
+  const Status status = _start(JobKind::RESET, timing, token);
+  if (status.inProgress()) {
+    _configurationState = ConfigurationState::APPLYING;
+    _prepareManagedImage(_desiredProfile);
+    _substep = 0;
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startBoot(const OperationTiming& timing, OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (!_hasDesiredProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to restore");
+  }
+  const Status status = _start(JobKind::BOOT, timing, token);
+  if (status.inProgress()) {
+    _configurationState = ConfigurationState::APPLYING;
+    _prepareManagedImage(_desiredProfile);
+    _substep = 0;
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startRecover(const OperationTiming& timing, OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (!_hasDesiredProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to restore");
+  }
+  const Status status = _start(JobKind::RECOVER, timing, token);
+  if (status.inProgress()) {
+    _configurationState = ConfigurationState::APPLYING;
+    _prepareManagedImage(_desiredProfile);
+    _substep = 0;
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startReconcile(const OperationTiming& timing,
+                                OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (!_hasDesiredProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to reconcile");
+  }
+  const Status status = _start(JobKind::RECONCILE, timing, token);
+  if (status.inProgress()) {
+    _configurationState = ConfigurationState::APPLYING;
+    _prepareManagedImage(_desiredProfile);
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startPowerDown(const OperationTiming& timing,
+                                OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  const Status status = _start(JobKind::POWER_DOWN, timing, token);
+  if (status.inProgress()) _configurationState = ConfigurationState::APPLYING;
+  return status;
+}
+
+Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
+                               const OperationTiming& timing,
+                               OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (request.samples < 5U || request.samples > MAX_SELF_TEST_SAMPLES) {
+    return Status::Error(Err::INVALID_PARAM, "Self-test samples must be 5..100");
+  }
+  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (!ready.ok()) return ready;
+  const Status status = _start(JobKind::SELF_TEST, timing, token);
+  if (status.inProgress()) {
+    _operationTransactionLimit = maximumSelfTestTransactions(request.samples);
+    _selfTestRequest = request;
+    _selfTestRestoreProfile = _verifiedProfile;
+    _configurationState = ConfigurationState::APPLYING;
+    _primaryStatus = Status::Ok();
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startCalibration(const CalibrationRequest& request,
+                                  const OperationTiming& timing,
+                                  OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  const Status validation = validateCalibrationRequest(request);
+  if (!validation.ok()) return validation;
+  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (!ready.ok()) return ready;
+  if ((request.kind == CalibrationKind::ACCELEROMETER_BIAS &&
+       _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
+      (request.kind == CalibrationKind::GYROSCOPE_BIAS &&
+       (_verifiedProfile.gyroOdr == Odr::POWER_DOWN ||
+        _verifiedProfile.gyroSleepEnabled))) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Calibration sensor is powered down or sleeping");
+  }
+  const Status status = _start(JobKind::CALIBRATION, timing, token);
+  if (status.inProgress()) {
+    _operationTransactionLimit = maximumCalibrationTransactions(request.samples);
+    _calibrationRequest = request;
+    _samplesDone = 0;
+    _sumX = _sumY = _sumZ = 0;
+    _rawMin = RawAxes{std::numeric_limits<int16_t>::max(),
+                      std::numeric_limits<int16_t>::max(),
+                      std::numeric_limits<int16_t>::max()};
+    _rawMax = RawAxes{std::numeric_limits<int16_t>::min(),
+                      std::numeric_limits<int16_t>::min(),
+                      std::numeric_limits<int16_t>::min()};
+    _readyPolls = 0;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::startFifoPurge(const FifoPurgeRequest& request,
+                                const OperationTiming& timing,
+                                OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (request.maxWords == 0U || request.maxWords > 2048U) {
+    return Status::Error(Err::INVALID_PARAM, "FIFO purge maximum must be 1..2048");
+  }
+  const Status status = _start(JobKind::FIFO_PURGE, timing, token);
+  if (status.inProgress()) {
+    _fifoPurgeRequest = request;
+    _operationTransactionLimit = maximumFifoPurgeTransactions(request.maxWords);
+  }
+  return status;
+}
+
+void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
+  const uint8_t registers[MANAGED_REGISTER_COUNT] = {
+      cmd::REG_FUNC_CFG_ACCESS, cmd::REG_SENSOR_SYNC_TIME_FRAME,
+      cmd::REG_SENSOR_SYNC_RES_RATIO, cmd::REG_FIFO_CTRL1, cmd::REG_FIFO_CTRL2,
+      cmd::REG_FIFO_CTRL3, cmd::REG_FIFO_CTRL4, cmd::REG_FIFO_CTRL5,
+      cmd::REG_DRDY_PULSE_CFG_G, cmd::REG_INT1_CTRL, cmd::REG_INT2_CTRL,
+      cmd::REG_CTRL1_XL, cmd::REG_CTRL2_G, cmd::REG_CTRL3_C,
+      cmd::REG_CTRL4_C, cmd::REG_CTRL5_C, cmd::REG_CTRL6_C,
+      cmd::REG_CTRL7_G, cmd::REG_CTRL8_XL, cmd::REG_CTRL9_XL,
+      cmd::REG_CTRL10_C, cmd::REG_MASTER_CONFIG, cmd::REG_TAP_CFG,
+      cmd::REG_TAP_THS_6D, cmd::REG_INT_DUR2, cmd::REG_WAKE_UP_THS,
+      cmd::REG_WAKE_UP_DUR, cmd::REG_FREE_FALL, cmd::REG_MD1_CFG,
+      cmd::REG_MD2_CFG, cmd::REG_X_OFS_USR, cmd::REG_Y_OFS_USR,
+      cmd::REG_Z_OFS_USR};
+  const uint8_t values[MANAGED_REGISTER_COUNT] = {
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      buildCtrl1(profile), buildCtrl2(profile), buildCtrl3(profile),
+      buildCtrl4(profile), 0, buildCtrl6(profile), buildCtrl7(profile),
+      buildCtrl8(profile), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      static_cast<uint8_t>(profile.accelUserOffset.x),
+      static_cast<uint8_t>(profile.accelUserOffset.y),
+      static_cast<uint8_t>(profile.accelUserOffset.z)};
+  for (uint8_t index = 0; index < MANAGED_REGISTER_COUNT; ++index) {
+    _managedRegisters[index] = registers[index];
+    _managedValues[index] = values[index];
+  }
+}
+
+Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
+                       uint64_t nowMs) {
+  if (_operationTransactionLimit != 0U &&
+      _operationTransactions >= _operationTransactionLimit) {
+    return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
+                         "Operation transaction limit exceeded");
+  }
+  uint8_t tx = reg;
+  _transactionUsed = true;
+  _operationTransactions = saturatingIncrement(_operationTransactions);
+  Status status = normalizeTransport(_driverConfig.i2cWriteRead(
+      static_cast<uint8_t>(_driverConfig.address), &tx, 1, data, length,
+      _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
+  if (status.ok()) {
+    _transportSuccesses = saturatingIncrement(_transportSuccesses);
+  } else {
+    _transportFailures = saturatingIncrement(_transportFailures);
+    _lastTransportError = status;
+    _lastTransportErrorUptimeMs = nowMs;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
+                        uint64_t nowMs, bool mayChangeConfiguration) {
+  if (length > MAX_DIAGNOSTIC_READ) {
+    return Status::Error(Err::INVALID_PARAM, "Write exceeds fixed transaction buffer");
+  }
+  if (_operationTransactionLimit != 0U &&
+      _operationTransactions >= _operationTransactionLimit) {
+    return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
+                         "Operation transaction limit exceeded");
+  }
+  uint8_t payload[MAX_DIAGNOSTIC_READ + 1] = {};
+  payload[0] = reg;
+  for (size_t index = 0; index < length; ++index) payload[index + 1U] = data[index];
+  if (mayChangeConfiguration) {
+    _hardwareStateMayHaveChanged = true;
+    _configurationMayBeUnknown = true;
+  }
+  _transactionUsed = true;
+  _operationTransactions = saturatingIncrement(_operationTransactions);
+  Status status = normalizeTransport(_driverConfig.i2cWrite(
+      static_cast<uint8_t>(_driverConfig.address), payload, length + 1U,
+      _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
+  if (status.ok()) {
+    _transportSuccesses = saturatingIncrement(_transportSuccesses);
+  } else {
+    _transportFailures = saturatingIncrement(_transportFailures);
+    _lastTransportError = status;
+    _lastTransportErrorUptimeMs = nowMs;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
+                            bool mayChangeConfiguration) {
+  return _write(reg, &value, 1, nowMs, mayChangeConfiguration);
+}
+
+void LSM6DS3TR::_recordMismatch(uint8_t reg, uint8_t expected,
+                               uint8_t observed) {
+  _mismatchRegister = reg;
+  _mismatchExpected = expected;
+  _mismatchObserved = observed;
+  _workingResult.configuration.mismatchRegister = reg;
+  _workingResult.configuration.expectedValue = expected;
+  _workingResult.configuration.observedValue = observed;
+}
+
+void LSM6DS3TR::_invalidateConfiguration() {
+  _configurationState = _hasDesiredProfile ? ConfigurationState::UNKNOWN
+                                            : ConfigurationState::UNCONFIGURED;
+  _hasVerifiedProfile = false;
+  _validAfterUptimeMs = 0;
+}
+
+Status LSM6DS3TR::_stepProbe(uint64_t nowMs, bool) {
+  if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status = _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "WHO_AM_I unavailable outside the main register bank");
     }
-    bool ready = false;
-    _pollInstructionUsed = true;
-    Status st = accelJob ? isAccelDataReady(ready) : isGyroDataReady(ready);
-    if (!st.ok()) {
-      return st;
+    _step = 1;
+    return inProgressStatus();
+  }
+  uint8_t whoAmI = 0;
+  const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+  if (!status.ok()) return status;
+  _workingResult.probe.address = static_cast<uint8_t>(_driverConfig.address);
+  _workingResult.probe.whoAmI = whoAmI;
+  if (whoAmI != cmd::WHO_AM_I_VALUE) {
+    _invalidateConfiguration();
+    return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+  }
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
+}
+
+Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
+  if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
+       (reconcileOnly && _job == JobKind::RECONCILE)) &&
+      _substep == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "Configuration requires the main register bank");
     }
-    if (!ready) {
-      ++_calibrationPollsForSample;
-      if (deadlineReached(_pollNowMs, _pollDeadlineMs) ||
-          _calibrationPollsForSample >= CALIBRATION_MAX_POLLS_PER_SAMPLE) {
-        return Status::Error(Err::TIMEOUT,
-                             accelJob ? "Accel data-ready timeout during calibration"
-                                      : "Gyro data-ready timeout during calibration",
-                             _calibrationPollsForSample);
-      }
-      return Status::Error(Err::IN_PROGRESS, "Calibration sample not ready");
+    _substep = 1;
+    return inProgressStatus();
+  }
+  if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
+       (reconcileOnly && _job == JobKind::RECONCILE)) &&
+      _substep == 1U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
     }
-    _pollStep = 1;
-    return Status::Ok();
+    _substep = 2;
+    return inProgressStatus();
   }
 
-  RawAxes raw;
-  _pollInstructionUsed = true;
-  Status st = accelJob ? readAccelRaw(raw) : readGyroRaw(raw);
-  if (!st.ok()) {
-    return st;
-  }
-  const Axes phys = accelJob ? convertAccel(raw) : convertGyro(raw);
-  addCalibrationSample(phys, _calibrationSamplesDone,
-                       _calibrationSumX, _calibrationSumY, _calibrationSumZ,
-                       _calibrationMinX, _calibrationMaxX,
-                       _calibrationMinY, _calibrationMaxY,
-                       _calibrationMinZ, _calibrationMaxZ);
-  ++_calibrationSamplesDone;
-
-  if (_calibrationSamplesDone >= _calibrationSamplesTarget) {
-    Axes bias;
-    Status quality = accelJob
-        ? finalizeAccelCalibration(_calibrationSamplesTarget,
-                                   _calibrationSumX, _calibrationSumY, _calibrationSumZ,
-                                   _calibrationMinX, _calibrationMaxX,
-                                   _calibrationMinY, _calibrationMaxY,
-                                   _calibrationMinZ, _calibrationMaxZ,
-                                   _config.calibrationLimits, bias)
-        : finalizeGyroCalibration(_calibrationSamplesTarget,
-                                  _calibrationSumX, _calibrationSumY, _calibrationSumZ,
-                                  _calibrationMinX, _calibrationMaxX,
-                                  _calibrationMinY, _calibrationMaxY,
-                                  _calibrationMinZ, _calibrationMaxZ,
-                                  _config.calibrationLimits, bias);
-    if (!quality.ok()) {
-      return quality;
+  if (reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
+    uint8_t observed = 0;
+    const uint8_t index = static_cast<uint8_t>(_step);
+    const Status status = _read(_managedRegisters[index], &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != _managedValues[index]) {
+      _recordMismatch(_managedRegisters[index], _managedValues[index], observed);
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Managed register readback mismatch",
+                           _managedRegisters[index]);
     }
-    if (accelJob) {
-      _accelBias = bias;
+    ++_step;
+    if (_step == MANAGED_REGISTER_COUNT) {
+      _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+    }
+    return inProgressStatus();
+  }
+
+  if (!reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
+    const uint8_t index = static_cast<uint8_t>(_step);
+    const Status status =
+        _writeByte(_managedRegisters[index], _managedValues[index], nowMs, true);
+    if (!status.ok()) return status;
+    ++_step;
+    return inProgressStatus();
+  }
+
+  if (!reconcileOnly && _step < 2U * MANAGED_REGISTER_COUNT) {
+    const uint8_t index = static_cast<uint8_t>(_step - MANAGED_REGISTER_COUNT);
+    uint8_t observed = 0;
+    const Status status = _read(_managedRegisters[index], &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != _managedValues[index]) {
+      _recordMismatch(_managedRegisters[index], _managedValues[index], observed);
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Managed register readback mismatch",
+                           _managedRegisters[index]);
+    }
+    ++_step;
+    return inProgressStatus();
+  }
+
+  if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT)) {
+    _mismatchRegister = 0;
+    _mismatchExpected = 0;
+    _mismatchObserved = 0;
+    _workingResult.configuration.mismatchRegister = 0;
+    _workingResult.configuration.expectedValue = 0;
+    _workingResult.configuration.observedValue = 0;
+    _verifiedProfile = _job == JobKind::SELF_TEST ? _selfTestRestoreProfile
+                                                   : _desiredProfile;
+    _hasVerifiedProfile = true;
+    if (!reconcileOnly) {
+      _configGeneration = saturatingIncrement(_configGeneration);
+    }
+    uint64_t settleMs = 0U;
+    if (reconcileOnly &&
+        _configurationStateBeforeOperation == ConfigurationState::KNOWN) {
+      _validAfterUptimeMs = _validAfterBeforeOperationMs;
+      _configurationState = ConfigurationState::KNOWN;
     } else {
-      _gyroBias = bias;
+      const uint64_t settleUs = requiredSettleUs(_verifiedProfile);
+      settleMs = settleUs == std::numeric_limits<uint64_t>::max()
+                     ? settleUs
+                     : (settleUs + 999U) / 1000U;
+      _validAfterUptimeMs = saturatingAdd(nowMs, settleMs);
+      _configurationState = settleMs == 0U ? ConfigurationState::KNOWN
+                                           : ConfigurationState::SETTLING;
     }
-    return _finishPollJob(Status::Ok());
+    _configurationMayBeUnknown = false;
+    _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 1U);
+    if (settleMs != 0U) {
+      _waiting = true;
+      return inProgressStatus();
+    }
   }
 
-  _pollStep = 0;
-  _calibrationPollsForSample = 0;
-  _pollDeadlineMs = _pollNowMs + odrIntervalMs(odr) * 3 + 100;
-  _pollDeadlineArmed = true;
-  return Status::Ok();
+  if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 1U) &&
+      nowMs < _validAfterUptimeMs) {
+    _waiting = true;
+    return inProgressStatus();
+  }
+  _configurationState = ConfigurationState::KNOWN;
+  if (_job == JobKind::SELF_TEST) {
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    _workingResult.selfTest.restorationStatus = Status::Ok();
+    if (!_primaryStatus.ok()) {
+      return _finish(_primaryStatus, OperationState::FAILED);
+    }
+  }
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
 
-Status LSM6DS3TR::getMeasurement(Measurement& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
+  if (_step == 0U && _sampleRequest.checkDataReady) {
+    if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
+      _waiting = true;
+      return inProgressStatus();
+    }
+    const Status status = _read(cmd::REG_STATUS_REG, &_sampleStatus, 1, nowMs);
+    if (!status.ok()) return status;
+    uint8_t required = 0;
+    if ((_sampleRequest.quantityMask & SAMPLE_ACCELERATION) != 0U)
+      required = cmd::MASK_XLDA;
+    if ((_sampleRequest.quantityMask & SAMPLE_ANGULAR_RATE) != 0U)
+      required = static_cast<uint8_t>(required | cmd::MASK_GDA);
+    if ((_sampleRequest.quantityMask & SAMPLE_TEMPERATURE) != 0U)
+      required = static_cast<uint8_t>(required | cmd::MASK_TDA);
+    if ((_sampleStatus & required) != required) {
+      ++_readyPolls;
+      if (_readyPolls >= 65U) {
+        return Status::Error(Err::DATA_NOT_READY,
+                             "Sample data was not ready within 65 checks");
+      }
+      _waitUntilMs = saturatingAdd(
+          nowMs, sampleReadyPollDelayMs(_verifiedProfile, _sampleRequest));
+      _waiting = true;
+      return inProgressStatus();
+    }
+    _readyPolls = 0;
+    _waitUntilMs = 0;
+    _step = 1;
+    return inProgressStatus();
   }
-  if (!_hasSample) {
-    return Status::Error(Err::MEASUREMENT_NOT_READY, "No sample available");
-  }
-
-  out.accel = convertAccel(_rawMeasurement.accel);
-  out.gyro = convertGyro(_rawMeasurement.gyro);
-  out.temperatureC = convertTemperature(_rawMeasurement.temperature);
-  correctAccel(out.accel);
-  correctGyro(out.gyro);
-  _measurementReady = false;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::getRawMeasurement(RawMeasurement& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!_hasSample) {
-    return Status::Error(Err::MEASUREMENT_NOT_READY, "No sample available");
-  }
-
-  out = _rawMeasurement;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readAccelRaw(RawAxes& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[cmd::DATA_LEN_ACCEL] = {};
-  Status st = readRegs(cmd::REG_DATA_START_ACCEL, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out.x = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
-  out.y = static_cast<int16_t>((static_cast<uint16_t>(data[3]) << 8) | data[2]);
-  out.z = static_cast<int16_t>((static_cast<uint16_t>(data[5]) << 8) | data[4]);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readGyroRaw(RawAxes& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[cmd::DATA_LEN_GYRO] = {};
-  Status st = readRegs(cmd::REG_DATA_START_GYRO, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out.x = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
-  out.y = static_cast<int16_t>((static_cast<uint16_t>(data[3]) << 8) | data[2]);
-  out.z = static_cast<int16_t>((static_cast<uint16_t>(data[5]) << 8) | data[4]);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readTemperatureRaw(int16_t& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[2] = {};
-  Status st = readRegs(cmd::REG_OUT_TEMP_L, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readAllRaw(RawMeasurement& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
+  if (_step == 0U) _step = 1;
 
   uint8_t data[cmd::DATA_LEN_ALL] = {};
-  Status st = readRegs(cmd::REG_DATA_START_ALL, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
+  const Status status = _read(cmd::REG_DATA_START_ALL, data, sizeof(data), nowMs);
+  if (!status.ok()) return status;
+  RawSampleResult& sample = _workingResult.sample;
+  sample.temperatureRaw = decodeInt16(&data[0]);
+  sample.gyro = decodeRawAxes(&data[2]);
+  sample.accel = decodeRawAxes(&data[8]);
+  sample.validMask = _sampleRequest.quantityMask;
+  sample.freshMask = 0;
+  if (_sampleRequest.checkDataReady) {
+    if ((_sampleStatus & cmd::MASK_XLDA) != 0U)
+      sample.freshMask = SAMPLE_ACCELERATION;
+    if ((_sampleStatus & cmd::MASK_GDA) != 0U)
+      sample.freshMask = static_cast<uint8_t>(sample.freshMask | SAMPLE_ANGULAR_RATE);
+    if ((_sampleStatus & cmd::MASK_TDA) != 0U)
+      sample.freshMask = static_cast<uint8_t>(sample.freshMask | SAMPLE_TEMPERATURE);
+    sample.freshMask = static_cast<uint8_t>(sample.freshMask & sample.validMask);
   }
-
-  out.temperature = static_cast<int16_t>((static_cast<uint16_t>(data[1]) << 8) | data[0]);
-  out.gyro.x = static_cast<int16_t>((static_cast<uint16_t>(data[3]) << 8) | data[2]);
-  out.gyro.y = static_cast<int16_t>((static_cast<uint16_t>(data[5]) << 8) | data[4]);
-  out.gyro.z = static_cast<int16_t>((static_cast<uint16_t>(data[7]) << 8) | data[6]);
-  out.accel.x = static_cast<int16_t>((static_cast<uint16_t>(data[9]) << 8) | data[8]);
-  out.accel.y = static_cast<int16_t>((static_cast<uint16_t>(data[11]) << 8) | data[10]);
-  out.accel.z = static_cast<int16_t>((static_cast<uint16_t>(data[13]) << 8) | data[12]);
-
-  _rawMeasurement = out;
-  _hasSample = true;
-  _sampleTimestampMs = _nowMs();
-  return Status::Ok();
+  sample.quality = _sampleRequest.checkDataReady
+                       ? SampleQuality::READY_CHECKED
+                       : SampleQuality::DIRECT_UNVERIFIED;
+  _sampleSequence = saturatingIncrement64(_sampleSequence);
+  sample.sequence = _sampleSequence;
+  sample.configGeneration = _configGeneration;
+  sample.readUptimeMs = nowMs;
+  sample.accelFullScale = _verifiedProfile.accelFullScale;
+  sample.gyroFullScale = _verifiedProfile.gyroFullScale;
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
 
-Status LSM6DS3TR::getSettings(SettingsSnapshot& out) const {
-  out.initialized = _initialized;
-  out.state = _driverState;
-  out.i2cAddress = _config.i2cAddress;
-  out.i2cTimeoutMs = _config.i2cTimeoutMs;
-  out.offlineThreshold = _config.offlineThreshold;
-  out.hasNowMsHook = (_config.nowMs != nullptr);
-  out.odrXl = _config.odrXl;
-  out.odrG = _config.odrG;
-  out.fsXl = _config.fsXl;
-  out.fsG = _config.fsG;
-  out.bdu = _config.bdu;
-  out.accelPowerMode = _accelPowerMode;
-  out.gyroPowerMode = _gyroPowerMode;
-  out.gyroSleepEnabled = _gyroSleepEnabled;
-  out.accelFilter = _accelFilterConfig;
-  out.gyroFilter = _gyroFilterConfig;
-  out.timestampEnabled = _timestampEnabled;
-  out.timestampHighResolution = _timestampHighResolution;
-  out.pedometerEnabled = _pedometerEnabled;
-  out.significantMotionEnabled = _significantMotionEnabled;
-  out.tiltEnabled = _tiltEnabled;
-  out.wristTiltEnabled = _wristTiltEnabled;
-  out.accelOffsetWeight = _accelOffsetWeight;
-  out.accelUserOffset = _accelUserOffset;
-  out.fifo = _fifoConfig;
-  out.accelBias = _accelBias;
-  out.gyroBias = _gyroBias;
-  out.measurementPending = _measurementRequested && !_measurementReady;
-  out.measurementReady = _measurementReady;
-  out.hasSample = _hasSample;
-  out.sampleTimestampMs = _sampleTimestampMs;
-  out.rawMeasurement = _rawMeasurement;
-  out.cachedConfigDirty = _cachedConfigDirty;
-  return Status::Ok();
-}
-
-Axes LSM6DS3TR::convertAccel(const RawAxes& raw) const {
-  const float sens = accelSensitivityMgLsb(_config.fsXl);
-  Axes result;
-  result.x = static_cast<float>(raw.x) * sens * 0.001f;
-  result.y = static_cast<float>(raw.y) * sens * 0.001f;
-  result.z = static_cast<float>(raw.z) * sens * 0.001f;
-  return result;
-}
-
-Axes LSM6DS3TR::convertGyro(const RawAxes& raw) const {
-  const float sens = gyroSensitivityMdpsLsb(_config.fsG);
-  Axes result;
-  result.x = static_cast<float>(raw.x) * sens * 0.001f;
-  result.y = static_cast<float>(raw.y) * sens * 0.001f;
-  result.z = static_cast<float>(raw.z) * sens * 0.001f;
-  return result;
-}
-
-float LSM6DS3TR::convertTemperature(int16_t raw) const {
-  return static_cast<float>(raw) / 256.0f + 25.0f;
-}
-
-Status LSM6DS3TR::setAccelOdr(Odr odr) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidAccelOdr(odr, _accelPowerMode)) {
-    return Status::Error(Err::INVALID_PARAM,
-                         "Accel 1.6 Hz requires low-power/normal mode; run 'apm lpn' first");
-  }
-  if ((_pedometerEnabled || _significantMotionEnabled || _tiltEnabled || _wristTiltEnabled) &&
-      !requiresAccelOdrAtLeast26Hz(odr)) {
-    return Status::Error(Err::INVALID_PARAM, "Embedded functions require accel ODR >= 26 Hz");
-  }
-  if (_timestampEnabled && odr == Odr::POWER_DOWN && _config.odrG == Odr::POWER_DOWN) {
-    return Status::Error(Err::INVALID_PARAM, "Timestamp requires at least one active sensor");
-  }
-
-  Status st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(odr, _config.fsXl));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  _config.odrXl = odr;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setGyroOdr(Odr odr) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidGyroOdr(odr, _gyroPowerMode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid gyro ODR/power-mode combination");
-  }
-  if (_timestampEnabled && odr == Odr::POWER_DOWN && _config.odrXl == Odr::POWER_DOWN) {
-    return Status::Error(Err::INVALID_PARAM, "Timestamp requires at least one active sensor");
-  }
-
-  Status st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(odr, _config.fsG));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  _config.odrG = odr;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setAccelFs(AccelFs fs) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidAccelFs(fs)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid accel full-scale");
-  }
-
-  Status st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, fs));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  _config.fsXl = fs;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setGyroFs(GyroFs fs) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidGyroFs(fs)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid gyro full-scale");
-  }
-
-  Status st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, fs));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  _config.fsG = fs;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::getAccelOdr(Odr& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _config.odrXl;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::getGyroOdr(Odr& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _config.odrG;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::getAccelFs(AccelFs& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _config.fsXl;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::getGyroFs(GyroFs& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _config.fsG;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readWhoAmI(uint8_t& id) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_WHO_AM_I, id);
-}
-
-Status LSM6DS3TR::readStatusReg(uint8_t& status) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_STATUS_REG, status);
-}
-
-Status LSM6DS3TR::readStatus(StatusReg& out) {
-  uint8_t raw = 0;
-  Status st = readStatusReg(raw);
-  if (!st.ok()) {
-    return st;
-  }
-
-  out.raw = raw;
-  out.accelDataReady = (raw & cmd::MASK_XLDA) != 0;
-  out.gyroDataReady = (raw & cmd::MASK_GDA) != 0;
-  out.tempDataReady = (raw & cmd::MASK_TDA) != 0;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::isAccelDataReady(bool& ready) {
-  uint8_t status = 0;
-  Status st = readStatusReg(status);
-  if (!st.ok()) {
-    return st;
-  }
-  ready = (status & cmd::MASK_XLDA) != 0;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::isGyroDataReady(bool& ready) {
-  uint8_t status = 0;
-  Status st = readStatusReg(status);
-  if (!st.ok()) {
-    return st;
-  }
-  ready = (status & cmd::MASK_GDA) != 0;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::isTempDataReady(bool& ready) {
-  uint8_t status = 0;
-  Status st = readStatusReg(status);
-  if (!st.ok()) {
-    return st;
-  }
-  ready = (status & cmd::MASK_TDA) != 0;
-  return Status::Ok();
-}
-
-float LSM6DS3TR::accelSensitivity() const {
-  return accelSensitivityMgLsb(_config.fsXl);
-}
-
-float LSM6DS3TR::gyroSensitivity() const {
-  return gyroSensitivityMdpsLsb(_config.fsG);
-}
-
-Status LSM6DS3TR::setAccelPowerMode(AccelPowerMode mode) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidAccelPowerMode(mode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid accel power mode");
-  }
-  if (!isValidAccelOdr(_config.odrXl, mode)) {
-    return Status::Error(Err::INVALID_PARAM,
-                         "Current accel ODR is not valid in requested power mode; use 12.5 Hz+ for high-performance");
-  }
-
-  const AccelPowerMode oldMode = _accelPowerMode;
-  _accelPowerMode = mode;
-  Status st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-  if (!st.ok()) {
-    _accelPowerMode = oldMode;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getAccelPowerMode(AccelPowerMode& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _accelPowerMode;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setGyroPowerMode(GyroPowerMode mode) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidGyroPowerMode(mode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid gyro power mode");
-  }
-  if (!isValidGyroOdr(_config.odrG, mode)) {
-    return Status::Error(Err::INVALID_PARAM, "Current gyro ODR is not valid in requested power mode");
-  }
-
-  const GyroPowerMode oldMode = _gyroPowerMode;
-  _gyroPowerMode = mode;
-  Status st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-  if (!st.ok()) {
-    _gyroPowerMode = oldMode;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getGyroPowerMode(GyroPowerMode& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _gyroPowerMode;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setGyroSleepEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  const bool oldValue = _gyroSleepEnabled;
-  _gyroSleepEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-  if (!st.ok()) {
-    _gyroSleepEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getGyroSleepEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _gyroSleepEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setAccelFilterConfig(const AccelFilterConfig& config) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  const AccelFilterConfig oldConfig = _accelFilterConfig;
-  _accelFilterConfig = config;
-  Status st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
-  if (!st.ok()) {
-    _accelFilterConfig = oldConfig;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getAccelFilterConfig(AccelFilterConfig& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _accelFilterConfig;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setGyroFilterConfig(const GyroFilterConfig& config) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidGyroHpfMode(config.highPassMode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid gyro high-pass mode");
-  }
-
-  const GyroFilterConfig oldConfig = _gyroFilterConfig;
-  _gyroFilterConfig = config;
-  Status st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-  if (!st.ok()) {
-    _gyroFilterConfig = oldConfig;
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-  if (!st.ok()) {
-    _gyroFilterConfig = oldConfig;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getGyroFilterConfig(GyroFilterConfig& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _gyroFilterConfig;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setTimestampEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (enabled && !isActiveOdr(_config.odrXl) && !isActiveOdr(_config.odrG)) {
-    return Status::Error(Err::INVALID_PARAM, "Timestamp requires at least one active sensor");
-  }
-
-  const bool oldValue = _timestampEnabled;
-  _timestampEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _timestampEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getTimestampEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _timestampEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setTimestampHighResolution(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  const bool oldValue = _timestampHighResolution;
-  _timestampHighResolution = enabled;
-  Status st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR, _buildWakeUpDur());
-  if (!st.ok()) {
-    _timestampHighResolution = oldValue;
-    _cachedConfigDirty = true;
-    return st;
-  }
-  if (enabled) {
-    st = resetTimestamp();
-    if (!st.ok()) {
-      _timestampHighResolution = oldValue;
-      _cachedConfigDirty = true;
+Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
+  if (_substep == 0U) {
+    if (recovery) {
+      uint8_t access = 0;
+      const Status status =
+          _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+      if (!status.ok()) return status;
+      if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+        _invalidateConfiguration();
+        return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                             "Recovery requires the main register bank");
+      }
+      _substep = 1;
+    } else {
+      const Status status =
+          _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+      if (!status.ok()) return status;
+      _substep = 1;
     }
-    return st;
+    return inProgressStatus();
   }
-  return Status::Ok();
+  if (recovery && _substep == 1U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _substep = 3;
+    return inProgressStatus();
+  }
+  if (!recovery && _substep == 1U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _recordMismatch(cmd::REG_FUNC_CFG_ACCESS, 0, access);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Main register bank clear did not verify",
+                           cmd::REG_FUNC_CFG_ACCESS);
+    }
+    _substep = 2;
+    return inProgressStatus();
+  }
+  if (_substep == 2U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _substep = 3;
+    return inProgressStatus();
+  }
+  if (_substep == 3U) {
+    const uint8_t gyroOff = static_cast<uint8_t>(buildCtrl2(_desiredProfile) &
+                                                 ~cmd::MASK_ODR_G);
+    const Status status = _writeByte(cmd::REG_CTRL2_G, gyroOff, nowMs, true);
+    if (!status.ok()) return status;
+    _substep = 4;
+    return inProgressStatus();
+  }
+  if (_substep == 4U) {
+    const uint8_t accelHighPerformance =
+        static_cast<uint8_t>(buildCtrl6(_desiredProfile) & ~cmd::MASK_XL_HM_MODE);
+    const Status status =
+        _writeByte(cmd::REG_CTRL6_C, accelHighPerformance, nowMs, true);
+    if (!status.ok()) return status;
+    _substep = 5;
+    return inProgressStatus();
+  }
+  if (_substep == 5U) {
+    const uint8_t command = static_cast<uint8_t>(buildCtrl3(_desiredProfile) |
+                                                 (boot ? cmd::MASK_BOOT
+                                                       : cmd::MASK_SW_RESET));
+    const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs, true);
+    if (!status.ok()) return status;
+    _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS);
+    _substep = 6;
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_substep == 6U) {
+    if (nowMs < _waitUntilMs) {
+      _waiting = true;
+      return inProgressStatus();
+    }
+    uint8_t ctrl3 = 0;
+    const Status status = _read(cmd::REG_CTRL3_C, &ctrl3, 1, nowMs);
+    if (!status.ok()) return status;
+    const uint8_t mask = boot ? cmd::MASK_BOOT : cmd::MASK_SW_RESET;
+    if ((ctrl3 & mask) != 0U) {
+      ++_readyPolls;
+      if (_readyPolls >= 16U) {
+        return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
+                             "Reset or boot completion poll limit exceeded");
+      }
+      _waitUntilMs = saturatingAdd(nowMs, 1U);
+      _waiting = true;
+      return inProgressStatus();
+    }
+    _readyPolls = 0;
+    _step = 0;
+    _substep = 7;
+    _prepareManagedImage(_desiredProfile);
+    return inProgressStatus();
+  }
+  return _stepConfigure(nowMs, false);
 }
 
-Status LSM6DS3TR::getTimestampHighResolution(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
+  constexpr uint8_t ctrl1 = 0;
+  constexpr uint8_t ctrl2 = 0;
+  if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    _step = (access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U
+                ? 1U
+                : 3U;
+    return inProgressStatus();
   }
-  enabled = _timestampHighResolution;
-  return Status::Ok();
+  if (_step == 1U) {
+    const Status status =
+        _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+    if (!status.ok()) return status;
+    _step = 2;
+    return inProgressStatus();
+  }
+  if (_step == 2U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _recordMismatch(cmd::REG_FUNC_CFG_ACCESS, 0, access);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Main register bank clear did not verify",
+                           cmd::REG_FUNC_CFG_ACCESS);
+    }
+    _step = 3;
+    return inProgressStatus();
+  }
+  if (_step == 3U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _step = 4;
+    return inProgressStatus();
+  }
+  if (_step == 4U) {
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, ctrl1, nowMs, true);
+    if (!status.ok()) return status;
+    ++_step;
+    return inProgressStatus();
+  }
+  if (_step == 5U) {
+    const Status status = _writeByte(cmd::REG_CTRL2_G, ctrl2, nowMs, true);
+    if (!status.ok()) return status;
+    ++_step;
+    return inProgressStatus();
+  }
+  uint8_t observed = 0;
+  if (_step == 6U) {
+    const Status status = _read(cmd::REG_CTRL1_XL, &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != ctrl1) {
+      _recordMismatch(cmd::REG_CTRL1_XL, ctrl1, observed);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Power-down readback mismatch", cmd::REG_CTRL1_XL);
+    }
+    ++_step;
+    return inProgressStatus();
+  }
+  if (_step == 7U) {
+    const Status status = _read(cmd::REG_CTRL2_G, &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != ctrl2) {
+      _recordMismatch(cmd::REG_CTRL2_G, ctrl2, observed);
+      return Status::Error(Err::CONFIGURATION_MISMATCH,
+                           "Power-down readback mismatch", cmd::REG_CTRL2_G);
+    }
+    _hasVerifiedProfile = false;
+    _configurationMayBeUnknown = false;
+    _configurationState = ConfigurationState::UNCONFIGURED;
+    _validAfterUptimeMs = 0;
+    _configGeneration = saturatingIncrement(_configGeneration);
+    return _finish(Status::Ok(), OperationState::SUCCEEDED);
+  }
+  return Status::Error(Err::INVALID_PARAM, "Invalid power-down step");
 }
 
-Status LSM6DS3TR::readTimestamp(uint32_t& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[3] = {};
-  Status st = readRegs(cmd::REG_TIMESTAMP0, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out = static_cast<uint32_t>(data[0]) |
-        (static_cast<uint32_t>(data[1]) << 8) |
-        (static_cast<uint32_t>(data[2]) << 16);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::resetTimestamp() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return writeRegister(cmd::REG_TIMESTAMP2, cmd::TIMESTAMP_RESET_VALUE);
-}
-
-Status LSM6DS3TR::setPedometerEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (enabled && !requiresAccelOdrAtLeast26Hz(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Pedometer requires accel ODR >= 26 Hz");
-  }
-
-  const bool oldValue = _pedometerEnabled;
-  _pedometerEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _pedometerEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getPedometerEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _pedometerEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setSignificantMotionEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (enabled && !requiresAccelOdrAtLeast26Hz(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Significant motion requires accel ODR >= 26 Hz");
-  }
-
-  const bool oldValue = _significantMotionEnabled;
-  _significantMotionEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _significantMotionEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getSignificantMotionEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _significantMotionEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setTiltEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (enabled && !requiresAccelOdrAtLeast26Hz(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Tilt detection requires accel ODR >= 26 Hz");
-  }
-
-  const bool oldValue = _tiltEnabled;
-  _tiltEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _tiltEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getTiltEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _tiltEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setWristTiltEnabled(bool enabled) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (enabled && !requiresAccelOdrAtLeast26Hz(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Wrist tilt requires accel ODR >= 26 Hz");
-  }
-
-  const bool oldValue = _wristTiltEnabled;
-  _wristTiltEnabled = enabled;
-  Status st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _wristTiltEnabled = oldValue;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getWristTiltEnabled(bool& enabled) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  enabled = _wristTiltEnabled;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readStepCounter(uint16_t& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[2] = {};
-  Status st = readRegs(cmd::REG_STEP_COUNTER_L, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out = static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readStepTimestamp(uint16_t& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[2] = {};
-  Status st = readRegs(cmd::REG_STEP_TIMESTAMP_L, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out = static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::resetStepCounter() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  const uint8_t ctrl10WithReset = static_cast<uint8_t>(_buildCtrl10C() | (1u << cmd::BIT_PEDO_RST_STEP));
-  Status st = writeRegister(cmd::REG_CTRL10_C, ctrl10WithReset);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::setAccelOffsetWeight(AccelOffsetWeight weight) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  if (!isValidAccelOffsetWeight(weight)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid accel offset weight");
-  }
-
-  const AccelOffsetWeight oldWeight = _accelOffsetWeight;
-  _accelOffsetWeight = weight;
-  Status st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-  if (!st.ok()) {
-    _accelOffsetWeight = oldWeight;
-    _cachedConfigDirty = true;
-  }
-  return st;
-}
-
-Status LSM6DS3TR::getAccelOffsetWeight(AccelOffsetWeight& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _accelOffsetWeight;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::setAccelUserOffset(const AccelUserOffset& offset) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  uint8_t data[3] = {
-      static_cast<uint8_t>(offset.x),
-      static_cast<uint8_t>(offset.y),
-      static_cast<uint8_t>(offset.z),
+Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
+  auto routeFailureToRestore = [this](const Status& status) -> Status {
+    if (status.ok() || status.inProgress()) return status;
+    if (_primaryStatus.ok()) _primaryStatus = status;
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    _substep = 100;
+    _step = 0;
+    _prepareManagedImage(_selfTestRestoreProfile);
+    _pollBoundary = true;
+    return inProgressStatus();
   };
-  Status st = writeRegs(cmd::REG_X_OFS_USR, data, sizeof(data));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
+
+  auto averageStep = [this, nowMs](bool accel, uint16_t target, bool accumulate,
+                                   bool& complete) -> Status {
+    complete = false;
+    const uint8_t readyMask = accel ? cmd::MASK_XLDA : cmd::MASK_GDA;
+    if (_step == 0U) {
+      if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
+        _waiting = true;
+        return inProgressStatus();
+      }
+      uint8_t statusReg = 0;
+      const Status status = _read(cmd::REG_STATUS_REG, &statusReg, 1, nowMs);
+      if (!status.ok()) return status;
+      if ((statusReg & readyMask) == 0U) {
+        ++_readyPolls;
+        if (_readyPolls >= 3U) {
+          return Status::Error(Err::DATA_NOT_READY,
+                               "Self-test data was not ready within three checks");
+        }
+        _waitUntilMs = saturatingAdd(nowMs, 3U);
+        _waiting = true;
+        return inProgressStatus();
+      }
+      _readyPolls = 0;
+      _waitUntilMs = 0;
+      _step = 1;
+      return inProgressStatus();
+    }
+    uint8_t data[6] = {};
+    const Status status = _read(accel ? cmd::REG_DATA_START_ACCEL
+                                      : cmd::REG_DATA_START_GYRO,
+                                data, sizeof(data), nowMs);
+    if (!status.ok()) return status;
+    const RawAxes raw = decodeRawAxes(data);
+    if (accumulate) {
+      _sumX += raw.x;
+      _sumY += raw.y;
+      _sumZ += raw.z;
+    }
+    ++_samplesDone;
+    _step = 0;
+    _waitUntilMs = saturatingAdd(nowMs, 3U);
+    if (_samplesDone >= target) complete = true;
+    return inProgressStatus();
+  };
+
+  if (_substep == 100U) {
+    return _stepConfigure(nowMs, false);
   }
-  _accelUserOffset = offset;
-  return Status::Ok();
+  if (_substep == 0U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    ++_substep;
+    return inProgressStatus();
+  }
+  if (_substep == 1U) {
+    const Status status = _writeByte(cmd::REG_CTRL8_XL, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    ++_substep;
+    return inProgressStatus();
+  }
+  if (_substep == 2U) {
+    if (_step == 0U) {
+      const Status status = _writeByte(cmd::REG_CTRL6_C, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step >= 1U && _step <= 3U) {
+      const uint8_t reg = static_cast<uint8_t>(
+          cmd::REG_X_OFS_USR + static_cast<uint8_t>(_step - 1U));
+      const Status status = _writeByte(reg, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    DeviceProfile testProfile = _selfTestRestoreProfile;
+    testProfile.accelOdr = Odr::HZ_416;
+    testProfile.accelFullScale = AccelFs::G_2;
+    const Status status =
+        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _step = 0;
+    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
+    _substep = 3;
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_substep == 3U || _substep == 7U || _substep == 13U || _substep == 17U) {
+    if (nowMs < _waitUntilMs) {
+      _waiting = true;
+      return inProgressStatus();
+    }
+    _samplesDone = 0;
+    _readyPolls = 0;
+    _step = 0;
+    ++_substep;
+    return inProgressStatus();
+  }
+  if (_substep == 4U || _substep == 8U || _substep == 14U || _substep == 18U) {
+    bool complete = false;
+    const bool accel = _substep < 10U;
+    const Status status =
+        averageStep(accel, SELF_TEST_DISCARD_SAMPLES, false, complete);
+    if (!status.ok() && !status.inProgress()) return routeFailureToRestore(status);
+    if (complete) {
+      _samplesDone = 0;
+      _sumX = _sumY = _sumZ = 0;
+      ++_substep;
+    }
+    return status;
+  }
+  if (_substep == 5U || _substep == 9U || _substep == 15U || _substep == 19U) {
+    bool complete = false;
+    const bool accel = _substep < 10U;
+    const Status status = averageStep(accel, _selfTestRequest.samples, true, complete);
+    if (!status.ok() && !status.inProgress()) return routeFailureToRestore(status);
+    if (!complete) return status;
+    const RawAxes average{
+        static_cast<int16_t>(_sumX / _selfTestRequest.samples),
+        static_cast<int16_t>(_sumY / _selfTestRequest.samples),
+        static_cast<int16_t>(_sumZ / _selfTestRequest.samples)};
+    if (_substep == 5U || _substep == 15U) _phaseBaseline = average;
+    else _phaseStimulus = average;
+
+    if (_substep == 5U) {
+      _workingResult.selfTest.accelBaselineG = rawAxesToFloat(_phaseBaseline, 0.000061f);
+      _substep = 6;
+    } else if (_substep == 9U) {
+      _workingResult.selfTest.accelStimulusG = rawAxesToFloat(_phaseStimulus, 0.000061f);
+      _workingResult.selfTest.accelDeltaG = absoluteAxes(
+          subtractAxes(_workingResult.selfTest.accelStimulusG,
+                       _workingResult.selfTest.accelBaselineG));
+      _workingResult.selfTest.accelPass =
+          axesWithin(_workingResult.selfTest.accelDeltaG,
+                     SELF_TEST_ACCEL_MIN_G, SELF_TEST_ACCEL_MAX_G);
+      if (!_workingResult.selfTest.accelPass && _primaryStatus.ok()) {
+        _primaryStatus =
+            Status::Error(Err::SELF_TEST_FAIL, "Accelerometer self-test failed");
+      }
+      _substep = 10;
+    } else if (_substep == 15U) {
+      _workingResult.selfTest.gyroBaselineDps = rawAxesToFloat(_phaseBaseline, 0.070f);
+      _substep = 16;
+    } else {
+      _workingResult.selfTest.gyroStimulusDps = rawAxesToFloat(_phaseStimulus, 0.070f);
+      _workingResult.selfTest.gyroDeltaDps = absoluteAxes(
+          subtractAxes(_workingResult.selfTest.gyroStimulusDps,
+                       _workingResult.selfTest.gyroBaselineDps));
+      _workingResult.selfTest.gyroPass =
+          axesWithin(_workingResult.selfTest.gyroDeltaDps,
+                     SELF_TEST_GYRO_MIN_DPS, SELF_TEST_GYRO_MAX_DPS);
+      if (!_workingResult.selfTest.gyroPass && _primaryStatus.ok()) {
+        _primaryStatus = Status::Error(Err::SELF_TEST_FAIL, "Gyroscope self-test failed");
+      }
+      _substep = 20;
+    }
+    _samplesDone = 0;
+    _sumX = _sumY = _sumZ = 0;
+    _step = 0;
+    return inProgressStatus();
+  }
+  if (_substep == 6U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_XL,
+                                     nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
+    _substep = 7;
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_substep == 10U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    ++_substep;
+    return inProgressStatus();
+  }
+  if (_substep == 11U) {
+    if (_step == 0U) {
+      const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      _step = 1;
+      return inProgressStatus();
+    }
+    if (_step == 1U) {
+      const uint8_t awakeCtrl4 = static_cast<uint8_t>(
+          buildCtrl4(_selfTestRestoreProfile) & ~cmd::MASK_SLEEP_G);
+      const Status status =
+          _writeByte(cmd::REG_CTRL4_C, awakeCtrl4, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      _step = 2;
+      return inProgressStatus();
+    }
+    const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _step = 0;
+    ++_substep;
+    return inProgressStatus();
+  }
+  if (_substep == 12U) {
+    DeviceProfile testProfile = _selfTestRestoreProfile;
+    testProfile.gyroOdr = Odr::HZ_416;
+    testProfile.gyroFullScale = GyroFs::DPS_2000;
+    const Status status =
+        _writeByte(cmd::REG_CTRL2_G, buildCtrl2(testProfile), nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_SETTLE_MS);
+    _substep = 13;
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_substep == 16U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_G,
+                                     nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_STIMULUS_SETTLE_MS);
+    _substep = 17;
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_substep == 20U) {
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    _substep = 100;
+    _step = 0;
+    _prepareManagedImage(_selfTestRestoreProfile);
+    if (!_primaryStatus.ok()) _pollBoundary = true;
+    return inProgressStatus();
+  }
+  return routeFailureToRestore(
+      Status::Error(Err::INVALID_PARAM, "Invalid self-test step"));
 }
 
-Status LSM6DS3TR::getAccelUserOffset(AccelUserOffset& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
+  const bool accel =
+      _calibrationRequest.kind == CalibrationKind::ACCELEROMETER_BIAS;
+  if (_step == 0U) {
+    if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
+      _waiting = true;
+      return inProgressStatus();
+    }
+    uint8_t statusReg = 0;
+    const Status status = _read(cmd::REG_STATUS_REG, &statusReg, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((statusReg & (accel ? cmd::MASK_XLDA : cmd::MASK_GDA)) == 0U) {
+      ++_readyPolls;
+      if (_readyPolls >= 3U) {
+        return Status::Error(Err::DATA_NOT_READY,
+                             "Calibration data was not ready within three checks");
+      }
+      const uint64_t periodUs = odrPeriodUs(
+          accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
+      _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U);
+      _waiting = true;
+      return inProgressStatus();
+    }
+    _readyPolls = 0;
+    _waitUntilMs = 0;
+    _step = 1;
+    return inProgressStatus();
   }
-  out = _accelUserOffset;
-  return Status::Ok();
+  uint8_t data[6] = {};
+  const Status status = _read(accel ? cmd::REG_DATA_START_ACCEL
+                                    : cmd::REG_DATA_START_GYRO,
+                              data, sizeof(data), nowMs);
+  if (!status.ok()) return status;
+  const RawAxes raw = decodeRawAxes(data);
+  _sumX += raw.x;
+  _sumY += raw.y;
+  _sumZ += raw.z;
+  if (raw.x < _rawMin.x) _rawMin.x = raw.x;
+  if (raw.y < _rawMin.y) _rawMin.y = raw.y;
+  if (raw.z < _rawMin.z) _rawMin.z = raw.z;
+  if (raw.x > _rawMax.x) _rawMax.x = raw.x;
+  if (raw.y > _rawMax.y) _rawMax.y = raw.y;
+  if (raw.z > _rawMax.z) _rawMax.z = raw.z;
+  ++_samplesDone;
+  _step = 0;
+  if (_samplesDone < _calibrationRequest.samples) {
+    const uint64_t periodUs = odrPeriodUs(
+        accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
+    _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U);
+    return inProgressStatus();
+  }
+
+  const RawAxes mean{static_cast<int16_t>(_sumX / _samplesDone),
+                     static_cast<int16_t>(_sumY / _samplesDone),
+                     static_cast<int16_t>(_sumZ / _samplesDone)};
+  CalibrationResult& result = _workingResult.calibration;
+  result.kind = _calibrationRequest.kind;
+  result.samples = _samplesDone;
+  if (accel) {
+    const int32_t sensitivity =
+        _verifiedProfile.accelFullScale == AccelFs::G_2 ? 61 :
+        _verifiedProfile.accelFullScale == AccelFs::G_4 ? 122 :
+        _verifiedProfile.accelFullScale == AccelFs::G_8 ? 244 : 488;
+    const float scale = static_cast<float>(sensitivity) / 1000000.0f;
+    const Axes measured = rawAxesToFloat(mean, scale);
+    result.bias = subtractAxes(measured, _calibrationRequest.expectedAccelerationG);
+    result.peakToPeak = Axes{
+        static_cast<float>(static_cast<int32_t>(_rawMax.x) - _rawMin.x) * scale,
+        static_cast<float>(static_cast<int32_t>(_rawMax.y) - _rawMin.y) * scale,
+        static_cast<float>(static_cast<int32_t>(_rawMax.z) - _rawMin.z) * scale};
+    if (result.peakToPeak.x > _calibrationRequest.limits.accelMaxPeakToPeakG ||
+        result.peakToPeak.y > _calibrationRequest.limits.accelMaxPeakToPeakG ||
+        result.peakToPeak.z > _calibrationRequest.limits.accelMaxPeakToPeakG) {
+      return Status::Error(Err::CALIBRATION_UNSTABLE,
+                           "Accelerometer calibration is unstable");
+    }
+    if (!finiteAxes(result.bias) || axesMagnitudeSquared(result.bias) > 0.25f) {
+      return Status::Error(Err::CALIBRATION_ORIENTATION,
+                           "Fixture vector does not match measured orientation");
+    }
+  } else {
+    int32_t sensitivity = 0;
+    const Status sensitivityStatus =
+        gyroSensitivityMicroDpsPerLsb(_verifiedProfile.gyroFullScale, sensitivity);
+    if (!sensitivityStatus.ok()) return sensitivityStatus;
+    const float scale = static_cast<float>(sensitivity) / 1000000.0f;
+    result.bias = rawAxesToFloat(mean, scale);
+    result.peakToPeak = Axes{
+        static_cast<float>(static_cast<int32_t>(_rawMax.x) - _rawMin.x) * scale,
+        static_cast<float>(static_cast<int32_t>(_rawMax.y) - _rawMin.y) * scale,
+        static_cast<float>(static_cast<int32_t>(_rawMax.z) - _rawMin.z) * scale};
+    if (result.peakToPeak.x > _calibrationRequest.limits.gyroMaxPeakToPeakDps ||
+        result.peakToPeak.y > _calibrationRequest.limits.gyroMaxPeakToPeakDps ||
+        result.peakToPeak.z > _calibrationRequest.limits.gyroMaxPeakToPeakDps) {
+      return Status::Error(Err::CALIBRATION_UNSTABLE,
+                           "Gyroscope calibration is unstable");
+    }
+  }
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
 
-Status LSM6DS3TR::configureFifo(const FifoConfig& config) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (config.threshold > 2047u) {
-    return Status::Error(Err::INVALID_PARAM, "FIFO threshold out of range");
-  }
-  if (!isValidFifoMode(config.mode)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid FIFO mode");
-  }
-  if (!isValidFifoDecimation(config.accelDecimation) ||
-      !isValidFifoDecimation(config.gyroDecimation)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid FIFO decimation");
-  }
-  if (!isValidFifoOdr(config.odr)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid FIFO ODR");
-  }
-  if (config.odr == Odr::POWER_DOWN && config.mode != FifoMode::BYPASS) {
-    return Status::Error(Err::INVALID_PARAM, "FIFO mode requires active FIFO ODR");
-  }
-  if (config.mode != FifoMode::BYPASS && !_config.bdu) {
-    return Status::Error(Err::INVALID_PARAM, "FIFO requires BDU enabled");
-  }
+Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
+  auto decodeStatus = [](const uint8_t* data, uint16_t& unread,
+                         uint16_t& pattern, bool& overrun) {
+    unread = static_cast<uint16_t>(data[0]) |
+             (static_cast<uint16_t>(data[1] & cmd::MASK_DIFF_FIFO_HI) << 8U);
+    pattern = static_cast<uint16_t>(data[2]) |
+              (static_cast<uint16_t>(data[3] & 0x03U) << 8U);
+    overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0U;
+    if (overrun && unread == 0U) unread = 2048U;
+  };
 
-  const FifoConfig oldConfig = _fifoConfig;
-  _fifoConfig = config;
-  Status st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-  if (!st.ok()) {
-    _fifoConfig = oldConfig;
-    _cachedConfigDirty = true;
-    return st;
+  if (_step == 0U) {
+    uint8_t access = 0;
+    const Status status =
+        _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((access & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "FIFO purge requires the main register bank");
+    }
+    _step = 1;
+    return inProgressStatus();
   }
-  st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-  if (!st.ok()) {
-    _fifoConfig = oldConfig;
-    _cachedConfigDirty = true;
-    return st;
+  if (_step == 1U) {
+    uint8_t whoAmI = 0;
+    const Status status = _read(cmd::REG_WHO_AM_I, &whoAmI, 1, nowMs);
+    if (!status.ok()) return status;
+    _workingResult.probe =
+        ProbeResult{static_cast<uint8_t>(_driverConfig.address), whoAmI};
+    if (whoAmI != cmd::WHO_AM_I_VALUE) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", whoAmI);
+    }
+    _step = 2;
+    return inProgressStatus();
   }
-  st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-  if (!st.ok()) {
-    _fifoConfig = oldConfig;
-    _cachedConfigDirty = true;
-    return st;
+  if (_step == 2U) {
+    uint8_t ctrl3 = 0;
+    const Status status = _read(cmd::REG_CTRL3_C, &ctrl3, 1, nowMs);
+    if (!status.ok()) return status;
+    constexpr uint8_t prerequisites = cmd::MASK_IF_INC | cmd::MASK_BDU;
+    if ((ctrl3 & prerequisites) != prerequisites) {
+      _invalidateConfiguration();
+      return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                           "FIFO purge requires verified IF_INC and BDU");
+    }
+    _step = 3;
+    return inProgressStatus();
   }
-  st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-  if (!st.ok()) {
-    _fifoConfig = oldConfig;
-    _cachedConfigDirty = true;
-    return st;
+  if (_step == 3U) {
+    uint8_t data[4] = {};
+    const Status status = _read(cmd::REG_FIFO_STATUS1, data, sizeof(data), nowMs);
+    if (!status.ok()) return status;
+    uint16_t unread = 0;
+    uint16_t pattern = 0;
+    bool overrun = false;
+    decodeStatus(data, unread, pattern, overrun);
+    _workingResult.fifoPurge.initialUnreadWords = unread;
+    _workingResult.fifoPurge.initialPattern = pattern;
+    _workingResult.fifoPurge.overrunObserved = overrun;
+    _workingResult.fifoPurge.truncated = unread > _fifoPurgeRequest.maxWords;
+    _step = 4;
+    if (unread == 0U) _step = 5;
+    return inProgressStatus();
   }
-  st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
-  if (!st.ok()) {
-    _fifoConfig = oldConfig;
-    _cachedConfigDirty = true;
+  if (_step == 4U &&
+      _workingResult.fifoPurge.wordsDiscarded <
+          _workingResult.fifoPurge.initialUnreadWords &&
+      _workingResult.fifoPurge.wordsDiscarded < _fifoPurgeRequest.maxWords) {
+    uint8_t discarded[2] = {};
+    _hardwareStateMayHaveChanged = true;
+    const Status status =
+        _read(cmd::REG_FIFO_DATA_OUT_L, discarded, sizeof(discarded), nowMs);
+    if (!status.ok()) return status;
+    ++_workingResult.fifoPurge.wordsDiscarded;
+    if (_workingResult.fifoPurge.wordsDiscarded <
+            _workingResult.fifoPurge.initialUnreadWords &&
+        _workingResult.fifoPurge.wordsDiscarded < _fifoPurgeRequest.maxWords) {
+      return inProgressStatus();
+    }
+    _step = 5;
+    return inProgressStatus();
   }
-  return st;
-}
-
-Status LSM6DS3TR::getFifoConfig(FifoConfig& out) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  out = _fifoConfig;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::readFifoStatus(FifoStatus& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
   uint8_t data[4] = {};
-  Status st = readRegs(cmd::REG_FIFO_STATUS1, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
+  const Status status = _read(cmd::REG_FIFO_STATUS1, data, sizeof(data), nowMs);
+  if (!status.ok()) return status;
+  uint16_t pattern = 0;
+  bool overrun = false;
+  decodeStatus(data, _workingResult.fifoPurge.finalUnreadWords, pattern, overrun);
+  _workingResult.fifoPurge.overrunObserved =
+      _workingResult.fifoPurge.overrunObserved || overrun;
+  _workingResult.fifoPurge.truncated =
+      _workingResult.fifoPurge.truncated ||
+      _workingResult.fifoPurge.finalUnreadWords != 0U;
+  if (_workingResult.fifoPurge.overrunObserved) {
+    return _finish(Status::Error(Err::FIFO_OVERRUN,
+                                 "FIFO overrun observed while purging"),
+                   OperationState::FAILED);
   }
-
-  decodeFifoStatus(data, out);
-  return Status::Ok();
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
 
-Status LSM6DS3TR::readFifoWord(uint16_t& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
+  if (_configurationState == ConfigurationState::SETTLING &&
+      _pollNowMs >= _validAfterUptimeMs) {
+    _configurationState = ConfigurationState::KNOWN;
   }
-
-  FifoStatus status;
-  Status st = readFifoStatus(status);
-  if (!st.ok()) {
-    return st;
-  }
-  if (status.empty || status.unreadWords == 0u) {
-    return Status::Error(Err::FIFO_EMPTY, "FIFO empty");
-  }
-  if (status.overrun) {
-    return Status::Error(Err::FIFO_OVERRUN, "FIFO overrun");
-  }
-
-  uint8_t data[2] = {};
-  st = readRegs(cmd::REG_FIFO_DATA_OUT_L, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
-  }
-
-  out = static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8);
-  return Status::Ok();
+  _workingResult.status = status;
+  _workingResult.state = state;
+  _workingResult.hardwareStateMayHaveChanged = _hardwareStateMayHaveChanged;
+  _workingResult.transactions = _operationTransactions;
+  _workingResult.transactionLimit = _operationTransactionLimit;
+  _workingResult.completedUptimeMs = _pollNowMs;
+  _workingResult.configuration.state = configurationState(_pollNowMs);
+  _workingResult.configuration.generation = _configGeneration;
+  _workingResult.configuration.validAfterUptimeMs = _validAfterUptimeMs;
+  _workingResult.configuration.mismatchRegister = _mismatchRegister;
+  _workingResult.configuration.expectedValue = _mismatchExpected;
+  _workingResult.configuration.observedValue = _mismatchObserved;
+  _terminalResult = _workingResult;
+  _resultPending = true;
+  _clearActive();
+  return status;
 }
 
-Status LSM6DS3TR::softReset() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::_fail(const Status& status) {
+  if (_job == JobKind::SELF_TEST && _substep == 100U) {
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    _workingResult.selfTest.restorationStatus = status;
   }
-
-  const bool startedOffline = _driverState == DriverState::OFFLINE;
-  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
-  Status result = [this]() -> Status {
-    _measurementRequested = false;
-    _measurementReady = false;
-    _hasSample = false;
-    _sampleTimestampMs = 0;
-
-    const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_SW_RESET | cmd::MASK_IF_INC |
-                                               (_config.bdu ? cmd::MASK_BDU : 0));
-    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
-    if (!st.ok()) {
-      return st;
-    }
-
-    const uint32_t deadline = _nowMs() + RESET_TIMEOUT_MS;
-    bool resetDone = false;
-    for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
-      if (deadlineReached(_nowMs(), deadline)) {
-        _cachedConfigDirty = true;
-        return _recordFailure(Status::Error(Err::TIMEOUT, "Reset timeout"));
-      }
-      uint8_t ctrl3Read = 0;
-      st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
-      if (!st.ok()) {
-        return _recordFailure(st);
-      }
-      if ((ctrl3Read & cmd::MASK_SW_RESET) == 0) {
-        resetDone = true;
-        break;
-      }
-    }
-    if (!resetDone) {
-      _cachedConfigDirty = true;
-      return _recordFailure(Status::Error(Err::TIMEOUT, "Reset polling limit", RESET_MAX_POLLS));
-    }
-
-    return _applyConfig();
-  }();
-  if (startedOffline && !result.ok() && !result.inProgress()) {
-    _reassertOfflineLatch();
+  if (_configurationMayBeUnknown) {
+    _invalidateConfiguration();
+  } else if (_configurationState == ConfigurationState::APPLYING) {
+    _configurationState = _configurationStateBeforeOperation;
+    _validAfterUptimeMs = _validAfterBeforeOperationMs;
   }
+  const bool determinateMismatch = status.code == Err::CONFIGURATION_MISMATCH;
+  const bool indeterminate = !determinateMismatch && _hardwareStateMayHaveChanged &&
+                             (_job != JobKind::SAMPLE &&
+                              _job != JobKind::CALIBRATION &&
+                              _job != JobKind::PROBE);
+  Status terminalStatus = status;
+  if (_job == JobKind::SELF_TEST && !_primaryStatus.ok()) {
+    terminalStatus = _primaryStatus;
+  }
+  return _finish(terminalStatus, indeterminate ? OperationState::INDETERMINATE
+                                               : OperationState::FAILED);
+}
+
+void LSM6DS3TR::_clearActive() {
+  _active = false;
+  _token = {};
+  _job = JobKind::NONE;
+  _step = 0;
+  _substep = 0;
+  _deadlineMs = 0;
+  _waitUntilMs = 0;
+  _configurationMayBeUnknown = false;
+}
+
+PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
+  Status status = Status::Error(Err::INVALID_PARAM, "Unknown operation");
+  switch (_job) {
+    case JobKind::PROBE: status = _stepProbe(nowMs, false); break;
+    case JobKind::CONFIGURE: status = _stepConfigure(nowMs, false); break;
+    case JobKind::SAMPLE: status = _stepSample(nowMs); break;
+    case JobKind::RESET: status = _stepResetBoot(nowMs, false, false); break;
+    case JobKind::BOOT: status = _stepResetBoot(nowMs, true, false); break;
+    case JobKind::RECOVER: status = _stepResetBoot(nowMs, false, true); break;
+    case JobKind::RECONCILE: status = _stepConfigure(nowMs, true); break;
+    case JobKind::POWER_DOWN: status = _stepPowerDown(nowMs); break;
+    case JobKind::SELF_TEST: status = _stepSelfTest(nowMs); break;
+    case JobKind::CALIBRATION: status = _stepCalibration(nowMs); break;
+    case JobKind::FIFO_PURGE: status = _stepFifoPurge(nowMs); break;
+    case JobKind::NONE: break;
+  }
+  if (_active && !status.ok() && !status.inProgress()) _fail(status);
+  PollResult result{};
+  if (_resultPending && !_active) {
+    result.token = _terminalResult.token;
+    result.kind = _terminalResult.kind;
+    result.state = _terminalResult.state;
+    result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
+  } else {
+    result.token = _token;
+    result.kind = _job;
+    result.state = _active ? OperationState::ACTIVE : OperationState::IDLE;
+    result.status = _active ? inProgressStatus() : Status::Ok();
+    if (_active && _job == JobKind::SELF_TEST && _substep == 100U &&
+        !_primaryStatus.ok()) {
+      result.status = _primaryStatus;
+    }
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
+  }
+  result.transactionsUsed = _transactionUsed ? 1U : 0U;
+  result.waiting = _waiting;
   return result;
 }
 
-Status LSM6DS3TR::boot() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
+  _pollNowMs = nowMs;
+  if (!_bound) {
+    PollResult result{};
+    result.status = Status::Error(Err::NOT_BOUND, "Driver is not bound");
+    return result;
+  }
+  if (!_active) {
+    if (_resultPending) {
+      PollResult result{};
+      result.token = _terminalResult.token;
+      result.kind = _terminalResult.kind;
+      result.state = _terminalResult.state;
+      result.status = _terminalResult.status;
+      result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+      result.transactionLimit =
+          static_cast<uint16_t>(_terminalResult.transactionLimit);
+      return result;
+    }
+    return PollResult{};
+  }
+  if (nowMs >= _deadlineMs) {
+    const uint16_t configurationDone =
+        static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+    const bool selfTestUntouched =
+        _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
+    const bool selfTestRestored =
+        _job == JobKind::SELF_TEST && _substep == 100U &&
+        _step > configurationDone && _hasVerifiedProfile &&
+        !_configurationMayBeUnknown;
+    if (_configurationMayBeUnknown) {
+      _invalidateConfiguration();
+    } else if (_configurationState == ConfigurationState::APPLYING) {
+      _configurationState = _configurationStateBeforeOperation;
+      _validAfterUptimeMs = _validAfterBeforeOperationMs;
+    }
+    if (_job == JobKind::SELF_TEST) {
+      if (_primaryStatus.ok()) {
+        _primaryStatus =
+            Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired");
+      }
+      _workingResult.selfTest.primaryStatus = _primaryStatus;
+      if (selfTestUntouched) {
+        _workingResult.selfTest.restorationStatus = Status::Ok();
+      } else if (selfTestRestored) {
+        _workingResult.selfTest.restorationStatus =
+            configurationState(nowMs) == ConfigurationState::SETTLING
+                ? Status::Error(Err::SETTLING,
+                                "Restored profile is still settling")
+                : Status::Ok();
+      } else {
+        _workingResult.selfTest.restorationStatus =
+            Status::Error(Err::OPERATION_INDETERMINATE,
+                          "Restoration not completed before deadline");
+      }
+    }
+    _finish(Status::Error(Err::DEADLINE_EXPIRED, "Operation deadline expired"),
+            OperationState::TIMED_OUT);
+    PollResult result{};
+    result.token = _terminalResult.token;
+    result.kind = _terminalResult.kind;
+    result.state = _terminalResult.state;
+    result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
+    return result;
+  }
+  if (maxTransactions == 0U) {
+    _transactionUsed = false;
+    _waiting = false;
+    const uint16_t configurationDone =
+        static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+    bool safeComputeStep = false;
+    if ((_job == JobKind::CONFIGURE || _job == JobKind::RECONCILE) &&
+        _step >= configurationDone) {
+      safeComputeStep = true;
+    } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
+                _job == JobKind::RECOVER) &&
+               _substep >= 7U && _step >= configurationDone) {
+      safeComputeStep = true;
+    } else if (_job == JobKind::SELF_TEST &&
+               ((_substep == 3U || _substep == 7U || _substep == 13U ||
+                 _substep == 17U || _substep == 20U) ||
+                (_substep == 100U && _step >= configurationDone))) {
+      safeComputeStep = true;
+    }
+    if (safeComputeStep) {
+      PollResult result = _pollOne(nowMs);
+      result.transactionsUsed = 0;
+      return result;
+    }
+    if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
+         _job == JobKind::RECOVER) &&
+        _substep == 6U) {
+      _waiting = nowMs < _waitUntilMs;
+    } else if ((_job == JobKind::SAMPLE || _job == JobKind::CALIBRATION) &&
+               _waitUntilMs != 0U) {
+      _waiting = nowMs < _waitUntilMs;
+    }
+    PollResult result{};
+    result.token = _token;
+    result.kind = _job;
+    result.state = OperationState::ACTIVE;
+    result.status = (_job == JobKind::SELF_TEST && _substep == 100U &&
+                     !_primaryStatus.ok())
+                        ? _primaryStatus
+                        : inProgressStatus();
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
+    result.waiting = _waiting;
+    return result;
   }
 
-  const bool startedOffline = _driverState == DriverState::OFFLINE;
-  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
-  Status result = [this]() -> Status {
-    const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_BOOT | cmd::MASK_IF_INC |
-                                               (_config.bdu ? cmd::MASK_BDU : 0));
-    Status st = writeRegister(cmd::REG_CTRL3_C, ctrl3);
-    if (!st.ok()) {
-      return st;
+  uint8_t used = 0;
+  PollResult result{};
+  for (uint8_t iteration = 0; iteration < 64U && _active; ++iteration) {
+    if (used >= maxTransactions) break;
+    _transactionUsed = false;
+    _waiting = false;
+    _pollBoundary = false;
+    result = _pollOne(nowMs);
+    if (_transactionUsed) {
+      ++used;
+      if (used >= maxTransactions) break;
     }
-
-    const uint32_t deadline = _nowMs() + BOOT_TIMEOUT_MS;
-    bool bootDone = false;
-    for (uint16_t poll = 0; poll < RESET_MAX_POLLS; ++poll) {
-      if (deadlineReached(_nowMs(), deadline)) {
-        _cachedConfigDirty = true;
-        return _recordFailure(Status::Error(Err::TIMEOUT, "Boot timeout"));
-      }
-      uint8_t ctrl3Read = 0;
-      st = _readRegisterRaw(cmd::REG_CTRL3_C, ctrl3Read);
-      if (!st.ok()) {
-        return _recordFailure(st);
-      }
-      if ((ctrl3Read & cmd::MASK_BOOT) == 0) {
-        bootDone = true;
-        break;
-      }
-    }
-    if (!bootDone) {
-      _cachedConfigDirty = true;
-      return _recordFailure(Status::Error(Err::TIMEOUT, "Boot polling limit", RESET_MAX_POLLS));
-    }
-
-    return refreshCachedConfig();
-  }();
-  if (startedOffline && !result.ok() && !result.inProgress()) {
-    _reassertOfflineLatch();
+    if (!_active || _waiting || _pollBoundary) break;
   }
+  if (_active) {
+    result.token = _token;
+    result.kind = _job;
+    result.state = OperationState::ACTIVE;
+    result.status = (_job == JobKind::SELF_TEST && _substep == 100U &&
+                     !_primaryStatus.ok())
+                        ? _primaryStatus
+                        : inProgressStatus();
+    result.transactions = static_cast<uint16_t>(_operationTransactions);
+    result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
+    result.waiting = _waiting;
+  } else if (_resultPending) {
+    result.token = _terminalResult.token;
+    result.kind = _terminalResult.kind;
+    result.state = _terminalResult.state;
+    result.status = _terminalResult.status;
+    result.transactions = static_cast<uint16_t>(_terminalResult.transactions);
+    result.transactionLimit =
+        static_cast<uint16_t>(_terminalResult.transactionLimit);
+    result.waiting = false;
+  }
+  result.transactionsUsed = used;
   return result;
 }
 
-Status LSM6DS3TR::readRegisterValue(uint8_t reg, uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::cancelActiveJob(uint64_t nowMs) {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (!_active) return Status::Error(Err::RESULT_NOT_AVAILABLE, "No active operation");
+  _pollNowMs = nowMs;
+  const uint16_t configurationDone =
+      static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+  const bool selfTestUntouched =
+      _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
+  const bool selfTestRestored =
+      _job == JobKind::SELF_TEST && _substep == 100U &&
+      _step > configurationDone && _hasVerifiedProfile &&
+      !_configurationMayBeUnknown;
+  if (_configurationMayBeUnknown) {
+    _invalidateConfiguration();
+  } else if (_configurationState == ConfigurationState::APPLYING) {
+    _configurationState = _configurationStateBeforeOperation;
+    _validAfterUptimeMs = _validAfterBeforeOperationMs;
   }
-  if (!isValidPublicRegisterAddress(reg)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid register address");
-  }
-  return readRegister(reg, value);
-}
-
-Status LSM6DS3TR::writeRegisterValue(uint8_t reg, uint8_t value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (!isValidPublicRegisterAddress(reg)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid register address");
-  }
-  if (!isSafePublicRegisterWrite(reg, value)) {
-    return Status::Error(Err::INVALID_PARAM, "Unsafe direct register write");
-  }
-  Status st = writeRegister(reg, value);
-  if (!st.ok()) {
-    if (isCachedConfigRegister(reg)) {
-      _cachedConfigDirty = true;
+  if (_job == JobKind::SELF_TEST) {
+    if (_primaryStatus.ok()) {
+      _primaryStatus = Status::Error(Err::CANCELLED, "Operation cancelled");
     }
-    return st;
+    _workingResult.selfTest.primaryStatus = _primaryStatus;
+    if (selfTestUntouched) {
+      _workingResult.selfTest.restorationStatus = Status::Ok();
+    } else if (selfTestRestored) {
+      _workingResult.selfTest.restorationStatus =
+          configurationState(nowMs) == ConfigurationState::SETTLING
+              ? Status::Error(Err::SETTLING,
+                              "Restored profile is still settling")
+              : Status::Ok();
+    } else {
+      _workingResult.selfTest.restorationStatus =
+          Status::Error(Err::OPERATION_INDETERMINATE,
+                        "Restoration not completed before cancellation");
+    }
   }
-
-  if (isCachedConfigRegister(reg)) {
-    return refreshCachedConfig();
-  }
+  (void)_finish(Status::Error(Err::CANCELLED, "Operation cancelled"),
+                OperationState::CANCELLED);
   return Status::Ok();
 }
 
-Status LSM6DS3TR::readRegisterBlock(uint8_t startReg, uint8_t* buf, size_t len) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+Status LSM6DS3TR::takeResult(OperationToken token, OperationResult& out) {
+  if (!_resultPending) {
+    return Status::Error(Err::RESULT_NOT_AVAILABLE, "No terminal result is pending");
   }
-  if (!isValidPublicRegisterBlock(startReg, len)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid register block");
+  if (!token.valid() || token != _terminalResult.token) {
+    return Status::Error(Err::STALE_RESULT, "Operation token does not match");
   }
-  return readRegs(startReg, buf, len);
-}
-
-Status LSM6DS3TR::refreshCachedConfig() {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-
-  Status st = readRegister(cmd::REG_CTRL1_XL, _refreshCtrl1);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL2_G, _refreshCtrl2);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL3_C, _refreshCtrl3);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL4_C, _refreshCtrl4);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL6_C, _refreshCtrl6);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL7_G, _refreshCtrl7);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL8_XL, _refreshCtrl8);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_CTRL10_C, _refreshCtrl10);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegister(cmd::REG_WAKE_UP_DUR, _refreshWakeUpDur);
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegs(cmd::REG_X_OFS_USR, _refreshOffsetData, sizeof(_refreshOffsetData));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-  st = readRegs(cmd::REG_FIFO_CTRL1, _refreshFifoCtrl, sizeof(_refreshFifoCtrl));
-  if (!st.ok()) {
-    _cachedConfigDirty = true;
-    return st;
-  }
-
-  return _commitStagedCachedConfig();
-}
-
-Status LSM6DS3TR::readWakeUpSource(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_WAKE_UP_SRC, value);
-}
-
-Status LSM6DS3TR::readTapSource(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_TAP_SRC, value);
-}
-
-Status LSM6DS3TR::read6dSource(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_D6D_SRC, value);
-}
-
-Status LSM6DS3TR::readFunctionSource1(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_FUNC_SRC1, value);
-}
-
-Status LSM6DS3TR::readFunctionSource2(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_FUNC_SRC2, value);
-}
-
-Status LSM6DS3TR::readWristTiltStatus(uint8_t& value) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  return readRegister(cmd::REG_WRIST_TILT_IA, value);
-}
-
-Status LSM6DS3TR::readSensorHub(SensorHubData& out, uint8_t count) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (count == 0u || count > 12u) {
-    return Status::Error(Err::INVALID_PARAM, "Sensor hub count must be 1..12");
-  }
-
-  out = SensorHubData{};
-  Status st = readRegs(cmd::REG_SENSORHUB1, out.bytes, count);
-  if (!st.ok()) {
-    return st;
-  }
-  out.count = count;
+  out = _terminalResult;
+  _terminalResult = {};
+  _resultPending = false;
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_i2cWriteReadRaw(const uint8_t* txBuf, size_t txLen,
-                                   uint8_t* rxBuf, size_t rxLen) {
-  if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
+ConfigurationState LSM6DS3TR::configurationState(uint64_t nowMs) const {
+  if (_configurationState == ConfigurationState::SETTLING &&
+      nowMs >= _validAfterUptimeMs) {
+    return ConfigurationState::KNOWN;
   }
-  if (_config.i2cWriteRead == nullptr) {
-    return Status::Error(Err::INVALID_CONFIG, "I2C write-read not set");
-  }
-  return normalizeTransportStatus(
-      _config.i2cWriteRead(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen,
-                           _config.i2cTimeoutMs, _config.i2cUser));
+  return _configurationState;
 }
 
-Status LSM6DS3TR::_i2cWriteRaw(const uint8_t* buf, size_t len) {
-  if (buf == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
+Status LSM6DS3TR::getDesiredProfile(DeviceProfile& out) const {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (!_hasDesiredProfile) {
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile");
   }
-  if (_config.i2cWrite == nullptr) {
-    return Status::Error(Err::INVALID_CONFIG, "I2C write not set");
-  }
-  return normalizeTransportStatus(
-      _config.i2cWrite(_config.i2cAddress, buf, len, _config.i2cTimeoutMs,
-                       _config.i2cUser));
-}
-
-Status LSM6DS3TR::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
-                                       uint8_t* rxBuf, size_t rxLen) {
-  if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
-  }
-  Status allowed = _ensureNormalI2cAllowed();
-  if (!allowed.ok()) {
-    return allowed;
-  }
-
-  Status st = _i2cWriteReadRaw(txBuf, txLen, rxBuf, rxLen);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
-  return _updateHealth(st);
-}
-
-Status LSM6DS3TR::_i2cWriteTracked(const uint8_t* buf, size_t len) {
-  if (buf == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
-  }
-  Status allowed = _ensureNormalI2cAllowed();
-  if (!allowed.ok()) {
-    return allowed;
-  }
-
-  Status st = _i2cWriteRaw(buf, len);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
-  return _updateHealth(st);
-}
-
-Status LSM6DS3TR::readRegs(uint8_t startReg, uint8_t* buf, size_t len) {
-  if (buf == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
-  }
-
-  uint8_t reg = startReg;
-  return _i2cWriteReadTracked(&reg, 1, buf, len);
-}
-
-Status LSM6DS3TR::writeRegs(uint8_t startReg, const uint8_t* buf, size_t len) {
-  if (buf == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid write buffer");
-  }
-  if (len > MAX_WRITE_LEN) {
-    return Status::Error(Err::INVALID_PARAM, "Write length too large");
-  }
-
-  uint8_t payload[MAX_WRITE_LEN + 1] = {};
-  payload[0] = startReg;
-  std::memcpy(&payload[1], buf, len);
-  return _i2cWriteTracked(payload, len + 1);
-}
-
-Status LSM6DS3TR::readRegister(uint8_t reg, uint8_t& value) {
-  return readRegs(reg, &value, 1);
-}
-
-Status LSM6DS3TR::writeRegister(uint8_t reg, uint8_t value) {
-  return writeRegs(reg, &value, 1);
-}
-
-Status LSM6DS3TR::_readRegisterRaw(uint8_t reg, uint8_t& value) {
-  uint8_t addr = reg;
-  return _i2cWriteReadRaw(&addr, 1, &value, 1);
-}
-
-Status LSM6DS3TR::_updateRegister(uint8_t reg, uint8_t mask, uint8_t value) {
-  uint8_t current = 0;
-  Status st = readRegister(reg, current);
-  if (!st.ok()) {
-    return st;
-  }
-
-  current = static_cast<uint8_t>((current & static_cast<uint8_t>(~mask)) | (value & mask));
-  return writeRegister(reg, current);
-}
-
-Status LSM6DS3TR::_updateHealth(const Status& st) {
-  if (!_initialized || st.inProgress()) {
-    return st;
-  }
-
-  const uint32_t now = _nowMs();
-  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
-  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
-
-  if (st.ok()) {
-    _lastOkMs = now;
-    if (_totalSuccess < maxU32) {
-      _totalSuccess++;
-    }
-    _consecutiveFailures = 0;
-    _driverState = DriverState::READY;
-    return st;
-  }
-
-  _lastError = st;
-  _lastErrorMs = now;
-  if (_totalFailures < maxU32) {
-    _totalFailures++;
-  }
-  if (_consecutiveFailures < maxU8) {
-    _consecutiveFailures++;
-  }
-
-  if (_consecutiveFailures >= _config.offlineThreshold) {
-    _driverState = DriverState::OFFLINE;
-  } else {
-    _driverState = DriverState::DEGRADED;
-  }
-
-  return st;
-}
-
-Status LSM6DS3TR::_recordFailure(const Status& st) {
-  if (!_initialized || st.ok() || st.inProgress()) {
-    return st;
-  }
-
-  const uint32_t now = _nowMs();
-  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
-  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
-
-  _lastError = st;
-  _lastErrorMs = now;
-  if (_totalFailures < maxU32) {
-    _totalFailures++;
-  }
-  if (_consecutiveFailures < maxU8) {
-    _consecutiveFailures++;
-  }
-
-  if (_consecutiveFailures >= _config.offlineThreshold) {
-    _driverState = DriverState::OFFLINE;
-  } else {
-    _driverState = DriverState::DEGRADED;
-  }
-
-  return st;
-}
-
-void LSM6DS3TR::_reassertOfflineLatch() {
-  _driverState = DriverState::OFFLINE;
-  const uint8_t threshold = _config.offlineThreshold == 0 ? 1 : _config.offlineThreshold;
-  if (_consecutiveFailures < threshold) {
-    _consecutiveFailures = threshold;
-  }
-}
-
-Status LSM6DS3TR::_ensureNormalI2cAllowed() const {
-  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
-  }
+  out = _desiredProfile;
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_applyConfig() {
-  const auto failDirty = [this](Status st) -> Status {
-    if (_initialized && !st.ok()) {
-      _cachedConfigDirty = true;
-    }
-    return st;
-  };
-
-  Status st = writeRegister(
-      cmd::REG_CTRL3_C,
-      static_cast<uint8_t>(cmd::MASK_IF_INC | (_config.bdu ? cmd::MASK_BDU : 0)));
-  if (!st.ok()) return failDirty(st);
-
-  st = writeRegister(cmd::REG_CTRL4_C, _buildCtrl4C());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL6_C, _buildCtrl6C());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL7_G, _buildCtrl7G());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL8_XL, _buildCtrl8Xl());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL1_XL, _buildCtrl1Xl(_config.odrXl, _config.fsXl));
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL2_G, _buildCtrl2G(_config.odrG, _config.fsG));
-  if (!st.ok()) return failDirty(st);
-  st = _updateRegister(cmd::REG_WAKE_UP_DUR, cmd::MASK_TIMER_HR, _buildWakeUpDur());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_CTRL10_C, _buildCtrl10C());
-  if (!st.ok()) return failDirty(st);
-
-  const uint8_t offsets[3] = {
-      static_cast<uint8_t>(_accelUserOffset.x),
-      static_cast<uint8_t>(_accelUserOffset.y),
-      static_cast<uint8_t>(_accelUserOffset.z),
-  };
-  st = writeRegs(cmd::REG_X_OFS_USR, offsets, sizeof(offsets));
-  if (!st.ok()) return failDirty(st);
-
-  st = writeRegister(cmd::REG_FIFO_CTRL1, loByte(_fifoConfig.threshold));
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_FIFO_CTRL2, _buildFifoCtrl2());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_FIFO_CTRL3, _buildFifoCtrl3());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_FIFO_CTRL4, _buildFifoCtrl4());
-  if (!st.ok()) return failDirty(st);
-  st = writeRegister(cmd::REG_FIFO_CTRL5, _buildFifoCtrl5());
-  if (!st.ok()) return failDirty(st);
-
-  _cachedConfigDirty = false;
+Status LSM6DS3TR::getVerifiedProfile(DeviceProfile& out, uint64_t nowMs) const {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (!_hasVerifiedProfile || configurationState(nowMs) != ConfigurationState::KNOWN) {
+    return Status::Error(configurationState(nowMs) == ConfigurationState::SETTLING
+                             ? Err::SETTLING
+                             : Err::CONFIGURATION_UNKNOWN,
+                         "Verified profile is unavailable");
+  }
+  out = _verifiedProfile;
   return Status::Ok();
 }
 
-Status LSM6DS3TR::_readRawAllWithTimestamp(uint32_t sampleTimestampMs) {
-  uint8_t data[cmd::DATA_LEN_ALL] = {};
-  Status st = readRegs(cmd::REG_DATA_START_ALL, data, sizeof(data));
-  if (!st.ok()) {
-    return st;
+DriverDiagnostics LSM6DS3TR::diagnostics(uint64_t nowMs) const {
+  DriverDiagnostics result{};
+  result.transportSuccesses = _transportSuccesses;
+  result.transportFailures = _transportFailures;
+  result.lastTransportError = _lastTransportError;
+  result.lastTransportErrorUptimeMs = _lastTransportErrorUptimeMs;
+  result.configGeneration = _configGeneration;
+  result.configurationState = configurationState(nowMs);
+  result.validAfterUptimeMs = _validAfterUptimeMs;
+  result.mismatchRegister = _mismatchRegister;
+  result.mismatchExpected = _mismatchExpected;
+  result.mismatchObserved = _mismatchObserved;
+  return result;
+}
+
+bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
+  if (length == 0U || length > MAX_DIAGNOSTIC_READ) return false;
+  const uint16_t end = static_cast<uint16_t>(startReg) +
+                       static_cast<uint16_t>(length - 1U);
+  return end <= cmd::REG_Z_OFS_USR;
+}
+
+bool LSM6DS3TR::_safeDiagnosticWrite(uint8_t reg, uint8_t value) {
+  if (reg == cmd::REG_TIMESTAMP2) return value == cmd::TIMESTAMP_RESET_VALUE;
+  uint8_t writableMask = 0;
+  if (!diagnosticWritableMask(reg, writableMask) ||
+      (value & static_cast<uint8_t>(~writableMask)) != 0U) {
+    return false;
   }
-
-  decodeRawAll(data, _rawMeasurement);
-  _hasSample = true;
-  _sampleTimestampMs = sampleTimestampMs;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::_readRawAll() {
-  return _readRawAllWithTimestamp(_nowMs());
-}
-
-Status LSM6DS3TR::_settleSelfTest(uint32_t settleMs) {
-  if (settleMs == 0u) {
-    return Status::Ok();
+  if (reg == cmd::REG_FUNC_CFG_ACCESS &&
+      (value & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U)
+    return false;
+  if (reg == cmd::REG_FIFO_CTRL5) {
+    const uint8_t mode = value & cmd::MASK_FIFO_MODE;
+    const uint8_t odr = static_cast<uint8_t>(
+        (value & cmd::MASK_ODR_FIFO) >> cmd::BIT_ODR_FIFO);
+    if (mode == 2U || mode == 5U || mode == 7U || odr > 10U) return false;
   }
-
-  const uint32_t deadline = _nowMs() + settleMs;
-  const uint32_t maxPolls =
-      settleMs * SELF_TEST_SETTLE_POLLS_PER_MS + SELF_TEST_SETTLE_POLLS_PER_MS;
-  for (uint32_t poll = 0; poll < maxPolls; ++poll) {
-    uint8_t ignored = 0;
-    Status st = readStatusReg(ignored);
-    if (!st.ok()) {
-      return st;
-    }
-    if (_config.nowMs == nullptr || deadlineReached(_nowMs(), deadline)) {
-      return Status::Ok();
-    }
+  if (reg == cmd::REG_CTRL1_XL &&
+      ((value & cmd::MASK_ODR_XL) >> cmd::BIT_ODR_XL) > 11U)
+    return false;
+  if (reg == cmd::REG_CTRL2_G) {
+    const uint8_t odr = static_cast<uint8_t>(
+        (value & cmd::MASK_ODR_G) >> cmd::BIT_ODR_G);
+    if (odr > 10U ||
+        ((value & cmd::MASK_FS_125) != 0U &&
+         (value & cmd::MASK_FS_G) != 0U))
+      return false;
   }
-  return Status::Error(Err::TIMEOUT, "Self-test settle timeout",
-                       static_cast<int32_t>(settleMs));
-}
-
-Status LSM6DS3TR::_waitForSelfTestReady(bool accel) {
-  const uint32_t timeoutMs = odrIntervalMs(Odr::HZ_416) * 3U + 100U;
-  const uint32_t deadline = _nowMs() + timeoutMs;
-  for (uint16_t poll = 0; poll < SELF_TEST_READY_MAX_POLLS; ++poll) {
-    bool ready = false;
-    Status st = accel ? isAccelDataReady(ready) : isGyroDataReady(ready);
-    if (!st.ok()) {
-      return st;
-    }
-    if (ready) {
-      return Status::Ok();
-    }
-    if (deadlineReached(_nowMs(), deadline)) {
-      return Status::Error(Err::TIMEOUT,
-                           accel ? "Accel self-test data-ready timeout"
-                                 : "Gyro self-test data-ready timeout",
-                           poll);
-    }
+  if (reg == cmd::REG_CTRL5_C) {
+    const uint8_t gyroSelfTest = static_cast<uint8_t>(
+        (value & cmd::MASK_ST_G) >> cmd::BIT_ST_G);
+    if ((value & cmd::MASK_ST_XL) == cmd::MASK_ST_XL ||
+        gyroSelfTest == 2U)
+      return false;
   }
-  return Status::Error(Err::TIMEOUT,
-                       accel ? "Accel self-test polling limit"
-                             : "Gyro self-test polling limit",
-                       SELF_TEST_READY_MAX_POLLS);
-}
-
-Status LSM6DS3TR::_readSelfTestAverage(bool accel, uint16_t samples, RawAxes& out) {
-  int32_t sumX = 0;
-  int32_t sumY = 0;
-  int32_t sumZ = 0;
-  for (uint16_t i = 0; i < samples; ++i) {
-    Status st = _waitForSelfTestReady(accel);
-    if (!st.ok()) {
-      return st;
-    }
-    RawAxes raw;
-    st = accel ? readAccelRaw(raw) : readGyroRaw(raw);
-    if (!st.ok()) {
-      return st;
-    }
-    sumX += raw.x;
-    sumY += raw.y;
-    sumZ += raw.z;
+  if (reg == cmd::REG_CTRL6_C) {
+    constexpr uint8_t TRIGGER_MODE_MASK = 0xE0U;
+    const uint8_t trigger = static_cast<uint8_t>(value & TRIGGER_MODE_MASK);
+    if (trigger != 0x00U && trigger != 0x40U && trigger != 0x60U &&
+        trigger != 0x80U && trigger != 0xC0U)
+      return false;
   }
-  out.x = static_cast<int16_t>(sumX / static_cast<int32_t>(samples));
-  out.y = static_cast<int16_t>(sumY / static_cast<int32_t>(samples));
-  out.z = static_cast<int16_t>(sumZ / static_cast<int32_t>(samples));
-  return Status::Ok();
+  if (reg == cmd::REG_CTRL3_C &&
+      ((value & (cmd::MASK_BOOT | cmd::MASK_SW_RESET | cmd::MASK_BLE)) != 0U ||
+       (value & cmd::MASK_IF_INC) == 0U))
+    return false;
+  if (reg == cmd::REG_CTRL4_C && (value & cmd::MASK_I2C_DISABLE) != 0U)
+    return false;
+  if ((reg == cmd::REG_X_OFS_USR || reg == cmd::REG_Y_OFS_USR ||
+       reg == cmd::REG_Z_OFS_USR) && value == 0x80U)
+    return false;
+  return true;
 }
 
-uint32_t LSM6DS3TR::_nowMs() const {
-  if (_config.nowMs != nullptr) {
-    return _config.nowMs(_config.timeUser);
-  }
-  return 0;
+Status LSM6DS3TR::diagnosticReadRegister(uint8_t reg, uint8_t& value,
+                                        uint64_t nowMs) {
+  return diagnosticReadBlock(reg, &value, 1, nowMs);
 }
 
-uint8_t LSM6DS3TR::_buildCtrl1Xl(Odr odr, AccelFs fs) {
-  return static_cast<uint8_t>((static_cast<uint8_t>(odr) << cmd::BIT_ODR_XL) |
-                              (static_cast<uint8_t>(fs) << cmd::BIT_FS_XL));
+Status LSM6DS3TR::diagnosticReadBlock(uint8_t startReg, uint8_t* data,
+                                     size_t length, uint64_t nowMs) {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (_active) return Status::Error(Err::BUSY, "Operation is active");
+  if (_resultPending)
+    return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
+  if (data == nullptr || !_validDiagnosticRange(startReg, length))
+    return Status::Error(Err::INVALID_PARAM, "Invalid diagnostic read range");
+  _operationTransactions = 0;
+  _operationTransactionLimit = 1;
+  _transactionUsed = false;
+  return _read(startReg, data, length, nowMs);
 }
 
-uint8_t LSM6DS3TR::_buildCtrl2G(Odr odr, GyroFs fs) {
-  if (fs == GyroFs::DPS_125) {
-    return static_cast<uint8_t>((static_cast<uint8_t>(odr) << cmd::BIT_ODR_G) |
-                                cmd::MASK_FS_125);
-  }
-  return static_cast<uint8_t>((static_cast<uint8_t>(odr) << cmd::BIT_ODR_G) |
-                              (static_cast<uint8_t>(fs) << cmd::BIT_FS_G));
-}
-
-uint8_t LSM6DS3TR::_buildCtrl4C() const {
-  uint8_t value = 0;
-  if (_gyroSleepEnabled) value |= cmd::MASK_SLEEP_G;
-  if (_gyroFilterConfig.lpf1Enabled) value |= cmd::MASK_LPF1_SEL_G;
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildCtrl6C() const {
-  uint8_t value = 0;
-  if (_accelPowerMode == AccelPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_XL_HM_MODE;
-  if (_accelOffsetWeight == AccelOffsetWeight::MG_16) value |= cmd::MASK_USR_OFF_W;
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildCtrl7G() const {
-  uint8_t value = 0;
-  if (_gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL) value |= cmd::MASK_G_HM_MODE;
-  if (_gyroFilterConfig.highPassEnabled) value |= cmd::MASK_HP_EN_G;
-  value |= static_cast<uint8_t>(static_cast<uint8_t>(_gyroFilterConfig.highPassMode)
-                                << cmd::BIT_HPM_G);
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildCtrl8Xl() const {
-  uint8_t value = 0;
-  if (_accelFilterConfig.lpf2Enabled) value |= cmd::MASK_LPF2_XL_EN;
-  if (_accelFilterConfig.highPassSlopeEnabled) value |= cmd::MASK_HP_SLOPE_XL_EN;
-  if (_accelFilterConfig.lowPassOn6d) value |= cmd::MASK_LOW_PASS_ON_6D;
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildCtrl10C() const {
-  uint8_t value = 0;
-  if (_wristTiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_WRIST_TILT_EN);
-  if (_timestampEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_EN);
-  if (_pedometerEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_PEDO_EN);
-  if (_tiltEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_TILT_EN);
-  if (_significantMotionEnabled) value |= static_cast<uint8_t>(1u << cmd::BIT_SIGN_MOTION_EN);
-  if (_pedometerEnabled || _tiltEnabled || _significantMotionEnabled || _wristTiltEnabled) {
-    value |= static_cast<uint8_t>(1u << cmd::BIT_FUNC_EN);
-  }
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildWakeUpDur() const {
-  return _timestampHighResolution ? cmd::MASK_TIMER_HR : 0;
-}
-
-uint8_t LSM6DS3TR::_buildFifoCtrl2() const {
-  uint8_t value = static_cast<uint8_t>((_fifoConfig.threshold >> 8) & cmd::MASK_FIFO_THRESHOLD_HI);
-  if (_fifoConfig.storeTimestampStep) value |= static_cast<uint8_t>(1u << cmd::BIT_TIMER_PEDO_FIFO_EN);
-  if (_fifoConfig.storeTemperature) value |= cmd::MASK_FIFO_TEMP_EN;
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildFifoCtrl3() const {
-  return static_cast<uint8_t>((static_cast<uint8_t>(_fifoConfig.gyroDecimation) << cmd::BIT_DEC_FIFO_GYRO) |
-                              (static_cast<uint8_t>(_fifoConfig.accelDecimation) << cmd::BIT_DEC_FIFO_XL));
-}
-
-uint8_t LSM6DS3TR::_buildFifoCtrl4() const {
-  uint8_t value = 0;
-  if (_fifoConfig.stopOnThreshold) value |= cmd::MASK_STOP_ON_FTH;
-  if (_fifoConfig.onlyHighData) value |= cmd::MASK_ONLY_HIGH_DATA;
-  return value;
-}
-
-uint8_t LSM6DS3TR::_buildFifoCtrl5() const {
-  return static_cast<uint8_t>((static_cast<uint8_t>(_fifoConfig.odr) << cmd::BIT_ODR_FIFO) |
-                              static_cast<uint8_t>(_fifoConfig.mode));
-}
-
-// ---------------------------------------------------------------------------
-// Software bias calibration
-// ---------------------------------------------------------------------------
-
-void LSM6DS3TR::setAccelBias(const Axes& bias) {
-  _accelBias = bias;
-}
-
-Axes LSM6DS3TR::accelBias() const {
-  return _accelBias;
-}
-
-void LSM6DS3TR::setGyroBias(const Axes& bias) {
-  _gyroBias = bias;
-}
-
-Axes LSM6DS3TR::gyroBias() const {
-  return _gyroBias;
-}
-
-void LSM6DS3TR::correctAccel(Axes& inout) const {
-  inout.x -= _accelBias.x;
-  inout.y -= _accelBias.y;
-  inout.z -= _accelBias.z;
-}
-
-void LSM6DS3TR::correctGyro(Axes& inout) const {
-  inout.x -= _gyroBias.x;
-  inout.y -= _gyroBias.y;
-  inout.z -= _gyroBias.z;
-}
-
-Status LSM6DS3TR::captureAccelBias(uint16_t samples, Axes& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (samples == 0 || samples > 10000) {
-    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
-  }
-  if (!isActiveOdr(_config.odrXl)) {
-    return Status::Error(Err::INVALID_PARAM, "Accel ODR is POWER_DOWN");
-  }
-
-  const uint32_t sampleTimeoutMs = odrIntervalMs(_config.odrXl) * 3 + 100;
-  double sumX = 0.0;
-  double sumY = 0.0;
-  double sumZ = 0.0;
-  float minX = 0.0f;
-  float maxX = 0.0f;
-  float minY = 0.0f;
-  float maxY = 0.0f;
-  float minZ = 0.0f;
-  float maxZ = 0.0f;
-
-  for (uint16_t i = 0; i < samples; ++i) {
-    // Wait for fresh accel data
-    const uint32_t deadline = _nowMs() + sampleTimeoutMs;
-    bool ready = false;
-    uint32_t polls = 0;
-    const uint32_t maxPolls = sampleTimeoutMs + 2U;
-    while (!ready && polls < maxPolls) {
-      Status st = isAccelDataReady(ready);
-      if (!st.ok()) {
-        return st;
-      }
-      if (!ready && deadlineReached(_nowMs(), deadline)) {
-        return Status::Error(Err::TIMEOUT, "Accel data-ready timeout during calibration");
-      }
-      polls++;
-    }
-    if (!ready) {
-      return Status::Error(Err::TIMEOUT, "Accel data-ready timeout during calibration");
-    }
-
-    RawAxes raw;
-    Status st = readAccelRaw(raw);
-    if (!st.ok()) {
-      return st;
-    }
-    const Axes phys = convertAccel(raw);
-    addCalibrationSample(phys, i, sumX, sumY, sumZ,
-                         minX, maxX, minY, maxY, minZ, maxZ);
-  }
-
-  Status st = finalizeAccelCalibration(samples, sumX, sumY, sumZ,
-                                       minX, maxX, minY, maxY, minZ, maxZ,
-                                       _config.calibrationLimits, out);
-  if (!st.ok()) {
-    return st;
-  }
-  _accelBias = out;
-  return Status::Ok();
-}
-
-Status LSM6DS3TR::captureGyroBias(uint16_t samples, Axes& out) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
-  }
-  if (samples == 0 || samples > 10000) {
-    return Status::Error(Err::INVALID_PARAM, "samples must be 1..10000");
-  }
-  if (!isActiveOdr(_config.odrG)) {
-    return Status::Error(Err::INVALID_PARAM, "Gyro ODR is POWER_DOWN");
-  }
-
-  const uint32_t sampleTimeoutMs = odrIntervalMs(_config.odrG) * 3 + 100;
-  double sumX = 0.0;
-  double sumY = 0.0;
-  double sumZ = 0.0;
-  float minX = 0.0f;
-  float maxX = 0.0f;
-  float minY = 0.0f;
-  float maxY = 0.0f;
-  float minZ = 0.0f;
-  float maxZ = 0.0f;
-
-  for (uint16_t i = 0; i < samples; ++i) {
-    // Wait for fresh gyro data
-    const uint32_t deadline = _nowMs() + sampleTimeoutMs;
-    bool ready = false;
-    uint32_t polls = 0;
-    const uint32_t maxPolls = sampleTimeoutMs + 2U;
-    while (!ready && polls < maxPolls) {
-      Status st = isGyroDataReady(ready);
-      if (!st.ok()) {
-        return st;
-      }
-      if (!ready && deadlineReached(_nowMs(), deadline)) {
-        return Status::Error(Err::TIMEOUT, "Gyro data-ready timeout during calibration");
-      }
-      polls++;
-    }
-    if (!ready) {
-      return Status::Error(Err::TIMEOUT, "Gyro data-ready timeout during calibration");
-    }
-
-    RawAxes raw;
-    Status st = readGyroRaw(raw);
-    if (!st.ok()) {
-      return st;
-    }
-    const Axes phys = convertGyro(raw);
-    addCalibrationSample(phys, i, sumX, sumY, sumZ,
-                         minX, maxX, minY, maxY, minZ, maxZ);
-  }
-
-  Status st = finalizeGyroCalibration(samples, sumX, sumY, sumZ,
-                                      minX, maxX, minY, maxY, minZ, maxZ,
-                                      _config.calibrationLimits, out);
-  if (!st.ok()) {
-    return st;
-  }
-  _gyroBias = out;
-  return Status::Ok();
+Status LSM6DS3TR::diagnosticWriteRegister(uint8_t reg, uint8_t value,
+                                         uint64_t nowMs) {
+  if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
+  if (_active) return Status::Error(Err::BUSY, "Operation is active");
+  if (_resultPending)
+    return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
+  if (!_safeDiagnosticWrite(reg, value))
+    return Status::Error(Err::INVALID_PARAM, "Unsafe or read-only diagnostic write");
+  _operationTransactions = 0;
+  _operationTransactionLimit = 1;
+  _transactionUsed = false;
+  _hardwareStateMayHaveChanged = true;
+  _configurationMayBeUnknown = true;
+  _invalidateConfiguration();
+  return _writeByte(reg, value, nowMs, true);
 }
 
 }  // namespace LSM6DS3TR

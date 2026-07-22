@@ -1,4 +1,4 @@
-version: "1.1.0"
+version: "2.0.0"
 description: "Production-grade LSM6DS3TR-C IMU driver"
 license: "MIT"
 url: "https://github.com/janhavelka/LSM6DS3TR"
@@ -6,4 +6,4 @@ targets:
   - esp32s2
   - esp32s3
 dependencies:
-  idf: ">=6.0.1"
+  idf: ">=5.4.0,<5.5.0"

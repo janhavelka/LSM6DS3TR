@@ -15,8 +15,8 @@ static constexpr uint8_t WHO_AM_I_VALUE = 0x6A;
 static constexpr uint8_t REG_FUNC_CFG_ACCESS = 0x01;
 
 // Sensor sync
-static constexpr uint8_t REG_SENSOR_SYNC_TIME_FRAME = 0x02;
-static constexpr uint8_t REG_SENSOR_SYNC_RES_RATIO = 0x04;
+static constexpr uint8_t REG_SENSOR_SYNC_TIME_FRAME = 0x04;
+static constexpr uint8_t REG_SENSOR_SYNC_RES_RATIO = 0x05;
 
 // FIFO control
 static constexpr uint8_t REG_FIFO_CTRL1 = 0x06;
@@ -156,7 +156,6 @@ static constexpr uint8_t BIT_BLE = 1;
 static constexpr uint8_t MASK_BLE = 0x02;
 static constexpr uint8_t BIT_SW_RESET = 0;
 static constexpr uint8_t MASK_SW_RESET = 0x01;
-static constexpr uint8_t CTRL3_C_DEFAULT = 0x04;
 
 // CTRL4_C
 static constexpr uint8_t BIT_DEN_XL_EN = 7;
@@ -193,8 +192,8 @@ static constexpr uint8_t BIT_HP_EN_G = 6;
 static constexpr uint8_t MASK_HP_EN_G = 0x40;
 static constexpr uint8_t BIT_HPM_G = 4;
 static constexpr uint8_t MASK_HPM_G = 0x30;
-static constexpr uint8_t BIT_HP_G_RST = 3;
-static constexpr uint8_t MASK_HP_G_RST = 0x08;
+static constexpr uint8_t BIT_ROUNDING_STATUS = 3;
+static constexpr uint8_t MASK_ROUNDING_STATUS = 0x08;
 
 // CTRL8_XL
 static constexpr uint8_t BIT_LPF2_XL_EN = 7;
@@ -328,8 +327,6 @@ static constexpr uint8_t TIMESTAMP_RESET_VALUE = 0xAA;
 
 // Reset / boot timing
 static constexpr uint32_t BOOT_TIME_MS = 15;
-static constexpr uint32_t SW_RESET_TIMEOUT_MS = 10;
-static constexpr uint16_t SW_RESET_MAX_POLLS = 255;
 
 }  // namespace cmd
 }  // namespace LSM6DS3TR

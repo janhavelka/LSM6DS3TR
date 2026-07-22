@@ -298,8 +298,8 @@ All registers are 8-bit. Default values indicated where documented. Address spac
 | Addr | Name | Type | Default | Description | Source |
 |------|------|------|---------|-------------|--------|
 | 01h | FUNC_CFG_ACCESS | R/W | 00h | Access embedded function registers; XL_HM_MODE bit (b4) selects accel power mode | LSM6DS3TR-C_datasheet.pdf, p45 |
-| 02h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | LSM6DS3TR-C_datasheet.pdf, p46 |
-| 04h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | LSM6DS3TR-C_datasheet.pdf, p46 |
+| 04h | SENSOR_SYNC_TIME_FRAME | R/W | 00h | Sensor sync configuration | LSM6DS3TR-C_datasheet.pdf, p53 |
+| 05h | SENSOR_SYNC_RES_RATIO | R/W | 00h | Sensor sync resolution ratio | LSM6DS3TR-C_datasheet.pdf, p54 |
 | 06h | FIFO_CTRL1 | R/W | 00h | FIFO threshold low [FTH_7:0] | LSM6DS3TR-C_datasheet.pdf, p46 |
 | 07h | FIFO_CTRL2 | R/W | 00h | FIFO threshold high [FTH_10:8], TIMER_PEDO_FIFO_EN/DRDY, FIFO_TEMP_EN | LSM6DS3TR-C_datasheet.pdf, p47 |
 | 08h | FIFO_CTRL3 | R/W | 00h | Gyro/accel FIFO decimation [DEC_FIFO_GYRO, DEC_FIFO_XL] | LSM6DS3TR-C_datasheet.pdf, p47 |
@@ -315,7 +315,7 @@ All registers are 8-bit. Default values indicated where documented. Address spac
 | 13h | CTRL4_C | R/W | 00h | DEN_XL_EN, SLEEP_G, INT2_on_INT1, DEN_DRDY_INT1, DRDY_MASK, I2C_disable, LPF1_SEL_G | LSM6DS3TR-C_datasheet.pdf, p53 |
 | 14h | CTRL5_C | R/W | 00h | Self-test [ST_XL, ST_G], DEN_LH, rounding | LSM6DS3TR-C_datasheet.pdf, p54 |
 | 15h | CTRL6_C | R/W | 00h | TRIG_EN, LVL1_EN, LVL2_EN, XL_HM_MODE (redundant — **unclear**: also at 01h b4) | LSM6DS3TR-C_datasheet.pdf, p55 |
-| 16h | CTRL7_G | R/W | 00h | G_HM_MODE, HP_EN_G, HPM_G[1:0], ROUNDING_STATUS, HP_G_RST | LSM6DS3TR-C_datasheet.pdf, p56 |
+| 16h | CTRL7_G | R/W | 00h | G_HM_MODE, HP_EN_G, HPM_G[1:0], ROUNDING_STATUS; bits 2:0 are reserved and must remain 0 | LSM6DS3TR-C_datasheet.pdf, p56 |
 | 17h | CTRL8_XL | R/W | 00h | LPF2_XL_EN, HPCF_XL[1:0], HP_REF_MODE, INPUT_COMPOSITE, HP_SLOPE_XL_EN, LOW_PASS_ON_6D | LSM6DS3TR-C_datasheet.pdf, p57 |
 | 18h | CTRL9_XL | R/W | E0h | DEN stamping axis bits [DEN_X, DEN_Y, DEN_Z], SOFT_EN | LSM6DS3TR-C_datasheet.pdf, p58 |
 | 19h | CTRL10_C | R/W | 00h | WRIST_TILT_EN, TIMER_EN, PEDO_EN, TILT_EN, FUNC_EN, PEDO_RST_STEP, SIGN_MOTION_EN | LSM6DS3TR-C_datasheet.pdf, p59 |
@@ -440,7 +440,7 @@ The slope filter computes: `slope(tn) = [acc(tn) - acc(tn-1)] / 2`. Selected by 
 
 ### Accelerometer User Offset Registers
 
-Three 8-bit registers (X_OFS_USR, Y_OFS_USR, Z_OFS_USR at 73h–75h) provide user-programmable offset correction. Weight selectable via `USR_OFF_W` bit in CTRL6_C: 0 = 2^−10 g/LSB (~1 mg/LSB), 1 = 2^−6 g/LSB (~15.6 mg/LSB). (AN5130, p27; LSM6DS3TR-C_datasheet.pdf, p95)
+Three 8-bit registers (X_OFS_USR, Y_OFS_USR, Z_OFS_USR at 73h–75h) provide user-programmable offset correction over the documented signed range -127..127. Weight selectable via `USR_OFF_W` bit in CTRL6_C: 0 = 2^−10 g/LSB (~1 mg/LSB), 1 = 2^−6 g/LSB (~15.6 mg/LSB). (AN5130, p27; LSM6DS3TR-C_datasheet.pdf, p95)
 
 ### Turn-On Time
 
@@ -475,10 +475,15 @@ The gyroscope digital chain consists of (AN5130, p16):
 
 | HPM_G[1:0] | Cutoff (Hz) | Source |
 |------------|-------------|--------|
-| 00 | 0.0081 | AN5130, p16 |
-| 01 | 0.0324 | AN5130, p16 |
-| 10 | 2.07 | AN5130, p16 |
-| 11 | 16.32 | AN5130, p16 |
+| 00 | 0.016 | AN5130, p16 |
+| 01 | 0.065 | AN5130, p16 |
+| 10 | 0.260 | AN5130, p16 |
+| 11 | 1.040 | AN5130, p16 |
+
+These are register-protocol facts. The production version 2 `DeviceProfile`
+rejects gyro HPF enable because AN5130's source-backed turn-on/settling tables
+explicitly exclude the HP filter; advanced diagnostic access does not create a
+managed sampling-readiness contract.
 
 ### Gyroscope LPF1 Bandwidth (varies with ODR and FTYPE[1:0])
 

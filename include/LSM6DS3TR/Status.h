@@ -1,69 +1,80 @@
 /// @file Status.h
-/// @brief Error codes and status handling for LSM6DS3TR driver
+/// @brief Typed status returned by the LSM6DS3TR-C driver.
 #pragma once
 
 #include <cstdint>
 
+/// @brief Framework-neutral public API for the LSM6DS3TR-C driver.
 namespace LSM6DS3TR {
 
-/// @brief Error codes for all LSM6DS3TR operations.
+/// @brief Error and progress codes. Values are append-only within this API major version.
 enum class Err : uint8_t {
-  OK = 0,                ///< Operation successful
-  NOT_INITIALIZED,       ///< begin() not called
-  INVALID_CONFIG,        ///< Invalid configuration parameter
-  I2C_ERROR,             ///< I2C communication failure
-  TIMEOUT,               ///< Operation timed out
-  INVALID_PARAM,         ///< Invalid parameter value
-  DEVICE_NOT_FOUND,      ///< Device not responding on I2C bus
-  CHIP_ID_MISMATCH,      ///< WHO_AM_I != 0x6A
-  MEASUREMENT_NOT_READY, ///< Sample not yet available
-  CONVERSION_NOT_READY = MEASUREMENT_NOT_READY, ///< Cross-library alias
-  BUSY,                  ///< Device is busy
-  IN_PROGRESS,           ///< Operation scheduled; call tick() to complete
-  SELF_TEST_FAIL,        ///< Self-test result out of range
-
-  // I2C transport details (append-only)
-  I2C_NACK_ADDR,         ///< I2C address not acknowledged
-  I2C_NACK_DATA,         ///< I2C data byte not acknowledged
-  I2C_TIMEOUT,           ///< I2C transaction timeout
-  I2C_BUS,               ///< I2C bus error
-  FIFO_EMPTY,            ///< FIFO has no unread samples
-  OFFLINE,               ///< Driver is offline; call recover()
-  I2C_BUSY,              ///< Transport or shared bus temporarily busy
-  FIFO_OVERRUN,          ///< FIFO overrun observed; data freshness is not guaranteed
-  CALIBRATION_UNSTABLE,  ///< Calibration samples exceeded stillness limits
-  CALIBRATION_ORIENTATION ///< Accelerometer calibration orientation is invalid
+  OK = 0,                    ///< Operation or helper succeeded.
+  NOT_BOUND,                 ///< No transport is currently bound.
+  INVALID_CONFIG,            ///< Driver or profile configuration is invalid.
+  INVALID_PARAM,             ///< A call argument is outside its valid domain.
+  BUSY,                      ///< Another operation or pending result owns the slot.
+  IN_PROGRESS,               ///< Operation was accepted or remains active.
+  RESULT_PENDING,            ///< A terminal result must be consumed first.
+  RESULT_NOT_AVAILABLE,      ///< No matching active or terminal result exists.
+  STALE_RESULT,              ///< The supplied token does not identify the result.
+  DEADLINE_EXPIRED,          ///< Absolute operation deadline was reached.
+  CANCELLED,                 ///< Caller cancelled the accepted operation.
+  CONFIGURATION_UNKNOWN,     ///< Verified device configuration is unavailable.
+  CONFIGURATION_MISMATCH,    ///< Register readback differed from the desired image.
+  SETTLING,                  ///< Configuration is verified but output is not yet valid.
+  DATA_NOT_READY,            ///< Bounded readiness checks were exhausted.
+  UNSUPPORTED_PROFILE,       ///< Requested feature is outside the production profile.
+  OPERATION_INDETERMINATE,   ///< Hardware effect or restoration cannot be proved.
+  TRANSACTION_LIMIT_EXCEEDED, ///< Hard callback ceiling was reached.
+  DEVICE_NOT_FOUND,          ///< Transport completed but no device was present.
+  CHIP_ID_MISMATCH,          ///< WHO_AM_I did not identify an LSM6DS3TR-C.
+  SELF_TEST_FAIL,            ///< Built-in sensor self-test limits were not met.
+  CALIBRATION_UNSTABLE,      ///< Calibration samples exceeded stability limits.
+  CALIBRATION_ORIENTATION,   ///< Fixture gravity did not match the requested vector.
+  FIFO_EMPTY,                ///< FIFO contained no unread word.
+  FIFO_OVERRUN,              ///< FIFO data loss was observed.
+  I2C_ERROR,                 ///< Generic transport error.
+  I2C_NACK_ADDR,             ///< Address phase was not acknowledged.
+  I2C_NACK_DATA,             ///< Data phase was not acknowledged.
+  I2C_TIMEOUT,               ///< Transport callback timed out.
+  I2C_BUS,                   ///< Bus-level transport fault.
+  I2C_BUSY                   ///< Transport owner reported the bus busy.
 };
 
-/// @brief Status structure returned by all fallible operations.
+/// @brief Status structure returned by every fallible public operation.
 struct Status {
-  Err code = Err::OK;     ///< Status code.
-  int32_t detail = 0;     ///< Implementation-specific detail, such as transport error code.
-  const char* msg = "";   ///< Static message string.
+  Err code = Err::OK;  ///< Stable typed outcome.
+  int32_t detail = 0;  ///< Context-specific numeric detail; zero when unused.
+  const char* msg = "";  ///< Static string only; never owned by the caller.
 
+  /// @brief Construct an OK status with no detail.
   constexpr Status() = default;
+
+  /// @brief Construct a status value without allocating memory.
+  /// @param c Typed outcome.
+  /// @param d Context-specific numeric detail.
+  /// @param m Static-lifetime diagnostic string.
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
 
-  /// @brief Check whether the operation succeeded.
-  /// @return true when code is OK.
+  /// @return True only when code is Err::OK.
   constexpr bool ok() const { return code == Err::OK; }
 
-  /// @brief Check whether the status matches an error code.
-  /// @return true when code equals @p err.
+  /// @param err Code to compare.
+  /// @return True when code equals @p err.
   constexpr bool is(Err err) const { return code == err; }
 
-  /// @brief Check whether the operation is still pending.
-  /// @return true when code is IN_PROGRESS.
+  /// @return True only while an accepted operation remains active.
   constexpr bool inProgress() const { return code == Err::IN_PROGRESS; }
 
-  /// @brief Create a success status.
+  /// @return Canonical successful status.
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }
 
-  /// @brief Create an error status.
-  /// @param err Error code.
-  /// @param message Static message string.
-  /// @param detailCode Optional implementation-specific detail.
-  /// @return Error status.
+  /// @brief Build a failed or progress status using a static message.
+  /// @param err Typed outcome.
+  /// @param message Static-lifetime diagnostic string.
+  /// @param detailCode Context-specific numeric detail.
+  /// @return Constructed status value.
   static constexpr Status Error(Err err, const char* message, int32_t detailCode = 0) {
     return Status{err, detailCode, message};
   }

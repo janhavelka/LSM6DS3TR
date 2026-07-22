@@ -17,7 +17,7 @@ COMPACT_DOCS = [
     "05_register_map.md",
     "06_modes_interrupts_status_and_faults.md",
     "07_initialization_reset_and_operational_notes.md",
-    "08_variant_differences_and_open_questions.md",
+    "08_variant_and_source_notes.md",
 ]
 
 RAW_SOURCE_EXTRACTS = [
@@ -74,6 +74,11 @@ CRITICAL_COMPACT_ANCHORS = [
     "Reserved bits",
 ]
 
+EXACT_REGISTER_FACTS = [
+    ("| `0x04` | `SENSOR_SYNC_TIME_FRAME` |", "REG_SENSOR_SYNC_TIME_FRAME = 0x04"),
+    ("| `0x05` | `SENSOR_SYNC_RES_RATIO` |", "REG_SENSOR_SYNC_RES_RATIO = 0x05"),
+]
+
 
 def fail(message: str) -> int:
     print(f"Chip documentation coverage FAILED: {message}")
@@ -110,6 +115,21 @@ def main() -> int:
         print("Chip documentation coverage FAILED: compact docs lost critical anchors")
         for anchor in missing_anchors:
             print(f"  - {anchor}")
+        return 1
+
+    command_table = (ROOT / "include" / "LSM6DS3TR" / "CommandTable.h").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    missing_facts = []
+    for compact_fact, header_fact in EXACT_REGISTER_FACTS:
+        if compact_fact not in compact_text:
+            missing_facts.append(compact_fact)
+        if header_fact not in command_table:
+            missing_facts.append(header_fact)
+    if missing_facts:
+        print("Chip documentation coverage FAILED: exact register facts changed")
+        for fact in missing_facts:
+            print(f"  - {fact}")
         return 1
 
     print("Chip documentation coverage PASSED")

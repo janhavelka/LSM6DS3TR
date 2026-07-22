@@ -36,7 +36,7 @@ jobs:
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install platformio==6.1.18
 
       - name: Build ${{ matrix.environment }}
         run: pio run -e ${{ matrix.environment }}
@@ -63,7 +63,7 @@ jobs:
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install platformio==6.1.18
 
       - name: Enforce core timing guard
         run: python tools/check_core_timing_guard.py
@@ -83,9 +83,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.18
 
-      - name: Check generated version header
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes doxygen
+
+      - name: Check generated version metadata
         run: python scripts/generate_version.py check
 
       - name: Enforce example CLI contract
@@ -94,11 +99,33 @@ jobs:
       - name: Enforce IDF example contract
         run: python tools/check_idf_example_contract.py
 
-      - name: Validate HIL smoke parser
-        run: python tools/hil_smoke.py --dry-run --parser-self-test
-
       - name: Enforce chip documentation coverage
         run: python tools/check_chip_docs_coverage.py
 
+      - name: Build strict API documentation
+        run: python tools/build_docs.py
+
       - name: Validate library package
-        run: pio pkg pack
+        run: |
+          pio pkg pack
+          python tools/check_package_contract.py
+
+  esp-idf-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - esp32s2
+          - esp32s3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build native ESP-IDF example for ${{ matrix.target }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.0
+          target: ${{ matrix.target }}
+          path: examples/idf/basic

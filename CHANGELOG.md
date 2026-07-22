@@ -7,6 +7,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Completed Doxygen contracts for the owner-safe public types, helpers,
+  operations, result provenance, and diagnostic boundary.
+- Made undocumented public API, missing parameter documentation, and Doxygen
+  documentation errors fail both clean local generation and CI.
+- Consolidated ESP-IDF guidance into `docs/IDF_PORT.md`, removed the duplicate
+  implementation note, included the maintained guide in package exports, and
+  clarified documentation validation and ownership language across the README
+  and contributor guidance.
+- Added a documentation map that distinguishes maintained contracts from
+  source references and generated pages.
+
+### Removed
+
+- Removed completed TunnelMonitor audit/fit artifacts and obsolete version 1
+  HIL evidence from the current documentation set; their history remains in
+  Git rather than appearing as version 2 validation.
+- Removed duplicate generated text and derived summaries for optional vendor
+  design-tip PDFs. The original PDFs remain available as source material.
+
+## [2.0.0] - 2026-07-19
+
+### Added
+
+- Zero-I2C `bind()`/`unbind()` lifecycle with an application-owned
+  `DriverConfig` transport binding.
+- One fixed-memory operation model for probe, configuration, sampling, reset,
+  boot, recovery, reconciliation, power-down, self-test, calibration, and
+  destructive FIFO purge.
+- Absolute 64-bit operation deadlines, caller-selected transport budgets,
+  hard total callback ceilings, bus-silent cancellation, 64-bit nonzero
+  operation tokens, and exactly-once terminal result delivery.
+- Atomic raw sample results with validity/freshness masks, a 64-bit sequence,
+  configuration generation, read uptime, and immutable full-scale provenance.
+- Explicit configuration states, verified profile readback, settling gates,
+  mismatch diagnostics, and ambiguous/partial hardware-effect reporting.
+- Allocation-free fixed-unit conversion, sensitivity, timing, validation, and
+  calibration helpers independent of mutable driver state.
+- Real ESP-IDF 5.4.0 CI builds for ESP32-S2 and ESP32-S3.
+
+### Changed
+
+- Replaced the managed synchronous/offline driver with an externally scheduled
+  owner-safe driver. Applications own bus locking, retries, health, backoff,
+  and recovery policy.
+- Production configuration is one replayable `DeviceProfile`. Version 2
+  supports polling snapshots and requires FIFO plus interrupts disabled.
+- Reset, boot, self-test, and calibration are staged operations with visible
+  waits and restoration outcomes.
+- Self-test and calibration enforce three-check per-sample readiness limits and
+  zero-I2C sampling cadence; self-test reserves its full restoration budget
+  and explicitly wakes then restores a configured sleeping gyro.
+- Poll progress now includes cumulative callback use and its hard ceiling.
+  Self-test exposes a failed primary status at a bus-silent poll boundary before
+  a later poll begins restoration.
+- Public callback ceilings are probe 2, configure 68, sample 66, reset/boot 88,
+  recover 87, reconcile 35, and power-down 8 worst case (6 from the main bank).
+  Self-test remains `16 * (samples + 5) + 80`, calibration is `4 * samples`,
+  and FIFO purge is `maxWords + 5`.
+- Ready-checked sampling spaces unsuccessful status reads by the slowest
+  requested cadence instead of a fixed 1 ms loop. Motion follows its configured
+  ODR; temperature follows the AN5130 12.5/26/52 Hz cases and remains available
+  from a non-power-down sleeping gyro.
+- Calibration requires an explicit expected acceleration vector instead of
+  assuming a Z-up product installation.
+- Diagnostic raw register access is one-transaction, excluded during active
+  jobs, and invalidates configuration provenance on accepted writes. Writes
+  now enforce per-register masks and reject reserved bits or illegal encodings
+  before I2C.
+- Arduino and native ESP-IDF examples now demonstrate the same compact
+  token/start/poll/cancel/take command surface with fixed input buffers.
+- The examples reject entire overlength command lines and validate sample and
+  calibration arguments exactly instead of executing truncated/defaulted input.
+- PlatformIO Core, pioarduino platform archive, and CI ESP-IDF version are
+  pinned. The IDF component supports the ESP-IDF 5.4 line.
+- Library packages use an explicit minimal export whitelist, with archive
+  contents enforced by a CI contract check.
+
+### Fixed
+
+- Prevented stale results from being attributed to a later request through
+  token correlation and exactly-once consumption.
+- Prevented cached raw samples from being converted with a newer full-scale
+  setting by carrying scale provenance in each sample.
+- Prevented interpreted measurements while configuration is unknown or sensor
+  output is settling.
+- Enforced BDU for managed multi-byte samples and independent validity of
+  acceleration, angular-rate, and temperature fields, including TDA readiness
+  for every request containing temperature.
+- Enforced the 208 Hz low-power/normal ceiling for both sensors and made
+  power-down available from any bound idle state while proving only exact zero
+  accelerometer/gyro ODR registers and leaving configuration unconfigured.
+- Partitioned total callback limits so sampling reserves its burst and
+  reset/boot/recovery reserve a complete profile replay/readback budget.
+- Made configure validate WHO_AM_I before its first write and made positive
+  chip-ID mismatches from probe, configure, reset, boot, reconcile, recovery,
+  and FIFO purge invalidate prior verified provenance. Reconcile checks
+  identity before managed readback.
+- Added main-register-bank prechecks before identity-dependent operations.
+  Reset/boot verify an explicit bank clear; power-down does so conditionally
+  when its precheck finds an alternate bank, then validates identity before its
+  ODR writes. Public ceilings include these callbacks.
+- Added the required bus-silent boot/reset inaccessible interval and verified
+  profile replay/readback.
+- Rejected non-finite or invalid calibration inputs and removed the public
+  `DISABLED`, `LOW`, and `HIGH` macro collisions.
+- Rejected gyroscope bias calibration while the verified gyro is sleeping,
+  without performing I2C.
+- Corrected the sensor-sync register addresses to `TIME_FRAME=0x04` and
+  `RES_RATIO=0x05`. Sensor-sync and DRDY-pulse controls are now managed and
+  verified as zero; diagnostic writes invalidate provenance for reconciliation.
+- Corrected gyro high-pass cutoff names/encodings as register facts and made
+  high-pass production profiles explicitly unsupported because authoritative
+  settling tables exclude them. Also restricted offset and snapshot-profile
+  combinations whose register effects were not safely represented.
+- Made settling calculations account for documented accelerometer discard
+  counts and gyro turn-on/filter delay instead of using a coarse fixed bound.
+- Made self-test use at least five averaged samples per phase, temporarily
+  remove user-offset effects, establish the required opposite-sensor modes,
+  preserve the exact original profile, and reserve the corrected restoration
+  ceiling.
+- Made conversion reject internally inconsistent raw provenance while carrying
+  sample quality into converted output.
+- Made FIFO purge verify device identity and IF_INC/BDU before consuming data,
+  and treat an overrun's zero encoded unread count as full/data-lost state; it
+  also verifies the main bank and its public ceiling is `maxWords + 5`.
+- Made passive diagnostic time identify the last transport error specifically,
+  rather than moving on successful transfers.
+- Synchronized `library.json`, `Version.h`, `idf_component.yml`, and Doxygen
+  project versions from one source.
+- Removed unrelated TunnelMonitor dependency-pin generation from the library's
+  version metadata script.
+
+### Removed
+
+- Synchronous `begin()`/`end()`/`recover()`, `tick()`, synchronous setters and
+  reads, cached measurement getters, driver-owned `OFFLINE` admission policy,
+  and blocking self-test/calibration APIs.
+- The incomplete FIFO acquisition/configuration surface and raw interrupt/event
+  configuration claims. FIFO purge remains explicitly destructive maintenance.
+- Stale broad CLI helpers and version 1 command-contract requirements.
+- The version 1-only HIL runner; its retained evidence is historical and a new
+  version 2 physical test campaign is required.
+
+### Documentation
+
+- Re-audited every TunnelMonitor suitability finding against the version 2
+  API and the authoritative local TunnelMonitor-node ownership/capacity
+  contracts.
+- Documented operation classes, transaction/deadline behavior, concurrency,
+  ISR restrictions, cancellation, ambiguous effects, provenance, migration,
+  and remaining product/HIL decisions.
+
 ## [1.2.0] - 2026-06-25
 
 ### Added
@@ -129,10 +283,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforced documented accelerometer and gyroscope ODR versus power-mode constraints
 - Enforced documented dependencies for timestamp, embedded functions, FIFO use, and async combined measurements
 - Fixed `recover()` after a failed `begin()` by copying stored config before retrying initialization
-- Fixed `REG_SENSOR_SYNC_TIME_FRAME` register address to `0x02`
+- Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/LSM6DS3TR/releases/tag/v1.0.0

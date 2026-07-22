@@ -68,8 +68,8 @@ These anchors keep the compact notes connected to the wider user register map wi
 
 | Address | Register anchor | Role | Source |
 |---:|---|---|---|
-| `0x02` | `SENSOR_SYNC_TIME_FRAME` | Sensor synchronization timing frame. | Datasheet, p. 53 |
-| `0x04` | `SENSOR_SYNC_RES_RATIO` | Sensor synchronization resolution ratio. | Datasheet, p. 54 |
+| `0x04` | `SENSOR_SYNC_TIME_FRAME` | Sensor synchronization timing frame. | Datasheet, p. 53 |
+| `0x05` | `SENSOR_SYNC_RES_RATIO` | Sensor synchronization resolution ratio. | Datasheet, p. 54 |
 | `0x1A` | `MASTER_CONFIG` | Sensor-hub master control, pass-through, pull-up, and data-valid behavior. | Datasheet, p. 69 |
 | `0x1B` | `WAKE_UP_SRC` | Wake-up, sleep state, and free-fall event source. | Datasheet, p. 70 |
 | `0x1C` | `TAP_SRC` | Single/double tap and tap-axis source. | Datasheet, p. 70 |

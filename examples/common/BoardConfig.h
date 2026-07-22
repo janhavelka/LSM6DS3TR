@@ -5,8 +5,8 @@
  * These are convenience defaults for reference designs only.
  * NOT part of the library API. Override for your hardware.
  *
- * @warning The library itself is board-agnostic. All pins are passed via Config.
- *          These defaults are provided for examples only.
+ * @warning The library itself is board-agnostic. The application-owned
+ *          transport configures pins and the bus. These defaults are examples.
  */
 
 #pragma once
@@ -22,7 +22,7 @@ namespace board {
 // ====================================================================
 // These values are NOT library defaults. They are example-only values.
 // Override them for your board by creating your own BoardConfig.h or
-// passing explicit values to Config structs in your application.
+// configuring the application-owned transport explicitly.
 // ====================================================================
 
 /// @brief I2C SDA pin (data line). Example default for ESP32-S2/S3.
@@ -42,8 +42,8 @@ static constexpr uint16_t I2C_TIMEOUT_MS = 50;
 static constexpr int LED = 48;
 
 /// @brief Initialize I2C for examples using the default config.
-inline bool initI2c() {
-  return transport::initWire(I2C_SDA, I2C_SCL, I2C_FREQ_HZ, I2C_TIMEOUT_MS);
+inline void initI2c() {
+  transport::initWire(I2C_SDA, I2C_SCL, I2C_FREQ_HZ, I2C_TIMEOUT_MS);
 }
 
 }  // namespace board

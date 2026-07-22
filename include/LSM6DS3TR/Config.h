@@ -1,5 +1,5 @@
 /// @file Config.h
-/// @brief Configuration structure for LSM6DS3TR driver
+/// @brief Transport binding and replayable LSM6DS3TR-C device profile.
 #pragma once
 
 #include <cstddef>
@@ -9,160 +9,168 @@
 
 namespace LSM6DS3TR {
 
-/// @brief I2C write callback signature.
-/// @param addr I2C device address (7-bit).
-/// @param data Pointer to bytes to write.
-/// @param len Number of bytes to write.
-/// @param timeoutMs Transaction timeout in milliseconds.
-/// @param user User context pointer.
-/// @return Status indicating success or failure. Callback must complete
-/// synchronously and must not return IN_PROGRESS; the driver normalizes that to
-/// I2C_BUSY for compatibility with shared-bus adapters.
-using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
+/// @brief Execute one complete, synchronous, timeout-bounded I2C write.
+/// @param address Seven-bit device address.
+/// @param data Bytes to transmit, including the register address.
+/// @param length Number of bytes at @p data.
+/// @param timeoutMs Per-attempt timeout selected by DriverConfig.
+/// @param user Opaque application context from DriverConfig::i2cUser.
+/// @return Status::Ok() on confirmed success, otherwise a mapped transport error.
+/// @note The callback performs exactly one physical attempt. The application
+/// owns the bus, locking, retries, recovery, and scheduling.
+using I2cWriteFn = Status (*)(uint8_t address, const uint8_t* data, size_t length,
                               uint32_t timeoutMs, void* user);
 
-/// @brief I2C write-then-read callback signature.
-/// @param addr I2C device address (7-bit).
-/// @param txData Pointer to bytes to write before the read.
-/// @param txLen Number of bytes to write.
-/// @param rxData Output buffer for read bytes.
-/// @param rxLen Number of bytes to read.
-/// @param timeoutMs Transaction timeout in milliseconds.
-/// @param user User context pointer.
-/// @return Status indicating success or failure. Callback must complete
-/// synchronously and must not return IN_PROGRESS; the driver normalizes that to
-/// I2C_BUSY for compatibility with shared-bus adapters.
-using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
-                                  uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
-                                  void* user);
+/// @brief Execute one complete write-then-read I2C transaction.
+/// @param address Seven-bit device address.
+/// @param txData Bytes to transmit, including the register address.
+/// @param txLength Number of bytes at @p txData.
+/// @param rxData Caller-owned receive buffer.
+/// @param rxLength Number of bytes to receive.
+/// @param timeoutMs Per-attempt timeout selected by DriverConfig.
+/// @param user Opaque application context from DriverConfig::i2cUser.
+/// @return Status::Ok() on confirmed success, otherwise a mapped transport error.
+/// @note The callback performs exactly one physical attempt and must not retry.
+using I2cWriteReadFn = Status (*)(uint8_t address, const uint8_t* txData, size_t txLength,
+                                  uint8_t* rxData, size_t rxLength,
+                                  uint32_t timeoutMs, void* user);
 
-/// @brief Millisecond timestamp callback.
-/// @param user User context pointer.
-/// @return Current monotonic milliseconds.
-using NowMsFn = uint32_t (*)(void* user);
-
-/// @brief Quality limits for automatic software bias calibration.
-struct CalibrationLimits {
-  float accelMaxPeakToPeakG = 0.08f;       ///< Maximum accel peak-to-peak per axis
-  float accelMaxHorizontalMeanG = 0.20f;   ///< Maximum absolute X/Y mean while Z-up
-  float accelMinZMeanG = 0.80f;            ///< Minimum accepted Z-axis mean
-  float accelMaxZMeanG = 1.20f;            ///< Maximum accepted Z-axis mean
-  float gyroMaxPeakToPeakDps = 3.0f;       ///< Maximum gyro peak-to-peak per axis
+/// @brief Supported seven-bit addresses selected by the SA0 pin.
+enum class SensorAddress : uint8_t {
+  SA0_GND = 0x6A,  ///< SA0 tied low.
+  SA0_VDD = 0x6B  ///< SA0 tied high.
 };
 
-/// @brief Output data rate register encoding.
+/// @brief Zero-I/O transport binding. No sensor settings are applied by bind().
+struct DriverConfig {
+  I2cWriteFn i2cWrite = nullptr;          ///< Required single-attempt write callback.
+  I2cWriteReadFn i2cWriteRead = nullptr;  ///< Required single-attempt combined callback.
+  void* i2cUser = nullptr;                ///< Opaque context forwarded unchanged.
+  SensorAddress address = SensorAddress::SA0_GND;  ///< Bound device address.
+  uint32_t i2cTimeoutMs = 50;  ///< Nonzero timeout passed to every callback.
+};
+
+/// @brief Output data-rate encoding shared by accelerometer and gyroscope.
+/// @note HZ_1_6 is valid only for the accelerometer in low-power/normal mode.
 enum class Odr : uint8_t {
-  POWER_DOWN = 0,  ///< Sensor disabled
-  HZ_12_5    = 1,  ///< 12.5 Hz
-  HZ_26      = 2,  ///< 26 Hz
-  HZ_52      = 3,  ///< 52 Hz
-  HZ_104     = 4,  ///< 104 Hz
-  HZ_208     = 5,  ///< 208 Hz
-  HZ_416     = 6,  ///< 416 Hz
-  HZ_833     = 7,  ///< 833 Hz
-  HZ_1660    = 8,  ///< 1.66 kHz
-  HZ_3330    = 9,  ///< 3.33 kHz
-  HZ_6660    = 10, ///< 6.66 kHz
-  HZ_1_6     = 11  ///< 1.6 Hz (accelerometer low-power only)
+  POWER_DOWN = 0,  ///< Sensor disabled.
+  HZ_12_5 = 1,    ///< 12.5 Hz.
+  HZ_26 = 2,      ///< 26 Hz.
+  HZ_52 = 3,      ///< 52 Hz.
+  HZ_104 = 4,     ///< 104 Hz.
+  HZ_208 = 5,     ///< 208 Hz.
+  HZ_416 = 6,     ///< 416 Hz; high-performance mode only.
+  HZ_833 = 7,     ///< 833 Hz; high-performance mode only.
+  HZ_1660 = 8,    ///< 1.66 kHz; high-performance mode only.
+  HZ_3330 = 9,    ///< 3.33 kHz; high-performance mode only.
+  HZ_6660 = 10,   ///< 6.66 kHz; high-performance mode only.
+  HZ_1_6 = 11     ///< 1.6 Hz accelerometer low-power/normal mode only.
 };
 
-/// @brief Accelerometer full-scale selection.
-/// Register encoding is 00=2g, 01=16g, 10=4g, 11=8g
+/// @brief Accelerometer full-scale range.
 enum class AccelFs : uint8_t {
-  G_2  = 0, ///< +/-2 g
-  G_16 = 1, ///< +/-16 g
-  G_4  = 2, ///< +/-4 g
-  G_8  = 3  ///< +/-8 g
+  G_2 = 0,   ///< +/-2 g.
+  G_16 = 1,  ///< +/-16 g.
+  G_4 = 2,   ///< +/-4 g.
+  G_8 = 3    ///< +/-8 g.
 };
 
-/// @brief Gyroscope full-scale selection.
+/// @brief Gyroscope full-scale range.
 enum class GyroFs : uint8_t {
-  DPS_125  = 0xFF, ///< +/-125 dps, uses FS_125 bit
-  DPS_250  = 0,    ///< +/-250 dps
-  DPS_500  = 1,    ///< +/-500 dps
-  DPS_1000 = 2,    ///< +/-1000 dps
-  DPS_2000 = 3     ///< +/-2000 dps
+  DPS_125 = 0xFF,  ///< +/-125 degrees per second.
+  DPS_250 = 0,     ///< +/-250 degrees per second.
+  DPS_500 = 1,     ///< +/-500 degrees per second.
+  DPS_1000 = 2,    ///< +/-1000 degrees per second.
+  DPS_2000 = 3     ///< +/-2000 degrees per second.
 };
 
-/// @brief Accelerometer power mode.
+/// @brief Accelerometer power/performance mode.
 enum class AccelPowerMode : uint8_t {
-  HIGH_PERFORMANCE = 0, ///< High-performance mode
-  LOW_POWER_NORMAL = 1  ///< Low-power / normal mode family
+  HIGH_PERFORMANCE = 0,  ///< High-performance operating mode.
+  LOW_POWER_NORMAL = 1   ///< Low-power/normal mode, limited to 208 Hz.
 };
 
-/// @brief Gyroscope power mode.
+/// @brief Gyroscope power/performance mode.
 enum class GyroPowerMode : uint8_t {
-  HIGH_PERFORMANCE = 0, ///< High-performance mode
-  LOW_POWER_NORMAL = 1  ///< Low-power / normal mode family
+  HIGH_PERFORMANCE = 0,  ///< High-performance operating mode.
+  LOW_POWER_NORMAL = 1   ///< Low-power/normal mode, limited to 208 Hz.
 };
 
-/// @brief Gyroscope high-pass filter cutoff.
+/// @brief Register-level gyroscope high-pass cutoff encoding.
+/// @note Production DeviceProfile values currently require high-pass disabled.
 enum class GyroHpfMode : uint8_t {
-  HZ_0_0081 = 0, ///< 0.0081 Hz
-  HZ_0_0324 = 1, ///< 0.0324 Hz
-  HZ_2_07   = 2, ///< 2.07 Hz
-  HZ_16_32  = 3  ///< 16.32 Hz
+  HZ_0_016 = 0,  ///< 0.016 Hz cutoff encoding.
+  HZ_0_065 = 1,  ///< 0.065 Hz cutoff encoding.
+  HZ_0_260 = 2,  ///< 0.260 Hz cutoff encoding.
+  HZ_1_040 = 3   ///< 1.040 Hz cutoff encoding.
 };
 
-/// @brief FIFO operating mode.
-enum class FifoMode : uint8_t {
-  BYPASS               = 0, ///< FIFO disabled
-  FIFO                 = 1, ///< Stop when FIFO is full
-  CONTINUOUS_TO_FIFO   = 3, ///< Continuous until trigger, then FIFO
-  BYPASS_TO_CONTINUOUS = 4, ///< Bypass until trigger, then continuous
-  CONTINUOUS           = 6  ///< Continuous FIFO
-};
-
-/// @brief FIFO decimation factor.
-#ifdef DISABLED
-#undef DISABLED
-#endif
-enum class FifoDecimation : uint8_t {
-  DISABLED = 0, ///< Do not store this source
-  NONE     = 1, ///< Store every sample
-  DIV_2    = 2, ///< Store every 2nd sample
-  DIV_3    = 3, ///< Store every 3rd sample
-  DIV_4    = 4, ///< Store every 4th sample
-  DIV_8    = 5, ///< Store every 8th sample
-  DIV_16   = 6, ///< Store every 16th sample
-  DIV_32   = 7  ///< Store every 32nd sample
-};
-
-/// @brief Accelerometer user-offset register weight.
+/// @brief Accelerometer user-offset scale.
 enum class AccelOffsetWeight : uint8_t {
-  MG_1  = 0, ///< About 1 mg/LSB
-  MG_16 = 1  ///< About 15.6 mg/LSB
+  MG_1 = 0,  ///< 1 mg per LSB.
+  MG_16 = 1  ///< 16 mg per LSB.
 };
 
-/// @brief Configuration for LSM6DS3TR driver.
-struct Config {
-  // I2C transport
-  I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
-  I2cWriteReadFn i2cWriteRead = nullptr; ///< I2C write-read function pointer
-  void* i2cUser = nullptr;               ///< User context for I2C callbacks
+/// @brief Signed sensor-native accelerometer user offsets.
+/// @note Each value must be in -127..127; -128 is a reserved encoding.
+struct AccelUserOffset {
+  int8_t x = 0;  ///< X-axis register value.
+  int8_t y = 0;  ///< Y-axis register value.
+  int8_t z = 0;  ///< Z-axis register value.
+};
 
-  // Timing hooks
-  NowMsFn nowMs = nullptr;  ///< Optional monotonic source; direct reads use 0 when absent
-  void* timeUser = nullptr; ///< User context for timing hook
+/// @brief Accelerometer filter choices represented by DeviceProfile.
+struct AccelFilterConfig {
+  bool lpf2Enabled = false;  ///< Enable the supported LPF2 output path.
+  bool highPassSlopeEnabled = false;  ///< Reserved for future typed support.
+  bool lowPassOn6d = false;  ///< Reserved for future interrupt-profile support.
+};
 
-  // Device settings
-  uint8_t i2cAddress = 0x6A;  ///< 0x6A (SA0=GND) or 0x6B (SA0=VDD)
-  uint32_t i2cTimeoutMs = 50; ///< I2C transaction timeout in milliseconds
+/// @brief Gyroscope filter choices represented by DeviceProfile.
+struct GyroFilterConfig {
+  bool lpf1Enabled = false;  ///< Enable LPF1 in high-performance mode.
+  bool highPassEnabled = false;  ///< Unsupported in production profiles.
+  GyroHpfMode highPassMode = GyroHpfMode::HZ_0_016;  ///< Register encoding when enabled.
+};
 
-  // Sensor configuration
-  Odr odrXl = Odr::HZ_104; ///< Accelerometer output data rate
-  Odr odrG = Odr::HZ_104;  ///< Gyroscope output data rate
-  AccelFs fsXl = AccelFs::G_2;     ///< Accelerometer full-scale range
-  GyroFs fsG = GyroFs::DPS_250;    ///< Gyroscope full-scale range
-  AccelPowerMode accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE; ///< Accelerometer power mode
-  GyroPowerMode gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;    ///< Gyroscope power mode
-  bool bdu = true; ///< Enable block data update for coherent multi-byte reads
+/// @brief FIFO policy represented by the production profile.
+///
+/// Version 2 production jobs support bypass only. Data removal remains available
+/// as the explicitly destructive, bounded FIFO_PURGE operation.
+struct FifoProfile {
+  bool enabled = false;  ///< Must remain false in version 2 production profiles.
+};
 
-  // Health tracking
-  uint8_t offlineThreshold = 5; ///< Consecutive tracked failures before OFFLINE
+/// @brief Interrupt policy represented by the production profile.
+///
+/// Interrupt routing is intentionally disabled until a complete electrical,
+/// route, latch, threshold, and duration profile is provided by a product.
+struct InterruptProfile {
+  bool enabled = false;  ///< Must remain false in version 2 production profiles.
+};
 
-  // Calibration quality
-  CalibrationLimits calibrationLimits; ///< Stillness/orientation limits for bias capture
+/// @brief Complete replayable state owned by the production driver.
+struct DeviceProfile {
+  Odr accelOdr = Odr::HZ_104;  ///< Accelerometer output data rate.
+  AccelFs accelFullScale = AccelFs::G_2;  ///< Accelerometer measurement range.
+  AccelPowerMode accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;  ///< Accelerometer mode.
+  Odr gyroOdr = Odr::HZ_104;  ///< Gyroscope output data rate.
+  GyroFs gyroFullScale = GyroFs::DPS_250;  ///< Gyroscope measurement range.
+  GyroPowerMode gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;  ///< Gyroscope mode.
+  AccelFilterConfig accelFilter = {};  ///< Accelerometer filter policy.
+  GyroFilterConfig gyroFilter = {};  ///< Gyroscope filter policy.
+  bool gyroSleepEnabled = false;  ///< Put a configured gyroscope into sleep mode.
+  bool blockDataUpdate = true;  ///< Must remain enabled for managed burst reads.
+  AccelOffsetWeight accelOffsetWeight = AccelOffsetWeight::MG_1;  ///< Offset scale.
+  AccelUserOffset accelUserOffset = {};  ///< Signed hardware offset values.
+  FifoProfile fifo = {};  ///< FIFO policy; version 2 requires bypass.
+  InterruptProfile interrupts = {};  ///< Interrupt policy; version 2 requires disabled.
+};
+
+/// @brief Quality limits for bounded bias calibration.
+struct CalibrationLimits {
+  float accelMaxPeakToPeakG = 0.08f;  ///< Per-axis acceleration stability limit.
+  float gyroMaxPeakToPeakDps = 3.0f;  ///< Per-axis angular-rate stability limit.
 };
 
 }  // namespace LSM6DS3TR
