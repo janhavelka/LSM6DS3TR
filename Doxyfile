@@ -31,7 +31,7 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md include LSM6DS3TR_imu_implementation_manual.md docs/README.md docs/IDF_PORT.md
+INPUT                  = README.md include LSM6DS3TR_imu_implementation_manual.md docs/DOCUMENTATION.md docs/IDF_PORT.md
 FILE_PATTERNS          = *.h *.md
 RECURSIVE              = YES
 EXCLUDE                = include/LSM6DS3TR/CommandTable.h

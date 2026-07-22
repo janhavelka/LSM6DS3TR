@@ -433,7 +433,7 @@ From a repository checkout, run `python tools/build_docs.py` to remove any
 stale generated pages and build the local reference under
 `docs/doxygen/html/`. The generated tree is intentionally ignored; source
 comments, this README, and the checked-in guides remain authoritative. The
-<a href="docs/README.md">documentation map</a> distinguishes maintained
+<a href="docs/DOCUMENTATION.md">documentation map</a> distinguishes maintained
 contracts from source reference material.
 
 Doxygen is strict for the supported owner-safe API: undocumented public
