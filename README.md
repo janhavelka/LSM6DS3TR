@@ -23,6 +23,9 @@ state.
 - `takeResult(token, out)` delivers the matching terminal result exactly once.
 - Every operation uses one absolute deadline in the caller's 64-bit monotonic
   uptime domain. Progress never renews it.
+- Transport callbacks receive at most 33 write bytes, including the register
+  prefix, and at most 32 read bytes. Public constants let fixed-memory owners
+  prove capacity at compile time.
 - The driver never sleeps, creates a task, retries transport, recovers the bus,
   logs, or allocates dynamically.
 - Configuration is trusted only after full readback. Partial or ambiguous
@@ -174,6 +177,11 @@ with every callback individually bounded by `i2cTimeoutMs`.
 Use `maxTransactions = 1` for a shared owner loop unless a maintenance window
 explicitly grants a larger chunk. Passing zero advances CPU/time-only state but
 performs no transport callback.
+
+`MAX_TRANSPORT_WRITE_BYTES` is 33 bytes: one register-address prefix and up to
+32 payload bytes. `MAX_TRANSPORT_READ_BYTES` is 32 bytes. These are hard upper
+bounds on buffers presented to the injected callbacks, not recommendations to
+allocate dynamically.
 
 Total callback ceilings are part of the public contract:
 
@@ -394,6 +402,30 @@ internally locked and is neither copyable nor movable.
 - Keep retry, absence/offline policy, queue expiry, health projection, and bus
   recovery above the driver.
 
+### External Owner Task Integration
+
+Keep the driver object and transport adapter private to the task that owns the
+physical I2C backend. A library callback executes synchronously inside that
+owner and calls the backend directly; it must not submit another request to the
+same owner queue. The application request identity and the library's
+`OperationToken` are separate values and must both be retained until the
+terminal result is published. One `poll(nowMs, 1)` per owner turn gives the
+normal one-backend-transfer scheduling bound.
+
+This is the intended TunnelMonitor-node boundary: its `I2cTask` remains the
+only bus owner and owns deadlines, retry/recovery, and health policy; an
+owner-private concrete IMU module would own this driver and map results into
+the application's fixed contracts. Each library callback must be one physical
+attempt with the owner's generic retry/recovery path disabled. Only after the
+terminal library result is taken may the owner recover the bus and explicitly
+start a new probe, reconcile, recover, or requested operation. The current
+library callback bounds fit TunnelMonitor-node's 128-byte I2C payload capacity,
+and an all-quantity sample fits its 48-reading result capacity. Product
+integration still requires an authoritative IMU device kind/instance binding,
+mounting transform, acquisition cadence, calibration policy, and measurement
+schema. This repository does not invent those product decisions or add a
+second bus owner.
+
 ## Examples
 
 - [Arduino owner-safe CLI](examples/01_basic_bringup_cli/main.cpp) uses a fixed
@@ -403,6 +435,9 @@ internally locked and is neither copyable nor movable.
 - [Native ESP-IDF example](examples/idf/basic) uses `app_main`, fixed C
   buffers, `driver/i2c_master.h`, `esp_timer_get_time`, and FreeRTOS yielding.
   It does not use Arduino compatibility code.
+- The repository-only [ESP32-S3 owner-soak harness](https://github.com/janhavelka/LSM6DS3TR/blob/v2.0.0/examples/02_owner_soak/main.cpp)
+  runs a low-output, fixed-memory physical campaign with one callback per poll
+  and checks all ready/direct quantity combinations on-device.
 
 Both examples expose the same compact command set. `rreg`, `wreg`, `dump`,
 calibration, self-test, and purge are explicitly advanced/maintenance commands.
@@ -415,9 +450,11 @@ python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python tools/check_chip_docs_coverage.py
+python -m py_compile tools/run_hil.py tools/run_owner_soak.py
 python tools/build_docs.py
 pio test -e native
 pio run -e esp32s3dev
+pio run -e esp32s3hil
 pio run -e esp32s2dev
 pio pkg pack
 python tools/check_package_contract.py
@@ -425,7 +462,8 @@ python tools/check_package_contract.py
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile
-evidence.
+evidence; maintained commands, coverage, and retained version 2 results are in
+the [HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/v2.0.0/docs/HIL_VALIDATION.md).
 
 ### API Documentation
 

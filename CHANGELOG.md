@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calibration helpers independent of mutable driver state.
 - Native ESP-IDF CI jobs for ESP32-S2 and ESP32-S3 using the published
   ESP-IDF 5.4.4 image.
+- Repeatable targeted CLI HIL tooling and a low-output ESP32-S3 owner-soak
+  harness that validates all measurement quantity/readiness combinations,
+  operation identity, transaction budgets, provenance, conversion, and
+  transport health.
 
 ### Changed
 
@@ -71,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token/start/poll/cancel/take command surface with fixed input buffers.
 - The examples reject entire overlength command lines and validate sample and
   calibration arguments exactly instead of executing truncated/defaulted input.
+- Every CLI command now rejects surplus arguments, and terminal records are
+  flushed before accepting more console work.
+- Public fixed-memory transport bounds are exposed as 33 write bytes including
+  the register prefix and 32 read bytes for external-owner capacity checks.
 - PlatformIO Core, pioarduino platform archive, and CI ESP-IDF version are
   pinned. The IDF component supports the ESP-IDF 5.4 line.
 - Library packages use an explicit minimal export whitelist, with archive
@@ -133,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also verifies the main bank and its public ceiling is `maxWords + 5`.
 - Made passive diagnostic time identify the last transport error specifically,
   rather than moving on successful transfers.
+- Prevented zero-length/null internal transfers and transfers larger than the
+  driver's fixed transaction buffers before invoking application callbacks.
 - Synchronized `library.json`, `Version.h`, `idf_component.yml`, and Doxygen
   project versions from one source.
 - Removed unrelated TunnelMonitor dependency-pin generation from the library's
@@ -151,8 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The incomplete FIFO acquisition/configuration surface and raw interrupt/event
   configuration claims. FIFO purge remains explicitly destructive maintenance.
 - Stale broad CLI helpers and version 1 command-contract requirements.
-- The version 1-only HIL runner; its retained evidence is historical and a new
-  version 2 physical test campaign is required.
+- The version 1-only HIL runner and obsolete evidence. Version 2 now has
+  separate targeted CLI and low-output owner-soak procedures.
 
 ### Documentation
 
@@ -161,7 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contracts.
 - Documented operation classes, transaction/deadline behavior, concurrency,
   ISR restrictions, cancellation, ambiguous effects, provenance, migration,
-  and remaining product/HIL decisions.
+  TunnelMonitor-node ownership fit, physical validation, and the remaining
+  product decisions.
+- Recorded the completed one-hour ESP32-S3 owner-path HIL result: 35,988
+  samples and 54,459 successful transport callbacks with zero failures.
 
 ## [1.2.0] - 2026-06-25
 

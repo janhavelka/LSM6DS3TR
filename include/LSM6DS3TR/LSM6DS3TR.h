@@ -288,7 +288,7 @@ struct DriverDiagnostics {
   uint8_t mismatchObserved = 0;  ///< Observed value for mismatchRegister.
 };
 
-/// @name Fixed transport callback ceilings
+/// @name Fixed operation transaction ceilings
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
@@ -298,6 +298,13 @@ static constexpr uint32_t MAX_RESET_TRANSACTIONS = 88;  ///< Reset/boot ceiling.
 static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 87;  ///< Recovery ceiling.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 8;  ///< Worst power-down ceiling.
+///@}
+
+/// @name Fixed transport buffer ceilings
+/// These bounds include every byte presented to an injected callback.
+///@{
+static constexpr size_t MAX_TRANSPORT_WRITE_BYTES = 33;  ///< Includes register prefix.
+static constexpr size_t MAX_TRANSPORT_READ_BYTES = 32;  ///< Maximum receive length.
 ///@}
 
 /// @name Pure validation, timing, and conversion helpers
@@ -585,7 +592,6 @@ public:
 
 private:
   static constexpr uint8_t MANAGED_REGISTER_COUNT = 33;
-  static constexpr uint8_t MAX_DIAGNOSTIC_READ = 32;
   static constexpr uint16_t MAX_SELF_TEST_SAMPLES = 100;
   static constexpr uint16_t MAX_CALIBRATION_SAMPLES = 1000;
 

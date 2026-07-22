@@ -62,7 +62,11 @@ OWNER_SAFE_TOKENS = [
     "selftest [5..100]",
     "samples < 5U",
     "samples == 0U",
-    "extra != nullptr",
+    "zeroArgumentCommand",
+    "argument1 != nullptr",
+    "argument2 != nullptr",
+    "argument3 != nullptr",
+    "Serial.flush()",
 ]
 
 FORBIDDEN_V1_TOKENS = [
@@ -110,18 +114,32 @@ def main() -> int:
         fail("Arduino CLI must discard an entire overlength input line")
     if re.search(
         r'else if \(strcmp\(command, "sample"\).*?'
-        r'!validQuantity \|\| !validMode \|\| extra != nullptr',
+        r'!validQuantity \|\| !validMode \|\| argument3 != nullptr',
         text,
         re.DOTALL,
     ) is None:
         fail("Arduino sample command must reject invalid or extra arguments")
     if re.search(
         r'else if \(strcmp\(command, "calxl"\).*?'
-        r'samples == 0U\)\) \|\|\s*extra != nullptr',
+        r'samples == 0U\)\) \|\|\s*argument2 != nullptr',
         text,
         re.DOTALL,
     ) is None:
         fail("Arduino calibration commands must reject zero or extra arguments")
+    if re.search(
+        r'selftest.*?samples < 5U\)\) \|\|\s*argument2 != nullptr',
+        text,
+        re.DOTALL,
+    ) is None:
+        fail("Arduino self-test command must reject extra arguments")
+    for command in ("purge", "rreg", "wreg", "dump"):
+        block = re.search(
+            rf'else if \(strcmp\(command, "{command}"\).*?\n  \}} else',
+            text,
+            re.DOTALL,
+        )
+        if block is None or "argument" not in block.group(0) or "!= nullptr" not in block.group(0):
+            fail(f"Arduino {command} command must reject extra arguments")
 
     print("CLI contract PASSED")
     return 0

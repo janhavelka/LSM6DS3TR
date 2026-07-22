@@ -2032,6 +2032,20 @@ void test_diagnostic_bounds_and_raw_write_invalidation_are_explicit() {
   (void)configure(driver, bus);
   bus.clearTrace();
   uint8_t data[33] = {};
+  TEST_ASSERT_TRUE(driver.diagnosticReadBlock(
+      0x10, data, MAX_TRANSPORT_READ_BYTES, bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(MAX_TRANSPORT_READ_BYTES,
+                           bus.trace[0].rxLength);
+  bus.clearTrace();
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(Err::INVALID_PARAM),
+      static_cast<uint8_t>(
+          driver.diagnosticReadBlock(0x10, nullptr, 1, bus.nowMs).code));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(Err::INVALID_PARAM),
+      static_cast<uint8_t>(driver.diagnosticReadBlock(0x10, data, 0,
+                                                       bus.nowMs).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
                           static_cast<uint8_t>(driver.diagnosticReadBlock(0x10, data, sizeof(data), bus.nowMs).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),

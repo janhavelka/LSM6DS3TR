@@ -14,6 +14,7 @@ jobs:
       matrix:
         environment:
           - esp32s3dev
+          - esp32s3hil
           - esp32s2dev
 
     steps:
@@ -101,6 +102,9 @@ jobs:
 
       - name: Enforce chip documentation coverage
         run: python tools/check_chip_docs_coverage.py
+
+      - name: Check HIL runner syntax
+        run: python -m py_compile tools/run_hil.py tools/run_owner_soak.py
 
       - name: Build strict API documentation
         run: python tools/build_docs.py

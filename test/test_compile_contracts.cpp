@@ -72,3 +72,7 @@ static_assert(sizeof(OperationResult) <= 320u,
               "OperationResult grew beyond its fixed-memory maintenance bound");
 static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1024u,
               "Driver state grew beyond its fixed-memory bound");
+static_assert(MAX_TRANSPORT_WRITE_BYTES == 33u,
+              "External owners depend on the bounded write callback size");
+static_assert(MAX_TRANSPORT_READ_BYTES == 32u,
+              "External owners depend on the bounded read callback size");
