@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Doxygen 1.9.8 package.
 - Replaced the unavailable `espressif/idf:v5.4.0` CI image with the published
   `v5.4.4` image for native ESP32-S2 and ESP32-S3 builds.
+- Updated first-party GitHub Actions to their Node.js 24 majors, removing
+  runtime deprecation warnings from hosted CI runners.
 
 ### Removed
 
