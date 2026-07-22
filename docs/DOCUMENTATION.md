@@ -12,6 +12,8 @@ same authority.
   types and operations.
 - [ESP-IDF port guide](IDF_PORT.md): native component and application-owned
   transport boundary.
+- [HIL validation guide](HIL_VALIDATION.md): repeatable targeted and
+  owner-soak procedures plus retained release evidence.
 - [Implementation manual](../LSM6DS3TR_imu_implementation_manual.md): chip and
   integration guidance used by this repository.
 
