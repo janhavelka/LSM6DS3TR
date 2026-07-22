@@ -43,7 +43,7 @@ Add this repository at an exact release tag or commit:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.1
+  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.0
 ```
 
 The repository's own target builds pin the pioarduino

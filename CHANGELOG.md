@@ -7,40 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.1] - 2026-07-22
-
-### Changed
-
-- Completed Doxygen contracts for the owner-safe public types, helpers,
-  operations, result provenance, and diagnostic boundary.
-- Made undocumented public API, missing parameter documentation, and Doxygen
-  documentation errors fail both clean local generation and CI.
-- Consolidated ESP-IDF guidance into `docs/IDF_PORT.md`, removed the duplicate
-  implementation note, included the maintained guide in package exports, and
-  clarified documentation validation and ownership language across the README
-  and contributor guidance.
-- Added a documentation map that distinguishes maintained contracts from
-  source references and generated pages.
-
-### Fixed
-
-- Fixed GitHub Actions documentation generation by installing Graphviz and by
-  giving the documentation map a non-README filename compatible with Ubuntu's
-  Doxygen 1.9.8 package.
-- Replaced the unavailable `espressif/idf:v5.4.0` CI image with the published
-  `v5.4.4` image for native ESP32-S2 and ESP32-S3 builds.
-- Updated first-party GitHub Actions to their Node.js 24 majors, removing
-  runtime deprecation warnings from hosted CI runners.
-
-### Removed
-
-- Removed completed TunnelMonitor audit/fit artifacts and obsolete version 1
-  HIL evidence from the current documentation set; their history remains in
-  Git rather than appearing as version 2 validation.
-- Removed duplicate generated text and derived summaries for optional vendor
-  design-tip PDFs. The original PDFs remain available as source material.
-
-## [2.0.0] - 2026-07-19
+## [2.0.0] - 2026-07-22
 
 ### Added
 
@@ -58,11 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mismatch diagnostics, and ambiguous/partial hardware-effect reporting.
 - Allocation-free fixed-unit conversion, sensitivity, timing, validation, and
   calibration helpers independent of mutable driver state.
-- Native ESP-IDF CI jobs for ESP32-S2 and ESP32-S3; the unavailable 5.4.0
-  image pin is corrected in 2.0.1.
+- Native ESP-IDF CI jobs for ESP32-S2 and ESP32-S3 using the published
+  ESP-IDF 5.4.4 image.
 
 ### Changed
 
+- Completed Doxygen contracts for the owner-safe public types, helpers,
+  operations, result provenance, and diagnostic boundary.
+- Made undocumented public API, missing parameter documentation, and Doxygen
+  documentation errors fail both clean local generation and CI.
+- Consolidated ESP-IDF guidance into `docs/IDF_PORT.md`, removed the duplicate
+  implementation note, included the maintained guide in package exports, and
+  clarified documentation validation and ownership language across the README
+  and contributor guidance.
+- Added a documentation map that distinguishes maintained contracts from
+  source references and generated pages.
 - Replaced the managed synchronous/offline driver with an externally scheduled
   owner-safe driver. Applications own bus locking, retries, health, backoff,
   and recovery policy.
@@ -101,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed GitHub Actions documentation generation by installing Graphviz and by
+  giving the documentation map a non-README filename compatible with Ubuntu's
+  Doxygen 1.9.8 package.
+- Replaced the unavailable `espressif/idf:v5.4.0` CI image with the published
+  `v5.4.4` image for native ESP32-S2 and ESP32-S3 builds.
+- Updated first-party GitHub Actions to their Node.js 24 majors, removing
+  runtime deprecation warnings from hosted CI runners.
 - Prevented stale results from being attributed to a later request through
   token correlation and exactly-once consumption.
 - Prevented cached raw samples from being converted with a newer full-scale
@@ -156,6 +140,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed completed TunnelMonitor audit/fit artifacts and obsolete version 1
+  HIL evidence from the current documentation set; their history remains in
+  Git rather than appearing as version 2 validation.
+- Removed duplicate generated text and derived summaries for optional vendor
+  design-tip PDFs. The original PDFs remain available as source material.
 - Synchronous `begin()`/`end()`/`recover()`, `tick()`, synchronous setters and
   reads, cached measurement getters, driver-owned `OFFLINE` admission policy,
   and blocking self-test/calibration APIs.
@@ -299,8 +288,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.1...HEAD
-[2.0.1]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...v2.0.1
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0
