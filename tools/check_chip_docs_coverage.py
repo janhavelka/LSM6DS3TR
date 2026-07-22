@@ -17,7 +17,7 @@ COMPACT_DOCS = [
     "05_register_map.md",
     "06_modes_interrupts_status_and_faults.md",
     "07_initialization_reset_and_operational_notes.md",
-    "08_variant_differences_and_open_questions.md",
+    "08_variant_and_source_notes.md",
 ]
 
 RAW_SOURCE_EXTRACTS = [

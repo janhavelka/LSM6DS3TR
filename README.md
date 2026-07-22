@@ -434,7 +434,7 @@ stale generated pages and build the local reference under
 `docs/doxygen/html/`. The generated tree is intentionally ignored; source
 comments, this README, and the checked-in guides remain authoritative. The
 <a href="docs/README.md">documentation map</a> distinguishes maintained
-contracts from source extracts and historical evidence.
+contracts from source reference material.
 
 Doxygen is strict for the supported owner-safe API: undocumented public
 symbols, missing parameter documentation, broken documentation commands, and
@@ -442,13 +442,6 @@ warnings fail generation and CI. `CommandTable.h` is intentionally omitted
 from the generated reference because it is a low-level register-fact catalog,
 not a typed production feature contract. Use it only with the controlled
 diagnostic APIs and the cited vendor documentation.
-
-The retained HIL summary under
-<a href="docs/reports/hil-evidence-summary.md">docs/reports/hil-evidence-summary.md</a>
-was produced with the version 1.x API and one Arduino fixture. It is useful
-historical chip/fixture evidence, but it does not validate the new version 2
-operation model. Version 2 fault injection, exact-board coexistence, disconnect,
-brownout, held-bus, `0x6B`, and long-soak hardware gates remain external.
 
 ## Migrating From 1.x
 
@@ -465,25 +458,6 @@ explicit replacement or restriction:
 | FIFO configuration and drain APIs | Production profiles require FIFO bypass. Only the bounded, destructive purge remains; typed FIFO acquisition needs a future replayable profile and decoder. |
 | Interrupt routes, tap/wake/free-fall/6D/tilt/wrist/significant-motion, pedometer and step-counter control/source APIs | Unsupported as version 2 production configuration. Controlled diagnostic reads may aid service work, but production use requires a future typed, fully replayable profile and board electrical contract. |
 | Timestamp control/readout and sensor-hub configuration/output APIs | Unsupported as version 2 production configuration. Do not rebuild these features from raw recipes in an application adapter; add a typed, bounded library profile when a current product needs them. |
-
-## TunnelMonitor Integration Status
-
-The library is general-purpose and now provides the owner-safe mechanics needed
-by an external I2C task. It does not define a TunnelMonitor product role.
-
-The inspected TunnelMonitor-node revision has no approved LSM6DS3TR-C part,
-address/SA0 strap, interrupt pin, required/optional role, mounting transform,
-ODR/range/filter profile, calibration policy, sample schema, or capacity
-extension. No TunnelMonitor integration should be inferred until those product
-decisions and contract changes are approved. See
-<a href="docs/TUNNELMONITOR_NODE_SUITABILITY_AUDIT.md">the suitability re-audit</a>.
-
-A future TunnelMonitor adapter must disable the owner's generic automatic
-retry around an LSM6 transport callback. One callback is exactly one physical
-attempt and has already advanced the driver state. After consuming the terminal
-result, the owner may recover the bus and explicitly start probe, reconcile,
-recover, or a new requested operation according to the reported hardware-effect
-evidence. It must never blindly replay an ambiguous write.
 
 ## Version Metadata
 

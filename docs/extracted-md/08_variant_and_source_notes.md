@@ -1,4 +1,4 @@
-# Variants And Open Questions
+# Variant And Source Notes
 
 ## Naming And Source Priority
 
@@ -11,11 +11,16 @@
 ## Revision Notes
 
 - The source datasheet is Rev. 3, May 2017. Source: datasheet, p. 1.
-- Revision history includes updates to the I2C interface section, FIFO section, FIFO reading procedure, `SW_RESET`, `CTRL1_XL`, and `CTRL8_XL`. Source: datasheet, p. 113.
+- Revision history includes updates to the I2C interface section, FIFO section,
+  FIFO reading procedure, `SW_RESET`, `CTRL1_XL`, and `CTRL8_XL`. Source:
+  datasheet, p. 113.
 
-## Open Questions For Implementation
+## Known Naming Difference
 
-- Gyro range naming differs across source tables: the sensitivity table uses +/-250 dps with 8.75 mdps/LSB, while the `CTRL2_G.FS_G=00` register table labels the range as 245 dps. Conversion code should follow the sensitivity table and keep comments explicit about the naming discrepancy. Source: datasheet, pp. 21, 62.
+The sensitivity table uses +/-250 dps with 8.75 mdps/LSB, while the
+`CTRL2_G.FS_G=00` register table labels the range as 245 dps. The public API
+follows the sensitivity table and names this range `DPS_250`. Source:
+datasheet, pp. 21, 62.
 
 ## Feature Scope Facts
 
@@ -29,7 +34,9 @@
 
 ## Embedded Function Bank Anchors
 
-Embedded-bank registers are selected through `FUNC_CFG_ACCESS`; the compact notes only anchor the bank names and library-relevant register groups. Use the raw datasheet extract or PDF before changing embedded function bank bit fields.
+Embedded-bank registers are selected through `FUNC_CFG_ACCESS`; the compact
+notes only anchor the bank names and library-relevant register groups. Use the
+raw datasheet extract or PDF before changing embedded-function bank bit fields.
 
 | Bank | Register anchors | Role | Source |
 |---|---|---|---|
@@ -38,6 +45,7 @@ Embedded-bank registers are selected through `FUNC_CFG_ACCESS`; the compact note
 | Bank A | `MAG_SI_XX` through `MAG_SI_ZZ`, `MAG_OFFX_L` through `MAG_OFFZ_H` | Magnetometer soft-iron and hard-iron correction registers. | Datasheet, pp. 101-104 |
 | Bank B | `A_WRIST_TILT_LAT`, `A_WRIST_TILT_THS`, `A_WRIST_TILT_MASK` | Absolute wrist-tilt latency, threshold, and axis mask. | Datasheet, p. 109 |
 
-## Not Documented In Compact Notes
+## PDF-Only Details
 
-- Full package drawing dimensions and land-pattern coordinates are figure data in the datasheet; use the PDF pages before board-layout work. Source: datasheet, pp. 105-111.
+Full package drawing dimensions and land-pattern coordinates are figure data
+in the datasheet. Use the original PDF pages 105-111 before board-layout work.

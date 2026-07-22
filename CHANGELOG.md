@@ -18,7 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clarified documentation validation and ownership language across the README
   and contributor guidance.
 - Added a documentation map that distinguishes maintained contracts from
-  source extracts, generated pages, and historical hardware evidence.
+  source references and generated pages.
+
+### Removed
+
+- Removed completed TunnelMonitor audit/fit artifacts and obsolete version 1
+  HIL evidence from the current documentation set; their history remains in
+  Git rather than appearing as version 2 validation.
+- Removed duplicate generated text and derived summaries for optional vendor
+  design-tip PDFs. The original PDFs remain available as source material.
 
 ## [2.0.0] - 2026-07-19
 
