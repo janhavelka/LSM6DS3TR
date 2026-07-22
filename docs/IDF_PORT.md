@@ -2,7 +2,7 @@
 
 The core is a framework-neutral ESP-IDF component. `idf_component.yml`
 supports the ESP-IDF 5.4 line, and CI compiles the native example with exactly
-ESP-IDF 5.4.0 for ESP32-S2 and ESP32-S3.
+ESP-IDF 5.4.4 for ESP32-S2 and ESP32-S3.
 
 The component target compiles `src/LSM6DS3TR.cpp` as C++17 and exports only
 the public `include` directory. Package version, public version constants,
