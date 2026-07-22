@@ -2,7 +2,7 @@
 # Generated HTML is a local/CI artifact under docs/doxygen and is not committed.
 
 PROJECT_NAME           = "LSM6DS3TR"
-PROJECT_NUMBER         = "2.0.0"
+PROJECT_NUMBER         = "2.0.1"
 PROJECT_BRIEF          = "LSM6DS3TR embedded library API documentation"
 OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO

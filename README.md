@@ -43,7 +43,7 @@ Add this repository at an exact release tag or commit:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.0
+  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.1
 ```
 
 The repository's own target builds pin the pioarduino
@@ -53,7 +53,7 @@ The repository's own target builds pin the pioarduino
 
 Use the repository as a component through `EXTRA_COMPONENT_DIRS`, or copy it
 into a project's `components` directory. The component manifest supports the
-ESP-IDF 5.4 line; CI compiles the native example with exactly ESP-IDF 5.4.0 for
+ESP-IDF 5.4 line; CI compiles the native example with exactly ESP-IDF 5.4.4 for
 ESP32-S2 and ESP32-S3.
 
 Public headers are under `include/LSM6DS3TR/`. Core code does not include
@@ -424,7 +424,7 @@ python tools/check_package_contract.py
 ```
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
-ESP-IDF 5.4.0. Hardware-in-loop validation is separate from host and compile
+ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile
 evidence.
 
 ### API Documentation

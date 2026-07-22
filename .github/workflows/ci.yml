@@ -88,7 +88,7 @@ jobs:
       - name: Install Doxygen
         run: |
           sudo apt-get update
-          sudo apt-get install --yes doxygen
+          sudo apt-get install --yes doxygen graphviz
 
       - name: Check generated version metadata
         run: python scripts/generate_version.py check
@@ -126,6 +126,6 @@ jobs:
       - name: Build native ESP-IDF example for ${{ matrix.target }}
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4.0
+          esp_idf_version: v5.4.4
           target: ${{ matrix.target }}
           path: examples/idf/basic

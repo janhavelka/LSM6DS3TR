@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-07-22
+
 ### Changed
 
 - Completed Doxygen contracts for the owner-safe public types, helpers,
@@ -19,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and contributor guidance.
 - Added a documentation map that distinguishes maintained contracts from
   source references and generated pages.
+
+### Fixed
+
+- Fixed GitHub Actions documentation generation by installing Graphviz with
+  Doxygen, matching Doxygen's enabled graph configuration.
+- Replaced the unavailable `espressif/idf:v5.4.0` CI image with the published
+  `v5.4.4` image for native ESP32-S2 and ESP32-S3 builds.
 
 ### Removed
 
@@ -46,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mismatch diagnostics, and ambiguous/partial hardware-effect reporting.
 - Allocation-free fixed-unit conversion, sensitivity, timing, validation, and
   calibration helpers independent of mutable driver state.
-- Real ESP-IDF 5.4.0 CI builds for ESP32-S2 and ESP32-S3.
+- Native ESP-IDF CI jobs for ESP32-S2 and ESP32-S3; the unavailable 5.4.0
+  image pin is corrected in 2.0.1.
 
 ### Changed
 
@@ -286,7 +296,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0
