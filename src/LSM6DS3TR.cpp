@@ -907,6 +907,10 @@ void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
 
 Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
                        uint64_t nowMs) {
+  if (data == nullptr || length == 0U || length > MAX_TRANSPORT_READ_BYTES) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Read exceeds fixed transaction buffer");
+  }
   if (_operationTransactionLimit != 0U &&
       _operationTransactions >= _operationTransactionLimit) {
     return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
@@ -930,7 +934,8 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
 
 Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
                         uint64_t nowMs, bool mayChangeConfiguration) {
-  if (length > MAX_DIAGNOSTIC_READ) {
+  if (data == nullptr || length == 0U ||
+      length + 1U > MAX_TRANSPORT_WRITE_BYTES) {
     return Status::Error(Err::INVALID_PARAM, "Write exceeds fixed transaction buffer");
   }
   if (_operationTransactionLimit != 0U &&
@@ -938,7 +943,7 @@ Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
     return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
                          "Operation transaction limit exceeded");
   }
-  uint8_t payload[MAX_DIAGNOSTIC_READ + 1] = {};
+  uint8_t payload[MAX_TRANSPORT_WRITE_BYTES] = {};
   payload[0] = reg;
   for (size_t index = 0; index < length; ++index) payload[index + 1U] = data[index];
   if (mayChangeConfiguration) {
@@ -2204,7 +2209,7 @@ DriverDiagnostics LSM6DS3TR::diagnostics(uint64_t nowMs) const {
 }
 
 bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
-  if (length == 0U || length > MAX_DIAGNOSTIC_READ) return false;
+  if (length == 0U || length > MAX_TRANSPORT_READ_BYTES) return false;
   const uint16_t end = static_cast<uint16_t>(startReg) +
                        static_cast<uint16_t>(length - 1U);
   return end <= cmd::REG_Z_OFS_USR;

@@ -213,6 +213,7 @@ void printTerminal(const OperationResult& result) {
            result.fifoPurge.overrunObserved ? "yes" : "no",
            result.fifoPurge.truncated ? "yes" : "no");
   }
+  fflush(stdout);
 }
 
 void serviceOperation(uint64_t now) {
@@ -260,6 +261,21 @@ void processCommand(char* line) {
   char* save = nullptr;
   char* command = strtok_r(line, " \t", &save);
   if (command == nullptr) return;
+  const char* argument1 = strtok_r(nullptr, " \t", &save);
+  const char* argument2 = strtok_r(nullptr, " \t", &save);
+  const char* argument3 = strtok_r(nullptr, " \t", &save);
+  const bool zeroArgumentCommand =
+      strcmp(command, "help") == 0 || strcmp(command, "version") == 0 ||
+      strcmp(command, "status") == 0 || strcmp(command, "bind") == 0 ||
+      strcmp(command, "unbind") == 0 || strcmp(command, "cancel") == 0 ||
+      strcmp(command, "probe") == 0 || strcmp(command, "configure") == 0 ||
+      strcmp(command, "reset") == 0 || strcmp(command, "boot") == 0 ||
+      strcmp(command, "recover") == 0 || strcmp(command, "reconcile") == 0 ||
+      strcmp(command, "powerdown") == 0;
+  if (zeroArgumentCommand && argument1 != nullptr) {
+    printf("expected %s\n", command);
+    return;
+  }
   const uint64_t now = nowMs();
 
   if (strcmp(command, "help") == 0) {
@@ -290,16 +306,15 @@ void processCommand(char* line) {
     (void)startConfigure(now);
   } else if (strcmp(command, "sample") == 0) {
     SampleRequest request{};
-    const char* quantity = strtok_r(nullptr, " \t", &save);
-    const char* mode = strtok_r(nullptr, " \t", &save);
-    const char* extra = strtok_r(nullptr, " \t", &save);
+    const char* quantity = argument1;
+    const char* mode = argument2;
     const bool validQuantity =
         quantity == nullptr || strcmp(quantity, "all") == 0 ||
         strcmp(quantity, "accel") == 0 || strcmp(quantity, "gyro") == 0 ||
         strcmp(quantity, "temp") == 0;
     const bool validMode = mode == nullptr || strcmp(mode, "ready") == 0 ||
                            strcmp(mode, "direct") == 0;
-    if (!validQuantity || !validMode || extra != nullptr) {
+    if (!validQuantity || !validMode || argument3 != nullptr) {
       puts("expected sample [all|accel|gyro|temp] [ready|direct]");
       return;
     }
@@ -322,8 +337,9 @@ void processCommand(char* line) {
     (void)acceptedStart(status, token);
   } else if (strcmp(command, "selftest") == 0) {
     uint32_t samples = 5;
-    const char* argument = strtok_r(nullptr, " \t", &save);
-    if (argument != nullptr && (!parseUnsigned(argument, 100, samples) || samples < 5U)) {
+    if ((argument1 != nullptr &&
+         (!parseUnsigned(argument1, 100, samples) || samples < 5U)) ||
+        argument2 != nullptr) {
       puts("expected selftest [5..100]");
       return;
     }
@@ -332,11 +348,9 @@ void processCommand(char* line) {
                                          timing(now, 20000), token), token);
   } else if (strcmp(command, "calxl") == 0 || strcmp(command, "calg") == 0) {
     uint32_t samples = 32;
-    const char* argument = strtok_r(nullptr, " \t", &save);
-    const char* extra = strtok_r(nullptr, " \t", &save);
-    if ((argument != nullptr &&
-         (!parseUnsigned(argument, 1000, samples) || samples == 0U)) ||
-        extra != nullptr) {
+    if ((argument1 != nullptr &&
+         (!parseUnsigned(argument1, 1000, samples) || samples == 0U)) ||
+        argument2 != nullptr) {
       puts("expected calibration sample count 1..1000");
       return;
     }
@@ -350,7 +364,8 @@ void processCommand(char* line) {
     (void)acceptedStart(imu.startCalibration(request, timing(now, 30000), token), token);
   } else if (strcmp(command, "purge") == 0) {
     uint32_t words = 0;
-    if (!parseUnsigned(strtok_r(nullptr, " \t", &save), 2048, words) || words == 0U) {
+    if (!parseUnsigned(argument1, 2048, words) || words == 0U ||
+        argument2 != nullptr) {
       puts("expected purge <1..2048>");
       return;
     }
@@ -359,7 +374,7 @@ void processCommand(char* line) {
                                           timing(now, 5000), token), token);
   } else if (strcmp(command, "rreg") == 0) {
     uint32_t reg = 0;
-    if (!parseUnsigned(strtok_r(nullptr, " \t", &save), 0xFF, reg)) {
+    if (!parseUnsigned(argument1, 0xFF, reg) || argument2 != nullptr) {
       puts("expected rreg <0..255>");
       return;
     }
@@ -371,8 +386,8 @@ void processCommand(char* line) {
   } else if (strcmp(command, "wreg") == 0) {
     uint32_t reg = 0;
     uint32_t value = 0;
-    if (!parseUnsigned(strtok_r(nullptr, " \t", &save), 0xFF, reg) ||
-        !parseUnsigned(strtok_r(nullptr, " \t", &save), 0xFF, value)) {
+    if (!parseUnsigned(argument1, 0xFF, reg) ||
+        !parseUnsigned(argument2, 0xFF, value) || argument3 != nullptr) {
       puts("expected wreg <0..255> <0..255>");
       return;
     }
@@ -381,8 +396,9 @@ void processCommand(char* line) {
   } else if (strcmp(command, "dump") == 0) {
     uint32_t reg = 0;
     uint32_t length = 0;
-    if (!parseUnsigned(strtok_r(nullptr, " \t", &save), 0xFF, reg) ||
-        !parseUnsigned(strtok_r(nullptr, " \t", &save), 32, length) || length == 0U) {
+    if (!parseUnsigned(argument1, 0xFF, reg) ||
+        !parseUnsigned(argument2, 32, length) || length == 0U ||
+        argument3 != nullptr) {
       puts("expected dump <0..255> <1..32>");
       return;
     }
