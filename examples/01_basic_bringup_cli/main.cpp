@@ -264,6 +264,10 @@ void handleCommand(char* line) {
     printHelp();
   } else if (strcmp(command, "version") == 0) {
     Serial.printf("LSM6DS3TR %s\n", VERSION_FULL);
+    Serial.printf("platform arduino=%s esp-idf=%s flash_bytes=%lu psram_bytes=%lu\n",
+                  ESP.getCoreVersion(), ESP.getSdkVersion(),
+                  static_cast<unsigned long>(ESP.getFlashChipSize()),
+                  static_cast<unsigned long>(ESP.getPsramSize()));
   } else if (strcmp(command, "status") == 0) {
     const DriverDiagnostics diag = device.diagnostics(now);
     Serial.printf("bound=%s active=%s result_pending=%s config=%s generation=%lu valid_after=%" PRIu64 "\n",

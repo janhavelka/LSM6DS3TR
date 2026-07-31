@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the pinned pioarduino platform from `54.03.20` to `55.03.311`
+  (Arduino-ESP32 3.3.11, ESP-IDF 5.5.5) and raised the CI PlatformIO Core pin
+  to the platform's required 6.1.19 release.
+- Declared the validated ESP32-S3 fixture's 4 MB flash and 2 MB QSPI PSRAM
+  explicitly and removed the obsolete original-ESP32 PSRAM cache workaround
+  from ESP32-S3 builds. Other S3 hardware must override these fixture values.
+- Updated the physical HIL runner for esptool 5 command names, runtime platform
+  and memory verification, strict self-test/calibration success, and zero final
+  transport failures.
+- Revalidated the upgraded stack on the ESP32-S3 fixture with the complete
+  targeted campaign and a one-hour owner soak: 35,989 ordered samples, 54,461
+  successful transport callbacks, 11 paired maintenance cycles, and zero
+  operation, contract, or transport failures.
+
+### Fixed
+
+- Made the Windows watchdog-reset HIL path recognize esptool 5's observed
+  post-reset serial-disconnect error only after it reports the expected chip
+  and watchdog reset, while retaining the port-reappearance proof.
+- Updated the ESP32-S2 post-upload reset spelling for esptool 5.
+
 ## [2.0.0] - 2026-07-22
 
 ### Added

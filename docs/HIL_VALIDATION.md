@@ -14,13 +14,23 @@ pio run -e esp32s3dev -t upload --upload-port COM26
 python tools/run_hil.py --port COM26 --watchdog-reset
 ```
 
+On Windows, run the upload in a UTF-8 Python console (for example, set
+`PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` in the invoking shell). This keeps
+esptool 5 progress and reset output from being decoded through a legacy console
+code page.
+
+First-time Windows installs may also require Win32 long-path support. The
+platform reports when it is disabled; enable it if extracting the 55.03.311
+framework package fails under the legacy path limit.
+
 The campaign covers bind/unbind lifecycle, probe/configure, every combination
 of all/acceleration/angular-rate/temperature with ready-checked and direct
 sampling, strict invalid input, busy admission, cancellation, token/result
 identity, diagnostic reads/writes and provenance invalidation, self-test,
 accelerometer and gyroscope calibration, FIFO purge, power-down, reset, boot,
 recover, and reconcile. It checks transaction ceilings and finishes with zero
-driver transport failures.
+driver transport failures. Self-test and both calibrations must succeed; a
+terminal operation with a failed primary result is not accepted as coverage.
 
 ## One-Hour Owner Soak
 
@@ -48,6 +58,28 @@ probe/reconcile counts, at least one successful callback per sample, and
 nonzero gravitational acceleration evidence. For
 ESP32-S3 native USB, DTR and RTS are set before opening the port; do not replace
 this with a monitor that momentarily asserts the boot straps.
+
+## pioarduino 55.03.311 Evidence
+
+The 2026-07-31 upgrade campaign used the ESP32-S3 revision 0.1 fixture supplied
+on `COM30`. After the new firmware selected its hardware USB Serial/JTAG
+identity, Windows assigned `COM26`; esptool reported the same
+`64:e8:33:73:a1:54` device. The fixture has 4 MB embedded flash and 2 MB QSPI
+PSRAM. Runtime metadata proved Arduino-ESP32 3.3.11, ESP-IDF 5.5.5, and both
+configured memory sizes before functional testing began.
+
+- Targeted CLI: passed all eight quantity/readiness combinations, 40 strict
+  invalid-input cases, and every lifecycle, maintenance, diagnostic,
+  cancellation, destructive, and recovery stage. Accelerometer and gyroscope
+  self-test passed, both 16-sample calibrations succeeded, and transport
+  counters moved from 70 to 1,178 successes with zero failures.
+- One-hour owner soak: passed from 09:52:52 to 10:52:54 UTC. At the exact
+  3,600,000 ms terminal record the device reported 35,989 samples with matching
+  sequence, configuration generation 1, 54,461 successful transport callbacks,
+  11 paired probe/reconcile maintenance cycles, and zero operation, contract,
+  or transport failures. Observed temperature was 30.136-31.000 degrees C;
+  peak absolute acceleration and angular rate were 1,078,785 micro-g and
+  126,078,750 micro-dps, respectively.
 
 ## Version 2.0.0 Evidence
 

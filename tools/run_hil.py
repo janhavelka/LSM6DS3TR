@@ -40,6 +40,14 @@ SAMPLE_RE = re.compile(
 )
 STATUS_CODE_RE = re.compile(r"status=(\d+) detail=(-?\d+) message=([^\r\n]+)")
 TRANSPORT_RE = re.compile(r"transport ok=(\d+) fail=(\d+) last_error=(\d+)")
+PLATFORM_RE = re.compile(
+    r"platform arduino=([^\s]+) esp-idf=([^\s]+) "
+    r"flash_bytes=(\d+) psram_bytes=(\d+)"
+)
+EXPECTED_ARDUINO_CORE = "3.3.11"
+EXPECTED_ESP_IDF = "v5.5.5"
+EXPECTED_FLASH_BYTES = 4 * 1024 * 1024
+EXPECTED_PSRAM_BYTES = 2 * 1024 * 1024
 
 
 class HilFailure(RuntimeError):
@@ -346,8 +354,33 @@ def update_ranges(ranges: dict[str, list[int]], output: str) -> None:
 
 def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
     print("HIL targeted: metadata and startup", flush=True)
-    version = cli.exchange("version", "LSM6DS3TR 2.0.0")
+    version = cli.exchange("version", "platform arduino=")
     require("LSM6DS3TR 2.0.0" in version, "wrong firmware/library version")
+    platform_match = PLATFORM_RE.search(version)
+    require(platform_match is not None, "missing platform version metadata")
+    assert platform_match is not None
+    require(
+        platform_match.group(1) == EXPECTED_ARDUINO_CORE,
+        f"wrong Arduino core version {platform_match.group(1)}",
+    )
+    require(
+        platform_match.group(2).startswith(EXPECTED_ESP_IDF),
+        f"wrong ESP-IDF version {platform_match.group(2)}",
+    )
+    require(
+        int(platform_match.group(3)) == EXPECTED_FLASH_BYTES,
+        f"wrong flash size {platform_match.group(3)}",
+    )
+    require(
+        int(platform_match.group(4)) == EXPECTED_PSRAM_BYTES,
+        f"PSRAM was not initialized: {platform_match.group(4)} bytes",
+    )
+    summary["platform"] = {
+        "arduino": platform_match.group(1),
+        "esp_idf": platform_match.group(2),
+        "flash_bytes": int(platform_match.group(3)),
+        "psram_bytes": int(platform_match.group(4)),
+    }
     cli.exchange("help", "All jobs use absolute deadlines")
     status = cli.exchange("status", "transport ok=")
     require("bound=yes" in status, "driver was not bound at baseline")
@@ -427,8 +460,7 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
         "message": self_test.status_message,
         "details": self_test.output.splitlines()[-1] if self_test.output else "",
     }
-    # A fixture or individual device can legitimately fail the stimulus limits,
-    # but the procedure must restore a known configuration before we continue.
+    require_success(self_test, "selftest")
     require("restore=0" in self_test.output, "self-test did not restore configuration")
 
     for command in ("calg 16", "calxl 16"):
@@ -439,7 +471,7 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
             "message": calibration.status_message,
             "output": calibration.output.splitlines()[-1] if calibration.output else "",
         }
-        require(calibration.state in ("succeeded", "failed"), "calibration did not terminate")
+        require_success(calibration, "calibration")
     purge = cli.job("purge 1")
     require_success(purge, "purge")
     require("discarded=0" in purge.output, "bypass FIFO unexpectedly contained data")
@@ -463,7 +495,9 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
 
     final_status = cli.exchange("status", "transport ok=")
     summary["targeted_transport_before"] = baseline_transport
-    summary["targeted_transport_after"] = parse_transport(final_status)
+    final_transport = parse_transport(final_status)
+    require(final_transport[1] == 0, "targeted campaign recorded transport failures")
+    summary["targeted_transport_after"] = final_transport
     summary["targeted_ranges"] = ranges
     summary["targeted_last_sequence"] = previous_sequence
 
@@ -475,25 +509,51 @@ def port_present(name: str) -> bool:
     return any(info.device.upper() == name.upper() for info in list_ports.comports())
 
 
+def esptool_command() -> list[str]:
+    configured_core = os.environ.get("PLATFORMIO_CORE_DIR")
+    if configured_core:
+        core_dir = pathlib.Path(configured_core)
+    else:
+        user_profile = pathlib.Path(os.environ.get("USERPROFILE", pathlib.Path.home()))
+        core_dir = user_profile / ".platformio"
+
+    if os.name == "nt":
+        scripts_dir = core_dir / "penv" / "Scripts"
+        executable = scripts_dir / "esptool.exe"
+        python = scripts_dir / "python.exe"
+    else:
+        scripts_dir = core_dir / "penv" / "bin"
+        executable = scripts_dir / "esptool"
+        python = scripts_dir / "python"
+    if executable.is_file():
+        return [str(executable)]
+
+    for package_root in ("packages", "tools"):
+        script = core_dir / package_root / "tool-esptoolpy" / "esptool.py"
+        if python.is_file() and script.is_file():
+            return [str(python), str(script)]
+    raise HilFailure(
+        "PlatformIO esptool was not found; omit --watchdog-reset or install PlatformIO"
+    )
+
+
 def watchdog_reset(port: str, raw_log: pathlib.Path) -> None:
-    user_profile = pathlib.Path(os.environ.get("USERPROFILE", pathlib.Path.home()))
-    pio_python = user_profile / ".platformio" / "penv" / "Scripts" / "python.exe"
-    esptool = user_profile / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"
-    if not pio_python.exists() or not esptool.exists():
-        raise HilFailure(
-            "PlatformIO esptool was not found; omit --watchdog-reset or install PlatformIO"
-        )
-    command = [
-        str(pio_python), str(esptool), "--chip", "esp32s3", "--port", port,
-        "--baud", "115200", "--before", "default_reset", "--after",
-        "watchdog_reset", "--no-stub", "chip_id",
+    command = esptool_command() + [
+        "--chip", "esp32s3", "--port", port, "--baud", "115200",
+        "--before", "default-reset", "--after", "watchdog-reset",
+        "--no-stub", "chip-id",
     ]
     completed = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
     with raw_log.open("a", encoding="utf-8") as handle:
         handle.write(completed.stdout)
         handle.write(completed.stderr)
     evidence = completed.stdout + completed.stderr
-    if completed.returncode != 0 or "Hard resetting with a watchdog" not in evidence:
+    reset_reported = "Hard resetting with a watchdog" in evidence
+    known_windows_disconnect = (
+        os.name == "nt" and "A serial exception error occurred" in evidence
+    )
+    if ("ESP32-S3" not in evidence or not reset_reported or
+            (completed.returncode != 0 and not known_windows_disconnect)):
         raise HilFailure(f"watchdog reset did not execute: {evidence}")
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:

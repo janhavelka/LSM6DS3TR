@@ -49,8 +49,15 @@ lib_deps =
   https://github.com/janhavelka/LSM6DS3TR.git#v2.0.0
 ```
 
-The repository's own target builds pin the pioarduino
-`platform-espressif32` 54.03.20 release archive and PlatformIO Core 6.1.18.
+The repository's own Arduino target builds pin pioarduino
+`platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11 and ESP-IDF 5.5.5)
+and PlatformIO Core 6.1.19. Consuming applications retain control of their
+own platform version. Native ESP-IDF component CI remains an independent
+ESP-IDF 5.4.4 compatibility target.
+
+The ESP32-S3 example and HIL environments describe the validated fixture's
+4 MB embedded flash and 2 MB QSPI PSRAM. Override those board settings when
+building the repository examples for different ESP32-S3 hardware.
 
 ### ESP-IDF
 
