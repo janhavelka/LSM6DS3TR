@@ -15,7 +15,7 @@ Thank you for considering contributing to this project!
 
 ### Code Style
 
-- Follow existing code style (see `.clang-format`)
+- Follow the existing two-space indentation and attached-brace style
 - Use `constexpr` instead of macros for constants
 - Prefer explicit over implicit
 - No heap allocations in steady-state library code
@@ -36,6 +36,10 @@ Thank you for considering contributing to this project!
 - Update public Doxygen and user documentation with API or behavior changes
 - Add changelog entry under `[Unreleased]`
 - Run `python tools/build_docs.py`; stale pages are removed and warnings fail
+- For chip-facing changes, update the maintained
+  `docs/chip-reference/` topic and run
+  `python tools/check_chip_docs_coverage.py`. Record ST source ambiguities
+  explicitly instead of choosing one statement silently.
 - Run `python scripts/generate_version.py check` when metadata is involved
 - Ensure the complete CI matrix passes
 

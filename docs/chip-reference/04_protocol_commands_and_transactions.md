@@ -1,5 +1,8 @@
 # Protocol Commands And Transactions
 
+> Source confidence: vendor fact. Library status: I2C transport callbacks are
+> supported; SPI and sensor-hub transactions are chip-only/unsupported.
+
 LSM6DS3TR-C exposes 7-bit register addresses over I2C and SPI. The register map is byte-addressed, and output data is generally little-endian when `CTRL3_C.BLE=0` (default). Source: datasheet, pp. 40-41, 63.
 
 ## I2C Slave Protocol

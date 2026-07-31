@@ -7,10 +7,11 @@
 namespace LSM6DS3TR {
 namespace {
 
-constexpr uint8_t SELF_TEST_DISCARD_SAMPLES = 5;
+constexpr uint8_t SELF_TEST_DISCARD_SAMPLES = 1;
 constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
-constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 800;
-constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 60;
+constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
+constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 86;
 constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
 constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
 constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
@@ -424,8 +425,10 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
 
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
   if (samples < 5U || samples > 100U) return 0U;
+  // Each sample reserves three ready checks and one burst in four phases.
+  // Fixed work is 20 test-setup writes plus the 66-callback profile restore.
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
-         80U;
+         SELF_TEST_FIXED_TRANSACTIONS;
 }
 
 uint32_t maximumCalibrationTransactions(uint16_t samples) {
@@ -932,20 +935,14 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
   return status;
 }
 
-Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
-                        uint64_t nowMs, bool mayChangeConfiguration) {
-  if (data == nullptr || length == 0U ||
-      length + 1U > MAX_TRANSPORT_WRITE_BYTES) {
-    return Status::Error(Err::INVALID_PARAM, "Write exceeds fixed transaction buffer");
-  }
+Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
+                            bool mayChangeConfiguration) {
   if (_operationTransactionLimit != 0U &&
       _operationTransactions >= _operationTransactionLimit) {
     return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
                          "Operation transaction limit exceeded");
   }
-  uint8_t payload[MAX_TRANSPORT_WRITE_BYTES] = {};
-  payload[0] = reg;
-  for (size_t index = 0; index < length; ++index) payload[index + 1U] = data[index];
+  const uint8_t payload[2] = {reg, value};
   if (mayChangeConfiguration) {
     _hardwareStateMayHaveChanged = true;
     _configurationMayBeUnknown = true;
@@ -953,7 +950,7 @@ Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
   _transactionUsed = true;
   _operationTransactions = saturatingIncrement(_operationTransactions);
   Status status = normalizeTransport(_driverConfig.i2cWrite(
-      static_cast<uint8_t>(_driverConfig.address), payload, length + 1U,
+      static_cast<uint8_t>(_driverConfig.address), payload, sizeof(payload),
       _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
   if (status.ok()) {
     _transportSuccesses = saturatingIncrement(_transportSuccesses);
@@ -963,11 +960,6 @@ Status LSM6DS3TR::_write(uint8_t reg, const uint8_t* data, size_t length,
     _lastTransportErrorUptimeMs = nowMs;
   }
   return status;
-}
-
-Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
-                            bool mayChangeConfiguration) {
-  return _write(reg, &value, 1, nowMs, mayChangeConfiguration);
 }
 
 void LSM6DS3TR::_recordMismatch(uint8_t reg, uint8_t expected,
@@ -987,7 +979,7 @@ void LSM6DS3TR::_invalidateConfiguration() {
   _validAfterUptimeMs = 0;
 }
 
-Status LSM6DS3TR::_stepProbe(uint64_t nowMs, bool) {
+Status LSM6DS3TR::_stepProbe(uint64_t nowMs) {
   if (_step == 0U) {
     uint8_t access = 0;
     const Status status = _read(cmd::REG_FUNC_CFG_ACCESS, &access, 1, nowMs);
@@ -1487,17 +1479,55 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
       ++_step;
       return inProgressStatus();
     }
-    if (_step >= 1U && _step <= 3U) {
+    if (_step == 1U) {
+      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step == 2U) {
+      const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_BDU |
+                                                 cmd::MASK_IF_INC);
+      const Status status = _writeByte(cmd::REG_CTRL3_C, ctrl3, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step == 3U) {
+      const Status status = _writeByte(cmd::REG_CTRL4_C, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step == 4U) {
+      const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step == 5U) {
+      const Status status = _writeByte(cmd::REG_CTRL9_XL, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step == 6U) {
+      const Status status = _writeByte(cmd::REG_CTRL10_C, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      ++_step;
+      return inProgressStatus();
+    }
+    if (_step >= 7U && _step <= 9U) {
       const uint8_t reg = static_cast<uint8_t>(
-          cmd::REG_X_OFS_USR + static_cast<uint8_t>(_step - 1U));
+          cmd::REG_X_OFS_USR + static_cast<uint8_t>(_step - 7U));
       const Status status = _writeByte(reg, 0, nowMs, true);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     DeviceProfile testProfile = _selfTestRestoreProfile;
-    testProfile.accelOdr = Odr::HZ_416;
-    testProfile.accelFullScale = AccelFs::G_2;
+    testProfile.accelOdr = Odr::HZ_52;
+    testProfile.accelFullScale = AccelFs::G_4;
     const Status status =
         _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs, true);
     if (!status.ok()) return routeFailureToRestore(status);
@@ -1545,10 +1575,10 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     else _phaseStimulus = average;
 
     if (_substep == 5U) {
-      _workingResult.selfTest.accelBaselineG = rawAxesToFloat(_phaseBaseline, 0.000061f);
+      _workingResult.selfTest.accelBaselineG = rawAxesToFloat(_phaseBaseline, 0.000122f);
       _substep = 6;
     } else if (_substep == 9U) {
-      _workingResult.selfTest.accelStimulusG = rawAxesToFloat(_phaseStimulus, 0.000061f);
+      _workingResult.selfTest.accelStimulusG = rawAxesToFloat(_phaseStimulus, 0.000122f);
       _workingResult.selfTest.accelDeltaG = absoluteAxes(
           subtractAxes(_workingResult.selfTest.accelStimulusG,
                        _workingResult.selfTest.accelBaselineG));
@@ -1604,10 +1634,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
       return inProgressStatus();
     }
     if (_step == 1U) {
-      const uint8_t awakeCtrl4 = static_cast<uint8_t>(
-          buildCtrl4(_selfTestRestoreProfile) & ~cmd::MASK_SLEEP_G);
-      const Status status =
-          _writeByte(cmd::REG_CTRL4_C, awakeCtrl4, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL4_C, 0, nowMs, true);
       if (!status.ok()) return routeFailureToRestore(status);
       _step = 2;
       return inProgressStatus();
@@ -1620,7 +1647,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
   }
   if (_substep == 12U) {
     DeviceProfile testProfile = _selfTestRestoreProfile;
-    testProfile.gyroOdr = Odr::HZ_416;
+    testProfile.gyroOdr = Odr::HZ_208;
     testProfile.gyroFullScale = GyroFs::DPS_2000;
     const Status status =
         _writeByte(cmd::REG_CTRL2_G, buildCtrl2(testProfile), nowMs, true);
@@ -1916,7 +1943,7 @@ void LSM6DS3TR::_clearActive() {
 PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
   Status status = Status::Error(Err::INVALID_PARAM, "Unknown operation");
   switch (_job) {
-    case JobKind::PROBE: status = _stepProbe(nowMs, false); break;
+    case JobKind::PROBE: status = _stepProbe(nowMs); break;
     case JobKind::CONFIGURE: status = _stepConfigure(nowMs, false); break;
     case JobKind::SAMPLE: status = _stepSample(nowMs); break;
     case JobKind::RESET: status = _stepResetBoot(nowMs, false, false); break;

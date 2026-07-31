@@ -1,8 +1,13 @@
 # Hardware-In-Loop Validation
 
 This guide owns the repeatable physical validation procedure and retained
-release evidence. Raw serial logs and JSON captures are generated outside the
-repository by default; they are evidence, not source files.
+validation evidence. Raw serial logs and JSON captures are generated outside
+the repository by default; they are evidence, not source files.
+
+Install `pyserial` with `python -m pip install pyserial` before using either
+runner. Replace `COMx` below with the port currently assigned to the fixture;
+the runners require an explicit port because native USB can re-enumerate under
+a different name after flashing or reset.
 
 ## Targeted CLI Campaign
 
@@ -10,8 +15,8 @@ Build and upload the maintained owner-safe CLI, then let the runner perform a
 stable watchdog reset before opening native USB:
 
 ```sh
-pio run -e esp32s3dev -t upload --upload-port COM26
-python tools/run_hil.py --port COM26 --watchdog-reset
+pio run -e esp32s3dev -t upload --upload-port COMx
+python tools/run_hil.py --port COMx --watchdog-reset
 ```
 
 On Windows, run the upload in a UTF-8 Python console (for example, set
@@ -39,8 +44,8 @@ progress record every 30 seconds. This avoids using high-volume native-USB CLI
 traffic as a proxy for sensor or transport reliability.
 
 ```sh
-pio run -e esp32s3hil -t upload --upload-port COM26
-python tools/run_owner_soak.py --port COM26 --expected-seconds 3600
+pio run -e esp32s3hil -t upload --upload-port COMx
+python tools/run_owner_soak.py --port COMx --expected-seconds 3600
 ```
 
 The firmware uses a fixed-memory owner loop and grants one transport callback
@@ -59,14 +64,24 @@ nonzero gravitational acceleration evidence. For
 ESP32-S3 native USB, DTR and RTS are set before opening the port; do not replace
 this with a monitor that momentarily asserts the boot straps.
 
-## pioarduino 55.03.311 Evidence
+## Retained ESP32-S3 Evidence
 
-The 2026-07-31 upgrade campaign used the ESP32-S3 revision 0.1 fixture supplied
-on `COM30`. After the new firmware selected its hardware USB Serial/JTAG
-identity, Windows assigned `COM26`; esptool reported the same
-`64:e8:33:73:a1:54` device. The fixture has 4 MB embedded flash and 2 MB QSPI
-PSRAM. Runtime metadata proved Arduino-ESP32 3.3.11, ESP-IDF 5.5.5, and both
-configured memory sizes before functional testing began.
+Both campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
+address `0x6A`, WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a
+50 ms callback timeout.
+
+| Campaign | Tested source | pioarduino | Arduino-ESP32 | Bundled ESP-IDF | PlatformIO Core |
+| --- | --- | --- | --- | --- | --- |
+| 2026-07-31 platform upgrade | [`94126c8`](https://github.com/janhavelka/LSM6DS3TR/commit/94126c8f6247b68d96e85044b5b7e9fd5493938f) | 55.03.311 | 3.3.11 | 5.5.5 | 6.1.19 |
+| 2026-07-22 version 2.0.0 baseline | [`v2.0.0`](https://github.com/janhavelka/LSM6DS3TR/tree/v2.0.0) | 54.03.20 | 3.2.0 | 5.4.1 | 6.1.18 |
+
+### pioarduino 55.03.311 Upgrade
+
+The fixture was supplied on `COM30`. After the new firmware selected its
+hardware USB Serial/JTAG identity, Windows assigned `COM26`; esptool reported
+the same `64:e8:33:73:a1:54` device. The fixture has 4 MB embedded flash and
+2 MB QSPI PSRAM. Runtime metadata proved Arduino-ESP32 3.3.11, ESP-IDF 5.5.5,
+and both configured memory sizes before functional testing began.
 
 - Targeted CLI: passed all eight quantity/readiness combinations, 40 strict
   invalid-input cases, and every lifecycle, maintenance, diagnostic,
@@ -77,15 +92,11 @@ configured memory sizes before functional testing began.
   3,600,000 ms terminal record the device reported 35,989 samples with matching
   sequence, configuration generation 1, 54,461 successful transport callbacks,
   11 paired probe/reconcile maintenance cycles, and zero operation, contract,
-  or transport failures. Observed temperature was 30.136-31.000 degrees C;
-  peak absolute acceleration and angular rate were 1,078,785 micro-g and
-  126,078,750 micro-dps, respectively.
+  or transport failures. Observed temperature was 30.136-31.000 degrees
+  Celsius; peak absolute acceleration and angular rate were 1,078,785 micro-g
+  and 126,078,750 micro-dps, respectively.
 
-## Version 2.0.0 Evidence
-
-The 2026-07-22 campaign used an ESP32-S3 revision 0.1 at address `0x6A`, with
-WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a 50 ms callback
-timeout.
+### Version 2.0.0 Baseline
 
 - Targeted CLI: passed 40 strict invalid-input cases and all lifecycle,
   sampling, maintenance, diagnostic, cancellation, and recovery stages. The
@@ -96,9 +107,9 @@ timeout.
   3,600,000 ms terminal record the device reported 35,988 samples with matching
   sequence, configuration generation 1, 54,459 successful transport callbacks,
   11 paired probe/reconcile maintenance cycles, and zero operation, contract,
-  or transport failures. Observed temperature was 29.566-30.082 degrees C;
-  peak absolute acceleration and angular rate were 971,791 micro-g and
-  2,030,000 micro-dps, respectively.
+  or transport failures. Observed temperature was 29.566-30.082 degrees
+  Celsius; peak absolute acceleration and angular rate were 971,791 micro-g
+  and 2,030,000 micro-dps, respectively.
 
 ## TunnelMonitor-node Compatibility Boundary
 

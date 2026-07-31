@@ -1,5 +1,9 @@
 # Electrical And Timing
 
+> Source confidence: vendor fact unless explicitly marked otherwise. Library
+> status: conversion constants are supported; board electrical design remains
+> the application and hardware designer's responsibility.
+
 ## Electrical Characteristics
 
 | Parameter | Value | Source |
@@ -12,6 +16,9 @@
 | Accelerometer-only high-performance current | typ. 150 uA below 1.6 kHz, 160 uA at or above 1.6 kHz | Datasheet, p. 24 |
 | Accelerometer-only normal current | typ. 85 uA at 208 Hz | Datasheet, p. 24 |
 | Accelerometer-only low-power current | typ. 9 uA at 12.5 Hz | Datasheet, p. 24 |
+| Gyroscope-only high-performance current | typ. 625 uA at 12.5 Hz through 6.66 kHz | AN5130 Table 7, p. 11 |
+| Gyroscope-only normal current | typ. 325 uA at 104 Hz; 430 uA at 208 Hz | AN5130 Table 7, p. 11 |
+| Gyroscope-only low-power current | typ. 232/245/270 uA at 12.5/26/52 Hz | AN5130 Table 7, p. 11 |
 | Power-down current | typ. 3 uA | Datasheet, p. 24 |
 | Turn-on time | typ. 35 ms | Datasheet, p. 24 |
 | Digital input high / low | `VIH` min 0.7 x `VDD_IO`; `VIL` max 0.3 x `VDD_IO` | Datasheet, p. 24 |
@@ -37,7 +44,7 @@
 | SPI | Max 10 MHz; 100 ns clock cycle; values apply to 4-wire and 3-wire SPI. | Datasheet, p. 26 |
 | I2C slave standard mode | 0 to 100 kHz. | Datasheet, p. 27 |
 | I2C slave fast mode | 0 to 400 kHz. | Datasheet, p. 27 |
-| I2C master mode | Fast Mode only; max 400 kHz and source table gives 116.3 kHz min generated SCL. | Datasheet, p. 28 |
+| I2C sensor-hub master mode | Fixed generated SCL of 116.3 kHz; the timing table is characterized against Fast-mode limits. | Datasheet Table 8, p. 28 |
 
 Operating temperature range is -40 to +85 degC. Source: datasheet, pp. 22, 24-25.
 

@@ -340,8 +340,10 @@ total callback ceiling, per-callback transport timeout, maximum per-poll budget,
 and owner scheduling delay.
 
 The self-test sample count applies independently to the baseline and stimulated
-averages for both sensors. Each of those four phases first discards five
-samples. Four fixed, bus-silent settle gates total 1,060 ms. Every discarded or
+averages for both sensors. Each of those four phases first discards one sample,
+as required by AN5130. The operation uses the vendor's 52 Hz / +/-4 g
+accelerometer setup and 208 Hz / +/-2000 dps gyroscope setup. Four fixed,
+bus-silent settle gates total 400 ms. Every discarded or
 collected sample receives at most three STATUS checks and one data read, with a
 3 ms zero-I2C gate after a read. Three failed readiness checks produce
 `DATA_NOT_READY` and route through the reserved full-profile restoration
@@ -419,19 +421,10 @@ same owner queue. The application request identity and the library's
 terminal result is published. One `poll(nowMs, 1)` per owner turn gives the
 normal one-backend-transfer scheduling bound.
 
-This is the intended TunnelMonitor-node boundary: its `I2cTask` remains the
-only bus owner and owns deadlines, retry/recovery, and health policy; an
-owner-private concrete IMU module would own this driver and map results into
-the application's fixed contracts. Each library callback must be one physical
-attempt with the owner's generic retry/recovery path disabled. Only after the
-terminal library result is taken may the owner recover the bus and explicitly
-start a new probe, reconcile, recover, or requested operation. The current
-library callback bounds fit TunnelMonitor-node's 128-byte I2C payload capacity,
-and an all-quantity sample fits its 48-reading result capacity. Product
-integration still requires an authoritative IMU device kind/instance binding,
-mounting transform, acquisition cadence, calibration policy, and measurement
-schema. This repository does not invent those product decisions or add a
-second bus owner.
+The reviewed TunnelMonitor-node fit, callback capacities, and remaining
+product decisions are retained in the
+[HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md#tunnelmonitor-node-compatibility-boundary).
+This repository does not invent those decisions or add a second bus owner.
 
 ## Examples
 
@@ -442,12 +435,13 @@ second bus owner.
 - [Native ESP-IDF example](examples/idf/basic) uses `app_main`, fixed C
   buffers, `driver/i2c_master.h`, `esp_timer_get_time`, and FreeRTOS yielding.
   It does not use Arduino compatibility code.
-- The repository-only [ESP32-S3 owner-soak harness](https://github.com/janhavelka/LSM6DS3TR/blob/v2.0.0/examples/02_owner_soak/main.cpp)
+- The repository-only [ESP32-S3 owner-soak harness](https://github.com/janhavelka/LSM6DS3TR/blob/main/examples/02_owner_soak/main.cpp)
   runs a low-output, fixed-memory physical campaign with one callback per poll
   and checks all ready/direct quantity combinations on-device.
 
-Both examples expose the same compact command set. `rreg`, `wreg`, `dump`,
-calibration, self-test, and purge are explicitly advanced/maintenance commands.
+The Arduino and native ESP-IDF CLI examples expose the same compact command
+set. `rreg`, `wreg`, `dump`, calibration, self-test, and purge are explicitly
+advanced/maintenance commands.
 
 ## Building And Validation
 
@@ -469,8 +463,8 @@ python tools/check_package_contract.py
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile
-evidence; maintained commands, coverage, and retained version 2 results are in
-the [HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/v2.0.0/docs/HIL_VALIDATION.md).
+evidence; maintained commands, coverage, and retained physical results are in
+the [HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md).
 
 ### API Documentation
 
@@ -478,8 +472,12 @@ From a repository checkout, run `python tools/build_docs.py` to remove any
 stale generated pages and build the local reference under
 `docs/doxygen/html/`. The generated tree is intentionally ignored; source
 comments, this README, and the checked-in guides remain authoritative. The
-<a href="docs/DOCUMENTATION.md">documentation map</a> distinguishes maintained
-contracts from source reference material.
+<a href="docs/DOCUMENTATION.md">Documentation map</a> distinguishes maintained contracts
+from source reference material. The packaged
+<a href="docs/chip-reference/README.md">LSM6DS3TR-C chip reference</a> is the maintained,
+source-audited translation of the datasheet and AN5130 for engineers and AI
+coders; it also separates silicon capability from this library's support
+contract.
 
 Doxygen is strict for the supported owner-safe API: undocumented public
 symbols, missing parameter documentation, broken documentation commands, and

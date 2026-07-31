@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import pathlib
+import re
 import sys
 
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-COMPACT_DIR = ROOT / "docs" / "extracted-md"
+REFERENCE_DIR = ROOT / "docs" / "chip-reference"
 RAW_DIR = ROOT / "docs" / "pdf-extracted-md"
 
-COMPACT_DOCS = [
-    "00_document_inventory.md",
+REFERENCE_DOCS = (
+    "README.md",
     "01_chip_overview.md",
     "02_pinout_and_signals.md",
     "03_electrical_and_timing.md",
@@ -18,19 +21,38 @@ COMPACT_DOCS = [
     "06_modes_interrupts_status_and_faults.md",
     "07_initialization_reset_and_operational_notes.md",
     "08_variant_and_source_notes.md",
-]
+    "09_filters_and_settling.md",
+    "10_fifo_and_embedded_functions.md",
+    "11_self_test_and_calibration.md",
+    "12_source_ambiguities.md",
+    "13_library_support_matrix.md",
+)
 
-RAW_SOURCE_EXTRACTS = [
-    "LSM6DS3TR-C_datasheet.md",
-    "LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.md",
-]
+SOURCE_ARTIFACTS = (
+    (
+        ROOT / "docs" / "LSM6DS3TR-C_datasheet.pdf",
+        RAW_DIR / "LSM6DS3TR-C_datasheet.md",
+        "352f35643f90772781540cf625ee574eb41d8249707440ac200632294b3b773c",
+        "- Page count: 114",
+    ),
+    (
+        ROOT
+        / "docs"
+        / "LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.pdf",
+        RAW_DIR
+        / "LSM6DS3TR-C_Always-On_3D_Accelerometer_3D_Gyroscope_Application_Note_AN5130.md",
+        "15b90b0ccca09f1cd6f561ecc67c7620714f452ad3f2c07e0f1cbce7e1ebb1c6",
+        "- Page count: 109",
+    ),
+)
 
-CRITICAL_COMPACT_ANCHORS = [
+CRITICAL_REFERENCE_ANCHORS = (
     "WHO_AM_I",
     "FUNC_CFG_ACCESS",
     "CTRL1_XL",
     "CTRL2_G",
     "CTRL3_C",
+    "CTRL6_C[4]",
     "BOOT",
     "SW_RESET",
     "CTRL4_C.DRDY_MASK",
@@ -43,8 +65,6 @@ CRITICAL_COMPACT_ANCHORS = [
     "FIFO_STATUS1",
     "FIFO_DATA_OUT_L",
     "FIFO_PATTERN",
-    "SENSOR_SYNC_TIME_FRAME",
-    "SENSOR_SYNC_RES_RATIO",
     "MASTER_CONFIG",
     "WAKE_UP_SRC",
     "TAP_SRC",
@@ -52,87 +72,222 @@ CRITICAL_COMPACT_ANCHORS = [
     "TIMESTAMP0_REG",
     "STEP_COUNTER_L",
     "STEP_COUNTER_H",
-    "SENSORHUB13_REG",
     "SENSORHUB18_REG",
     "FUNC_SRC1",
     "FUNC_SRC2",
     "WRIST_TILT_IA",
-    "TAP_CFG",
-    "WAKE_UP_THS",
-    "WAKE_UP_DUR",
-    "FREE_FALL",
-    "MD1_CFG",
-    "MD2_CFG",
-    "MASTER_CMD_CODE",
-    "SENS_SYNC_SPI_ERROR_CODE",
-    "OUT_MAG_RAW_X_L",
     "X_OFS_USR",
-    "SLV0_ADD",
-    "CONFIG_PEDO_THS_MIN",
-    "A_WRIST_TILT_LAT",
-    "0x80 | addr",
     "Reserved bits",
-]
+    "vendor fact",
+    "vendor ambiguity",
+    "engineering inference",
+    "diagnostic-only",
+    "unsupported",
+)
 
-EXACT_REGISTER_FACTS = [
-    ("| `0x04` | `SENSOR_SYNC_TIME_FRAME` |", "REG_SENSOR_SYNC_TIME_FRAME = 0x04"),
-    ("| `0x05` | `SENSOR_SYNC_RES_RATIO` |", "REG_SENSOR_SYNC_RES_RATIO = 0x05"),
-]
+# These are independent datasheet-derived expectations for the highest-risk
+# constants. The checker compares them with CommandTable.h rather than merely
+# checking that a name exists in both documentation and code.
+HEADER_FACTS = {
+    "REG_FUNC_CFG_ACCESS": 0x01,
+    "REG_FIFO_CTRL5": 0x0A,
+    "REG_WHO_AM_I": 0x0F,
+    "WHO_AM_I_VALUE": 0x6A,
+    "REG_CTRL1_XL": 0x10,
+    "REG_CTRL2_G": 0x11,
+    "REG_CTRL3_C": 0x12,
+    "REG_CTRL6_C": 0x15,
+    "REG_CTRL9_XL": 0x18,
+    "REG_STATUS_REG": 0x1E,
+    "REG_OUT_TEMP_L": 0x20,
+    "REG_OUTX_L_G": 0x22,
+    "REG_OUTX_L_XL": 0x28,
+    "REG_FIFO_STATUS1": 0x3A,
+    "REG_FIFO_DATA_OUT_L": 0x3E,
+    "REG_TIMESTAMP2": 0x42,
+    "REG_STEP_COUNTER_L": 0x4B,
+    "REG_STEP_COUNTER_H": 0x4C,
+    "REG_X_OFS_USR": 0x73,
+    "REG_Y_OFS_USR": 0x74,
+    "REG_Z_OFS_USR": 0x75,
+    "BIT_FUNC_CFG_EN": 7,
+    "MASK_FUNC_CFG_EN": 0x80,
+    "BIT_FUNC_CFG_EN_B": 5,
+    "MASK_FUNC_CFG_EN_B": 0x20,
+    "BIT_XL_HM_MODE": 4,
+    "MASK_XL_HM_MODE": 0x10,
+    "BIT_G_HM_MODE": 7,
+    "MASK_G_HM_MODE": 0x80,
+    "BIT_BDU": 6,
+    "MASK_BDU": 0x40,
+    "BIT_IF_INC": 2,
+    "MASK_IF_INC": 0x04,
+    "BIT_SW_RESET": 0,
+    "MASK_SW_RESET": 0x01,
+    "BIT_ST_XL": 0,
+    "MASK_ST_XL": 0x03,
+    "BIT_ST_G": 2,
+    "MASK_ST_G": 0x0C,
+    "BIT_ODR_FIFO": 3,
+    "MASK_ODR_FIFO": 0x78,
+    "BIT_FIFO_MODE": 0,
+    "MASK_FIFO_MODE": 0x07,
+    "BIT_TDA": 2,
+    "MASK_TDA": 0x04,
+    "BIT_GDA": 1,
+    "MASK_GDA": 0x02,
+    "BIT_XLDA": 0,
+    "MASK_XLDA": 0x01,
+    "TIMESTAMP_RESET_VALUE": 0xAA,
+}
+
+EXACT_DOCUMENT_FACTS = {
+    "README.md": (
+        "DocID030071 Rev 3, May 2017",
+        "AN5130 Rev 1, March 2018",
+        "Official pages | Repository evidence",
+        "Verified against ST's live product documentation on **2026-07-31**",
+    ),
+    "04_protocol_commands_and_transactions.md": (
+        "IF_INC` (`0x12[2]`)",
+        "`0x80 | addr` for reads",
+    ),
+    "05_register_map.md": (
+        "`1011` | 1.6 Hz low-power-only | 12.5 Hz high-performance",
+        "invalid mode/ODR pairing",
+        "Table 19 says `0x00`, while Table 75 field defaults imply `0xE0`",
+    ),
+    "09_filters_and_settling.md": (
+        "138, 131, 121, and 138 Hz",
+        "135 / 135 / 135 / 135",
+        "BDU=1` protects each individual 16-bit LSB/MSB output pair",
+    ),
+    "10_fifo_and_embedded_functions.md": (
+        "`min(max(ODR_XL, ODR_G), ODR_FIFO)`",
+        "zero is not empty unless `FIFO_EMPTY=1`",
+        "continue filling if space remains, then stop when full",
+    ),
+    "11_self_test_and_calibration.md": (
+        "`CTRL1_XL=0x38`",
+        "`CTRL2_G=0x5C`",
+        "Wait 150 ms",
+        "Wait 50 ms",
+        "90..1700 mg inclusive",
+        "150..700 dps inclusive",
+    ),
+    "12_source_ambiguities.md": (
+        "`FUNC_CFG_ACCESS[4]=0`",
+        "`A_WRIST_TILT_MASK=0xC0`",
+        "requires `STATUS_REG.TDA`",
+    ),
+    "13_library_support_matrix.md": (
+        "FIFO configuration, acquisition, pattern decoding | unsupported",
+        "Raw main-bank register/block reads | diagnostic-only",
+        "Built-in accelerometer and gyro self-test | supported",
+    ),
+}
+
+FORBIDDEN_DOCUMENT_FACTS = {
+    "04_protocol_commands_and_transactions.md": ("Sub-address MSB",),
+    "11_self_test_and_calibration.md": (
+        "`CTRL1_XL=0x60`",
+        "`CTRL2_G=0x60`",
+        "Wait 800 ms",
+        "Wait 60 ms",
+    ),
+}
 
 
-def fail(message: str) -> int:
-    print(f"Chip documentation coverage FAILED: {message}")
-    return 1
+def sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def main() -> int:
-    missing_paths = []
-    for name in COMPACT_DOCS:
-        path = COMPACT_DIR / name
+    errors: list[str] = []
+    texts: dict[str, str] = {}
+
+    for name in REFERENCE_DOCS:
+        path = REFERENCE_DIR / name
         if not path.is_file():
-            missing_paths.append(path.relative_to(ROOT).as_posix())
+            errors.append(f"missing maintained reference: {path.relative_to(ROOT)}")
+            continue
+        texts[name] = path.read_text(encoding="utf-8", errors="replace")
 
-    for name in RAW_SOURCE_EXTRACTS:
-        path = RAW_DIR / name
+    for pdf_path, raw_path, expected_hash, page_anchor in SOURCE_ARTIFACTS:
+        if not pdf_path.is_file():
+            errors.append(f"missing vendor PDF: {pdf_path.relative_to(ROOT)}")
+            continue
+        observed_hash = sha256(pdf_path)
+        if observed_hash != expected_hash:
+            errors.append(
+                f"vendor PDF hash changed: {pdf_path.relative_to(ROOT)} "
+                f"expected {expected_hash}, observed {observed_hash}"
+            )
+        if not raw_path.is_file():
+            errors.append(f"missing raw source extract: {raw_path.relative_to(ROOT)}")
+            continue
+        raw_text = raw_path.read_text(encoding="utf-8", errors="replace")
+        if f"- SHA256: `{expected_hash}`" not in raw_text:
+            errors.append(f"raw extract hash header drifted: {raw_path.relative_to(ROOT)}")
+        if page_anchor not in raw_text:
+            errors.append(f"raw extract page header drifted: {raw_path.relative_to(ROOT)}")
+
+    combined = "\n".join(texts.values())
+    for anchor in CRITICAL_REFERENCE_ANCHORS:
+        if anchor not in combined:
+            errors.append(f"maintained reference lost critical anchor: {anchor}")
+
+    for name, facts in EXACT_DOCUMENT_FACTS.items():
+        text = texts.get(name, "")
+        for fact in facts:
+            if fact not in text:
+                errors.append(f"{name} lost exact audited fact: {fact}")
+
+    for name, facts in FORBIDDEN_DOCUMENT_FACTS.items():
+        text = texts.get(name, "")
+        for fact in facts:
+            if fact in text:
+                errors.append(f"{name} regained rejected stale fact: {fact}")
+
+    header_path = ROOT / "include" / "LSM6DS3TR" / "CommandTable.h"
+    header = header_path.read_text(encoding="utf-8", errors="replace")
+    constants = {
+        match.group(1): int(match.group(2), 0)
+        for match in re.finditer(
+            r"static constexpr uint(?:8|32)_t\s+(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)",
+            header,
+        )
+    }
+    for name, expected in HEADER_FACTS.items():
+        observed = constants.get(name)
+        if observed != expected:
+            errors.append(
+                f"CommandTable fact mismatch: {name} expected 0x{expected:X}, "
+                f"observed {observed!r}"
+            )
+
+    for path in (
+        ROOT / "LSM6DS3TR_imu_implementation_manual.md",
+        ROOT / "docs" / "archive" / "LSM6DS3TR_imu_legacy_extraction.md",
+    ):
         if not path.is_file():
-            missing_paths.append(path.relative_to(ROOT).as_posix())
+            errors.append(f"missing retained documentation path: {path.relative_to(ROOT)}")
 
-    if missing_paths:
-        print("Chip documentation coverage FAILED: required source files are missing")
-        for path in missing_paths:
-            print(f"  - {path}")
+    if errors:
+        print("Chip documentation coverage FAILED")
+        for error in errors:
+            print(f"  - {error}")
         return 1
 
-    compact_text = "\n".join(
-        (COMPACT_DIR / name).read_text(encoding="utf-8", errors="replace")
-        for name in COMPACT_DOCS
+    print(
+        "Chip documentation coverage PASSED "
+        f"({len(REFERENCE_DOCS)} maintained topics, "
+        f"{len(HEADER_FACTS)} exact register facts)"
     )
-    missing_anchors = [
-        anchor for anchor in CRITICAL_COMPACT_ANCHORS if anchor not in compact_text
-    ]
-
-    if missing_anchors:
-        print("Chip documentation coverage FAILED: compact docs lost critical anchors")
-        for anchor in missing_anchors:
-            print(f"  - {anchor}")
-        return 1
-
-    command_table = (ROOT / "include" / "LSM6DS3TR" / "CommandTable.h").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    missing_facts = []
-    for compact_fact, header_fact in EXACT_REGISTER_FACTS:
-        if compact_fact not in compact_text:
-            missing_facts.append(compact_fact)
-        if header_fact not in command_table:
-            missing_facts.append(header_fact)
-    if missing_facts:
-        print("Chip documentation coverage FAILED: exact register facts changed")
-        for fact in missing_facts:
-            print(f"  - {fact}")
-        return 1
-
-    print("Chip documentation coverage PASSED")
     return 0
 
 

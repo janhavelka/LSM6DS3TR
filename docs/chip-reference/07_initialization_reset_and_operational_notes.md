@@ -1,5 +1,9 @@
 # Initialization, Reset, And Operational Notes
 
+> Source confidence: vendor fact plus conservative library policy. Library
+> status: the owner-scheduled probe/configure/reset/boot/recover flows are
+> supported; raw feature recipes are not substitutes for typed profiles.
+
 ## Basic Bring-Up Sequence
 
 1. Power `VDD` and `VDDIO`, wait for turn-on time. Source: datasheet, p. 24.

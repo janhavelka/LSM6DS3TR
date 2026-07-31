@@ -9,7 +9,6 @@ import pathlib
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -18,7 +17,7 @@ try:
 except ImportError as error:  # pragma: no cover - depends on the HIL host
     raise SystemExit("pyserial is required: python -m pip install pyserial") from error
 
-from run_hil import HilFailure, watchdog_reset
+from run_hil import HilFailure, default_path, watchdog_reset
 
 
 RESULT_RE = re.compile(
@@ -28,14 +27,6 @@ RESULT_RE = re.compile(
     r"probes=(\d+) reconciles=(\d+) temp_min_mC=(-?\d+) "
     r"temp_max_mC=(-?\d+) accel_abs_max_ug=(\d+) gyro_abs_max_udps=(\d+)"
 )
-
-
-def default_path(name: str) -> pathlib.Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    requested = pathlib.Path(name)
-    return pathlib.Path(tempfile.gettempdir()) / (
-        f"lsm6ds3tr_{requested.stem}_{stamp}{requested.suffix}"
-    )
 
 
 def open_safe(port: str, baud: int) -> serial.Serial:
@@ -54,7 +45,7 @@ def open_safe(port: str, baud: int) -> serial.Serial:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="COM26")
+    parser.add_argument("--port", required=True)
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--expected-seconds", type=float, default=3600.0)
     parser.add_argument("--timeout-margin-seconds", type=float, default=120.0)
@@ -83,9 +74,8 @@ def main() -> int:
         "progress": [],
     }
     endpoint: serial.Serial | None = None
-    raw = raw_path.open("a", encoding="utf-8", newline="\n")
+    raw = None
     try:
-        raw.close()
         watchdog_reset(args.port, raw_path)
         raw = raw_path.open("a", encoding="utf-8", newline="\n")
         endpoint = open_safe(args.port, args.baud)
@@ -179,7 +169,7 @@ def main() -> int:
         summary["completed_utc"] = datetime.now(timezone.utc).isoformat()
         if endpoint is not None:
             endpoint.close()
-        if not raw.closed:
+        if raw is not None:
             raw.close()
         summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         print(f"raw log: {raw_path.resolve()}", flush=True)

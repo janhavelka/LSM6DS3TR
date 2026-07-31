@@ -31,7 +31,7 @@ struct I2cContext {
 
 I2cContext i2c{};
 LSM6DS3TR::LSM6DS3TR imu;
-DeviceProfile profile{};
+const DeviceProfile profile{};
 OperationToken pendingToken{};
 bool configureAfterProbe = false;
 

@@ -1,5 +1,10 @@
 # Register Map
 
+> Source confidence: vendor fact except where the ST documents contradict one
+> another; those cases link to the [ambiguity ledger](12_source_ambiguities.md).
+> Library status: only fields owned by `DeviceProfile` or an explicit bounded
+> operation are production-supported.
+
 ## Core User Registers
 
 | Address | Name | Type | Default | Notes | Source |
@@ -18,7 +23,7 @@
 | `0x15` | `CTRL6_C` | R/W | `0x00` | Accelerometer high-performance disable, user-offset weight, gyro LPF1 bandwidth. | Datasheet, p. 66 |
 | `0x16` | `CTRL7_G` | R/W | `0x00` | Gyro high-performance disable and high-pass filter. | Datasheet, p. 67 |
 | `0x17` | `CTRL8_XL` | R/W | `0x00` | Accelerometer LPF/HPF and 6D filter options. | Datasheet, pp. 67-68 |
-| `0x18` | `CTRL9_XL` | R/W | `0x00` | DEN stamping and soft-iron correction enable. | Datasheet, p. 68 |
+| `0x18` | `CTRL9_XL` | R/W | ambiguous | DEN stamping and soft-iron correction enable. Table 19 says `0x00`, while Table 75 field defaults imply `0xE0`; configure explicitly rather than relying on reset state. | Datasheet, pp. 49, 68; [ambiguity ledger](12_source_ambiguities.md) |
 | `0x19` | `CTRL10_C` | R/W | `0x00` | Embedded function enable bits, including pedometer/tilt/wrist tilt. | Datasheet, p. 69 |
 | `0x1E` | `STATUS_REG` | R | output | Temperature, gyro, and accel data-available bits. | Datasheet, p. 72 |
 | `0x20..0x2D` | output registers | R | output | Temperature, gyro, and accel output words, including `OUT_TEMP_L`, `OUTX_L_G`, and `OUTX_L_XL`. | Datasheet, pp. 73-76 |
@@ -43,18 +48,23 @@
 | Field value | Accelerometer `ODR_XL` with `XL_HM_MODE=1` | Accelerometer `ODR_XL` with `XL_HM_MODE=0` | Gyroscope `ODR_G` with `G_HM_MODE=1` | Gyroscope `ODR_G` with `G_HM_MODE=0` | Source |
 |---:|---:|---:|---:|---:|---|
 | `0000` | Power-down | Power-down | Power-down | Power-down | Datasheet, pp. 61-62 |
-| `0001` | 12.5 Hz | 12.5 Hz | 12.5 Hz | 12.5 Hz | Datasheet, pp. 61-62 |
-| `0010` | 26 Hz | 26 Hz | 26 Hz | 26 Hz | Datasheet, pp. 61-62 |
-| `0011` | 52 Hz | 52 Hz | 52 Hz | 52 Hz | Datasheet, pp. 61-62 |
-| `0100` | 104 Hz | 104 Hz | 104 Hz | 104 Hz | Datasheet, pp. 61-62 |
-| `0101` | 208 Hz | 208 Hz | 208 Hz | 208 Hz | Datasheet, pp. 61-62 |
-| `0110` | 416 Hz | 416 Hz | 416 Hz | 416 Hz | Datasheet, pp. 61-62 |
-| `0111` | 833 Hz | 833 Hz | 833 Hz | 833 Hz | Datasheet, pp. 61-62 |
-| `1000` | 1.66 kHz | 1.66 kHz | 1.66 kHz | 1.66 kHz | Datasheet, pp. 61-62 |
-| `1001` | 3.33 kHz | 3.33 kHz | 3.33 kHz | 3.33 kHz | Datasheet, pp. 61-62 |
-| `1010` | 6.66 kHz | 6.66 kHz | 6.66 kHz | 6.66 kHz | Datasheet, pp. 61-62 |
+| `0001` | 12.5 Hz | 12.5 Hz | 12.5 Hz | 12.5 Hz | Datasheet, pp. 31, 61-62 |
+| `0010` | 26 Hz | 26 Hz | 26 Hz | 26 Hz | Datasheet, pp. 31, 61-62 |
+| `0011` | 52 Hz | 52 Hz | 52 Hz | 52 Hz | Datasheet, pp. 31, 61-62 |
+| `0100` | 104 Hz normal | 104 Hz high-performance | 104 Hz normal | 104 Hz high-performance | Datasheet, pp. 31, 61-62 |
+| `0101` | 208 Hz normal | 208 Hz high-performance | 208 Hz normal | 208 Hz high-performance | Datasheet, pp. 31, 61-62 |
+| `0110` | invalid mode/ODR pairing | 416 Hz high-performance | invalid mode/ODR pairing | 416 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `0111` | invalid mode/ODR pairing | 833 Hz high-performance | invalid mode/ODR pairing | 833 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1000` | invalid mode/ODR pairing | 1.66 kHz high-performance | invalid mode/ODR pairing | 1.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1001` | invalid mode/ODR pairing | 3.33 kHz high-performance | invalid mode/ODR pairing | 3.33 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1010` | invalid mode/ODR pairing | 6.66 kHz high-performance | invalid mode/ODR pairing | 6.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
 | `1011` | 1.6 Hz low-power-only | 12.5 Hz high-performance | not available | not available | Datasheet, pp. 61-62 |
 | `11xx` | not allowed | not allowed | not available | not available | Datasheet, pp. 61-62 |
+
+`XL_HM_MODE=1` and `G_HM_MODE=1` disable high-performance operation. Low-power
+or normal operation is limited to ODRs through 208 Hz; the register encoding
+still exists at higher values, but the pairing is not an admissible operating
+mode. The library rejects it instead of relying on unspecified silicon behavior.
 
 ## Offset Registers
 

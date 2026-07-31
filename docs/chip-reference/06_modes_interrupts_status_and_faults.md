@@ -1,5 +1,9 @@
 # Modes, Interrupts, Status, And Faults
 
+> Source confidence: vendor fact. Library status: polling status and bounded
+> FIFO purge are supported; interrupt routing and FIFO acquisition are
+> unsupported production features.
+
 ## ODR And Power Modes
 
 - Accelerometer and gyroscope ODR fields select both output data rate and operating mode. `0000` powers down the selected sensor. Source: datasheet, pp. 61-62.
@@ -15,7 +19,7 @@
 | `STATUS_REG.GDA` | New gyroscope data available. | Datasheet, p. 72 |
 | `STATUS_REG.XLDA` | New accelerometer data available. | Datasheet, p. 72 |
 | `FIFO_STATUS2.WaterM` | FIFO level reached or exceeded watermark. | Datasheet, p. 80 |
-| `FIFO_STATUS2.OVER_RUN` | FIFO completely filled. | Datasheet, p. 80 |
+| `FIFO_STATUS2.OVER_RUN` | FIFO filled and data loss/overwrite behavior occurred; interpret with mode and `FIFO_EMPTY`. | Datasheet, p. 80; AN5130, pp. 79, 83 |
 | `FIFO_STATUS2.FIFO_EMPTY` | FIFO contains no data when set. | Datasheet, p. 80 |
 
 ## Source And Fault Registers

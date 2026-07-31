@@ -1,5 +1,8 @@
 # Pinout And Signals
 
+> Source confidence: vendor fact. Library status: board-level information;
+> host pin ownership remains outside the library.
+
 ## Pin Summary
 
 | Pin | Name | Mode 1 function | Mode 2 function | Source |
@@ -21,7 +24,8 @@
 
 ## Host Interface Selection
 
-- `CS = 1` selects SPI idle/I2C communication enabled; `CS = 0` selects SPI communication mode and disables I2C. Source: datasheet, p. 20.
+- `CS = 1` enables I2C communication; `CS = 0` selects SPI communication and
+  disables I2C. Source: datasheet, pp. 20, 44-45.
 - The I2C slave address is `110101x`; `SA0=0` gives `0x6A`, `SA0=1` gives `0x6B`. Source: datasheet, pp. 39-40.
 - I2C read/write address bytes are `0xD5`/`0xD4` for SA0 low and `0xD7`/`0xD6` for SA0 high. Source: datasheet, p. 40.
 

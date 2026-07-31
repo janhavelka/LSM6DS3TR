@@ -83,6 +83,16 @@ size_t findWrite(const FakeBus& bus, uint8_t reg, uint8_t requiredMask = 0,
   return bus.traceCount;
 }
 
+size_t findRead(const FakeBus& bus, uint8_t reg, size_t start = 0) {
+  for (size_t i = start; i < bus.traceCount; ++i) {
+    const Transfer& transfer = bus.trace[i];
+    if (transfer.kind == TransferKind::WRITE_READ && transfer.startReg == reg) {
+      return i;
+    }
+  }
+  return bus.traceCount;
+}
+
 void setFifoPurgePrerequisites(FakeBus& bus) {
   bus.regs[cmd::REG_CTRL3_C] =
       static_cast<uint8_t>(cmd::MASK_IF_INC | cmd::MASK_BDU);
@@ -2673,15 +2683,63 @@ void test_self_test_normalizes_low_power_offsets_and_restores_exact_profile() {
   TEST_ASSERT_TRUE(result.selfTest.accelPass);
   TEST_ASSERT_TRUE(result.selfTest.gyroPass);
 
-  const size_t accelTest = findWrite(bus, cmd::REG_CTRL1_XL, 0xFFu, 0x60u);
+  const size_t accelTest = findWrite(bus, cmd::REG_CTRL1_XL, 0xFFu, 0x38u);
   const size_t highPerformance = findWrite(bus, cmd::REG_CTRL6_C, 0xFFu, 0u);
+  const size_t gyroOff = findWrite(bus, cmd::REG_CTRL2_G, 0xFFu, 0u);
+  const size_t exactCtrl3 = findWrite(
+      bus, cmd::REG_CTRL3_C, 0xFFu,
+      static_cast<uint8_t>(cmd::MASK_BDU | cmd::MASK_IF_INC));
+  const size_t ctrl4Off = findWrite(bus, cmd::REG_CTRL4_C, 0xFFu, 0u);
+  const size_t ctrl7Off = findWrite(bus, cmd::REG_CTRL7_G, 0xFFu, 0u);
+  const size_t ctrl8Off = findWrite(bus, cmd::REG_CTRL8_XL, 0xFFu, 0u);
+  const size_t ctrl9Off = findWrite(bus, cmd::REG_CTRL9_XL, 0xFFu, 0u);
+  const size_t ctrl10Off = findWrite(bus, cmd::REG_CTRL10_C, 0xFFu, 0u);
   const size_t offsetX = findWrite(bus, cmd::REG_X_OFS_USR, 0xFFu, 0u);
   const size_t offsetY = findWrite(bus, cmd::REG_Y_OFS_USR, 0xFFu, 0u);
   const size_t offsetZ = findWrite(bus, cmd::REG_Z_OFS_USR, 0xFFu, 0u);
   TEST_ASSERT_LESS_THAN(accelTest, highPerformance);
+  TEST_ASSERT_LESS_THAN(accelTest, gyroOff);
+  TEST_ASSERT_LESS_THAN(accelTest, exactCtrl3);
+  TEST_ASSERT_LESS_THAN(accelTest, ctrl4Off);
+  TEST_ASSERT_LESS_THAN(accelTest, ctrl7Off);
+  TEST_ASSERT_LESS_THAN(accelTest, ctrl8Off);
+  TEST_ASSERT_LESS_THAN(accelTest, ctrl9Off);
+  TEST_ASSERT_LESS_THAN(accelTest, ctrl10Off);
   TEST_ASSERT_LESS_THAN(accelTest, offsetX);
   TEST_ASSERT_LESS_THAN(accelTest, offsetY);
   TEST_ASSERT_LESS_THAN(accelTest, offsetZ);
+
+  const size_t accelBaselineRead =
+      findRead(bus, cmd::REG_DATA_START_ACCEL, accelTest + 1u);
+  const size_t accelStimulus = findWrite(
+      bus, cmd::REG_CTRL5_C, 0xFFu,
+      static_cast<uint8_t>(1U << cmd::BIT_ST_XL), accelBaselineRead + 1u);
+  const size_t accelStimulusRead =
+      findRead(bus, cmd::REG_DATA_START_ACCEL, accelStimulus + 1u);
+  const size_t gyroTest =
+      findWrite(bus, cmd::REG_CTRL2_G, 0xFFu, 0x5Cu, accelStimulusRead + 1u);
+  const size_t gyroBaselineRead =
+      findRead(bus, cmd::REG_DATA_START_GYRO, gyroTest + 1u);
+  const size_t gyroStimulus = findWrite(
+      bus, cmd::REG_CTRL5_C, 0xFFu,
+      static_cast<uint8_t>(1U << cmd::BIT_ST_G), gyroBaselineRead + 1u);
+  const size_t gyroStimulusRead =
+      findRead(bus, cmd::REG_DATA_START_GYRO, gyroStimulus + 1u);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelBaselineRead);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelStimulus);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelStimulusRead);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroTest);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroBaselineRead);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroStimulus);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroStimulusRead);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[accelTest].atMs + 100u,
+                                      bus.trace[accelBaselineRead].atMs);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[accelStimulus].atMs + 100u,
+                                      bus.trace[accelStimulusRead].atMs);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[gyroTest].atMs + 150u,
+                                      bus.trace[gyroBaselineRead].atMs);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[gyroStimulus].atMs + 50u,
+                                      bus.trace[gyroStimulusRead].atMs);
 
   TEST_ASSERT_EQUAL_HEX8(0x18u, bus.regs[cmd::REG_CTRL6_C]);
   TEST_ASSERT_EQUAL_HEX8(11u, bus.regs[cmd::REG_X_OFS_USR]);
@@ -2861,7 +2919,7 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
                                       token)
                        .inProgress());
   uint8_t gyroDataReads = 0;
-  for (uint32_t polls = 0; polls < 2000u && gyroDataReads < 20u; ++polls) {
+  for (uint32_t polls = 0; polls < 2000u && gyroDataReads < 12u; ++polls) {
     const size_t traceBefore = thresholdBus.traceCount;
     (void)thresholdDriver.poll(thresholdBus.nowMs, 1);
     if (thresholdBus.traceCount > traceBefore &&
@@ -2871,7 +2929,7 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
     }
     ++thresholdBus.nowMs;
   }
-  TEST_ASSERT_EQUAL_UINT8(20u, gyroDataReads);
+  TEST_ASSERT_EQUAL_UINT8(12u, gyroDataReads);
   const uint32_t thresholdTransfers = thresholdBus.transferCalls;
   const PollResult thresholdFailure =
       thresholdDriver.poll(thresholdBus.nowMs, 0);
@@ -2891,8 +2949,8 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
 
 void test_maximum_transaction_helpers_cover_exact_boundaries() {
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(4));
-  TEST_ASSERT_EQUAL_UINT32(240u, maximumSelfTestTransactions(5));
-  TEST_ASSERT_EQUAL_UINT32(1760u, maximumSelfTestTransactions(100));
+  TEST_ASSERT_EQUAL_UINT32(182u, maximumSelfTestTransactions(5));
+  TEST_ASSERT_EQUAL_UINT32(1702u, maximumSelfTestTransactions(100));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(101));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumCalibrationTransactions(0));
   TEST_ASSERT_EQUAL_UINT32(4u, maximumCalibrationTransactions(1));

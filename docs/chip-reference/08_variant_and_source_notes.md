@@ -1,12 +1,16 @@
 # Variant And Source Notes
 
+> Source confidence: vendor fact and explicitly recorded vendor ambiguity.
+> Library status: naming and source-precedence guidance applies to every chip
+> change.
+
 ## Naming And Source Priority
 
 | Topic | Note | Source |
 |---|---|---|
 | Device name | The primary PDF is for `LSM6DS3TR-C`; compact notes keep that suffix when citing datasheet facts. | Datasheet, p. 1 |
 | Source priority | Register addresses and bit meanings in these notes come from the Rev. 3 datasheet, not general design-tip PDFs. | Inventory |
-| Application note | AN5130 is relevant for feature recipes, but the compact notes do not import its long raw examples. | Inventory |
+| Application note | AN5130 defines feature recipes, filter behavior, settling, FIFO interpretation, and self-test procedures. Long verbatim examples remain in audit-only extracts rather than this maintained paraphrase. | [Source baseline](README.md#current-official-source-baseline) |
 
 ## Revision Notes
 

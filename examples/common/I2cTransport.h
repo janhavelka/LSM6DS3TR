@@ -125,9 +125,9 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
 }
 
 /**
- * @brief Initialize Wire with default pins and frequency.
+ * @brief Initialize Wire with application-selected pins, frequency, and timeout.
  */
-inline void initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
+inline void initWire(int sda, int scl, uint32_t freq, uint16_t timeoutMs) {
   Wire.begin(sda, scl);
   Wire.setClock(freq);
   Wire.setTimeOut(timeoutMs);

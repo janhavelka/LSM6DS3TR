@@ -1,5 +1,8 @@
 # Chip Overview
 
+> Source confidence: vendor fact. Library status varies by capability; see the
+> [support matrix](13_library_support_matrix.md).
+
 LSM6DS3TR-C is a system-in-package with a 3-axis digital accelerometer and a 3-axis digital gyroscope. It supports I2C and SPI host interfaces, includes up to 4 kbyte FIFO, and has embedded low-power motion functions. Source: datasheet, pp. 15-16.
 
 ## Core Capabilities

@@ -22,6 +22,7 @@ src/                     - Implementation (.cpp)
 examples/
   01_*/
   common/                - Example-only helpers (BoardConfig.h, I2cTransport.h)
+docs/chip-reference/     - Maintained vendor-audited silicon behavior reference
 platformio.ini
 library.json
 README.md
@@ -36,6 +37,11 @@ Rules:
 - Public headers only in `include/LSM6DS3TR/`.
 - Examples demonstrate usage and may use `examples/common/BoardConfig.h`.
 - Keep the layout boring and predictable.
+- Before changing a register constant, validation rule, conversion, timing
+  bound, self-test stage, or other chip-facing behavior, read
+  `docs/chip-reference/README.md` and the applicable topic. Resolve any source
+  conflict through `12_source_ambiguities.md`; do not reinterpret the vendor
+  PDFs silently in code.
 
 Framework-boundary rules:
 - Core/public headers and `src/` must remain framework-neutral. Do not include Arduino or ESP-IDF headers there unless the exception is documented in Doxygen and this file.

@@ -22,6 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targeted campaign and a one-hour owner soak: 35,989 ordered samples, 54,461
   successful transport callbacks, 11 paired maintenance cycles, and zero
   operation, contract, or transport failures.
+- Made both HIL runners require an explicit serial port, derive the expected
+  library version from `library.json`, and share their temporary evidence-path
+  helper instead of retaining fixture-specific or duplicated defaults.
+- Consolidated current repository-only links and physical evidence in the
+  README and HIL guide, including exact tested revisions and the prior platform
+  baseline. Reclassified the implementation extraction as non-API source
+  material and removed it from the generated public API reference.
+- Removed obsolete native Arduino stubs, unused example/checker symbols,
+  no-op source-filter entries, empty timing-guard exception machinery, a dead
+  probe parameter, and the unused generic internal block-write path.
+- Promoted the vendor-audited LSM6DS3TR-C notes into a packaged, Doxygen-linked
+  `docs/chip-reference/` source of truth for engineers and AI coders, with an
+  official-source manifest, explicit ST ambiguity ledger, filter/settling and
+  FIFO semantics, exact self-test procedures, and a library support matrix.
+- Preserved the old monolithic extraction as a clearly unsafe repository-only
+  audit archive instead of allowing its stale recipes and duplicated sections
+  to compete with the maintained reference.
 
 ### Fixed
 
@@ -29,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-reset serial-disconnect error only after it reports the expected chip
   and watchdog reset, while retaining the port-reappearance proof.
 - Updated the ESP32-S2 post-upload reset spelling for esptool 5.
+- Replaced invalid email CODEOWNERS entries and their redundant path-specific
+  copies with the repository administrator's verified GitHub account.
+- Aligned the bounded accelerometer and gyroscope self-test stages with AN5130
+  Figures 37 and 36: exact control images, 52 Hz / +/-4 g and 208 Hz /
+  +/-2000 dps modes, one discarded sample per phase, and the vendor's
+  100/150/50 ms settling gates.
+- Requalified the corrected self-test and all other public operation families
+  on the ESP32-S3 fixture: 1,178 successful transport callbacks, zero transport
+  failures, both self-tests and calibrations successful, and all 40 strict
+  invalid-input checks passing.
+- Corrected translated chip guidance for I2C auto-increment, SPI framing,
+  `XL_HM_MODE`, FIFO mode values and transitions, embedded-bank defaults,
+  gyroscope filter bandwidth/current, dynamic register defaults, and
+  mode-dependent ODR encoding; vendor contradictions are now recorded rather
+  than silently resolved.
 
 ## [2.0.0] - 2026-07-22
 

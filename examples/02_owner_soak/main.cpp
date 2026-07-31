@@ -29,7 +29,7 @@ enum class Phase : uint8_t {
 };
 
 LSM6DS3TR::LSM6DS3TR device;
-DeviceProfile profile{};
+const DeviceProfile profile{};
 OperationToken pendingToken{};
 Phase phase = Phase::STARTUP_PROBE;
 uint32_t previousMillis = 0;

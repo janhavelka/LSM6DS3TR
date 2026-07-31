@@ -30,6 +30,10 @@ except ImportError as error:  # pragma: no cover - depends on the HIL host
     raise SystemExit("pyserial is required: python -m pip install pyserial") from error
 
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+EXPECTED_LIBRARY_VERSION = str(
+    json.loads((ROOT / "library.json").read_text(encoding="utf-8"))["version"]
+)
 RESULT_RE = re.compile(
     r"result token=(\d+) kind=(\w+) state=(\w+) "
     r"transactions=(\d+)/(\d+) changed=(yes|no)"
@@ -355,7 +359,11 @@ def update_ranges(ranges: dict[str, list[int]], output: str) -> None:
 def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
     print("HIL targeted: metadata and startup", flush=True)
     version = cli.exchange("version", "platform arduino=")
-    require("LSM6DS3TR 2.0.0" in version, "wrong firmware/library version")
+    expected_banner = f"LSM6DS3TR {EXPECTED_LIBRARY_VERSION}"
+    require(
+        expected_banner in version,
+        f"wrong firmware/library version: {version}",
+    )
     platform_match = PLATFORM_RE.search(version)
     require(platform_match is not None, "missing platform version metadata")
     assert platform_match is not None
@@ -579,7 +587,7 @@ def default_path(name: str) -> pathlib.Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="COM26")
+    parser.add_argument("--port", required=True)
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--watchdog-reset", action="store_true")
     parser.add_argument("--raw-log", type=pathlib.Path)

@@ -597,7 +597,7 @@ private:
 
   Status _start(JobKind kind, const OperationTiming& timing, OperationToken& token);
   PollResult _pollOne(uint64_t nowMs);
-  Status _stepProbe(uint64_t nowMs, bool recovery);
+  Status _stepProbe(uint64_t nowMs);
   Status _stepConfigure(uint64_t nowMs, bool reconcileOnly);
   Status _stepSample(uint64_t nowMs);
   Status _stepResetBoot(uint64_t nowMs, bool boot, bool recovery);
@@ -612,8 +612,6 @@ private:
   void _prepareManagedImage(const DeviceProfile& profile);
   void _recordMismatch(uint8_t reg, uint8_t expected, uint8_t observed);
   Status _read(uint8_t reg, uint8_t* data, size_t length, uint64_t nowMs);
-  Status _write(uint8_t reg, const uint8_t* data, size_t length, uint64_t nowMs,
-                bool mayChangeConfiguration);
   Status _writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
                     bool mayChangeConfiguration = true);
   Status _checkStart(const OperationTiming& timing) const;

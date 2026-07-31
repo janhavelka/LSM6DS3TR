@@ -18,7 +18,7 @@ static constexpr uint8_t POLL_TRANSACTION_BUDGET = 1;
 static constexpr uint8_t INPUT_CHARS_PER_LOOP = 16;
 
 LSM6DS3TR::LSM6DS3TR device;
-DeviceProfile profile{};
+const DeviceProfile profile{};
 OperationToken pendingToken{};
 bool configureAfterProbe = false;
 char input[INPUT_CAPACITY]{};
