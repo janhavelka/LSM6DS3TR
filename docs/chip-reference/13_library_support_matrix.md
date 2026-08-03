@@ -12,10 +12,10 @@
 | Ready-checked accel, gyro, temperature, and combined snapshots | supported | `SampleRequest`; temperature-containing requests require TDA |
 | Conversion to g, dps, and degrees Celsius | supported | allocation-free conversion helpers with profile provenance |
 | Software reset, boot, recovery, power-down | supported | bounded tokened operations, absolute deadline, profile restoration/readback |
-| Built-in accelerometer and gyro self-test | supported | AN5130 procedure in `startSelfTest`, bounded status checks, exact restore |
+| Built-in accelerometer and gyro self-test | supported | AN5130 procedure in `startSelfTest`, bounded status checks, explicit restoration evidence |
 | Bias estimation/calibration | supported library policy | bounded `startCalibration`; results are explicit and not auto-applied |
 | User offset registers | supported | typed profile, range/weight validation, write/readback |
-| FIFO status inspection and bounded destructive purge | supported maintenance operation | `startFifoPurge`; no decoding/acquisition claim |
+| FIFO status evidence within a bounded destructive purge | supported maintenance operation | `startFifoPurge`; no passive typed inspection or decoding/acquisition claim |
 | Raw main-bank register/block reads | diagnostic-only | one transaction, no production cache population |
 | Safety-filtered raw register write | diagnostic-only | one transaction, invalidates configuration provenance |
 | SPI host transport | unsupported | core binding is I2C-only; no SPI callback contract exists |

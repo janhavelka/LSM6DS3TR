@@ -19,6 +19,10 @@ pio run -e esp32s3dev -t upload --upload-port COMx
 python tools/run_hil.py --port COMx --watchdog-reset
 ```
 
+On Windows, invoke the upload as `.\scripts\pio.cmd run ...`; the wrapper
+honors `PLATFORMIO_CORE_DIR` before the default user package store. The bare
+`pio` spelling above is for POSIX shells and CI.
+
 On Windows, run the upload in a UTF-8 Python console (for example, set
 `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` in the invoking shell). This keeps
 esptool 5 progress and reset output from being decoded through a legacy console
@@ -48,6 +52,8 @@ pio run -e esp32s3hil -t upload --upload-port COMx
 python tools/run_owner_soak.py --port COMx --expected-seconds 3600
 ```
 
+On Windows, invoke the upload through `.\scripts\pio.cmd` as described above.
+
 The firmware uses a fixed-memory owner loop and grants one transport callback
 per `poll()`. At 100 ms intervals it cycles all eight sample quantity/readiness
 combinations and checks exact token/kind correlation, terminal success,
@@ -66,12 +72,13 @@ this with a monitor that momentarily asserts the boot straps.
 
 ## Retained ESP32-S3 Evidence
 
-Both campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
+All retained campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
 address `0x6A`, WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a
 50 ms callback timeout.
 
 | Campaign | Tested source | pioarduino | Arduino-ESP32 | Bundled ESP-IDF | PlatformIO Core |
 | --- | --- | --- | --- | --- | --- |
+| 2026-08-03 v2.0.1 release candidate | [`v2.0.1`](https://github.com/janhavelka/LSM6DS3TR/tree/v2.0.1) | 55.03.311 | 3.3.11 | 5.5.5 | 6.1.19 |
 | 2026-07-31 platform upgrade | [`94126c8`](https://github.com/janhavelka/LSM6DS3TR/commit/94126c8f6247b68d96e85044b5b7e9fd5493938f) | 55.03.311 | 3.3.11 | 5.5.5 | 6.1.19 |
 | 2026-07-22 version 2.0.0 baseline | [`v2.0.0`](https://github.com/janhavelka/LSM6DS3TR/tree/v2.0.0) | 54.03.20 | 3.2.0 | 5.4.1 | 6.1.18 |
 
@@ -89,15 +96,15 @@ and both configured memory sizes before functional testing began.
   self-test passed, both 16-sample calibrations succeeded, and transport
   counters moved from 70 to 1,178 successes with zero failures.
 - Post-datasheet-re-audit targeted check: passed from 15:01:57 to 15:02:47 UTC
-  on the same USB identity after the self-test cadence/shutdown,
+  on 2026-07-31 on the same USB identity after the self-test cadence/shutdown,
   reset/boot/recovery prerequisite, and FIFO-empty-proof corrections. The
   campaign covered the complete lifecycle and maintenance surface, both
   self-tests and 16-sample calibrations succeeded, all 40 invalid-input checks
   passed, and transport counters moved from 70 to 825 successes with zero
   failures. The requested focused check intentionally did not repeat the
   one-hour soak.
-- Final post-hardening targeted check: passed from 06:02:36 to 06:03:26 UTC on
-  2026-08-01 after flashing the exact final firmware to the same fixture. This
+- Post-hardening targeted check: passed from 06:02:36 to 06:03:26 UTC on
+  2026-08-01 after flashing the then-final driver logic to the same fixture. This
   rechecked reset, boot, recovery, self-test, calibration, sampling,
   cancellation, diagnostics, and the strict invalid-input matrix after adding
   active-stimulus failure cleanup and bidirectional FIFO count/`FIFO_EMPTY`
@@ -107,7 +114,15 @@ and both configured memory sizes before functional testing began.
   self-test-failure branches remain native fault-injection checks because the
   fixture cannot safely force those internal status/transport faults. No soak
   was run.
-- One-hour owner soak: passed from 09:52:52 to 10:52:54 UTC. At the exact
+- v2.0.1 release-candidate targeted check: passed from 12:31:55 to 12:32:45 UTC
+  on 2026-08-03 after the release audit, malformed-provenance rejection,
+  calibration-helper cleanup, and version synchronization. Runtime metadata
+  reported library 2.0.1, Arduino-ESP32 3.3.11, ESP-IDF 5.5.5, 4 MB flash, and
+  2 MB PSRAM. Every public operation family, both self-tests, both 16-sample
+  calibrations, and all 40 invalid-input checks passed; transport counters
+  moved from 70 to 825 successes with zero failures. No soak was run.
+- One-hour owner soak on `94126c8`, before the later datasheet-driven driver
+  corrections: passed from 09:52:52 to 10:52:54 UTC. At the exact
   3,600,000 ms terminal record the device reported 35,989 samples with matching
   sequence, configuration generation 1, 54,461 successful transport callbacks,
   11 paired probe/reconcile maintenance cycles, and zero operation, contract,

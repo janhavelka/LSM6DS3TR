@@ -46,14 +46,14 @@ Add this repository at an exact release tag or commit:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.0
+  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.1
 ```
 
-The repository's own Arduino target builds pin pioarduino
-`platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11 and ESP-IDF 5.5.5)
-and PlatformIO Core 6.1.19. Consuming applications retain control of their
-own platform version. Native ESP-IDF component CI remains an independent
-ESP-IDF 5.4.4 compatibility target.
+The repository's `platformio.ini` pins pioarduino `platform-espressif32`
+55.03.311 (Arduino-ESP32 3.3.11 and ESP-IDF 5.5.5), while CI pins the required
+PlatformIO Core 6.1.19. Consuming applications retain control of their own
+platform version. Native ESP-IDF component CI remains an independent ESP-IDF
+5.4.4 compatibility target.
 
 The ESP32-S3 example and HIL environments describe the validated fixture's
 4 MB embedded flash and 2 MB QSPI PSRAM. Override those board settings when
@@ -109,8 +109,8 @@ if (imu.operationActive()) {
   const auto progress = imu.poll(applicationUptimeMs(), 1);
   // progress.transactionsUsed is 0 or 1 with this budget.
   // progress.transactions/progress.transactionLimit are cumulative.
-  // During self-test cleanup, ACTIVE plus a failed progress.status exposes
-  // the primary error before a later poll performs restoration I2C.
+  // After bounded self-test cleanup, ACTIVE plus a failed progress.status
+  // exposes the primary error before a later poll performs restoration I2C.
   // progress.waiting means time or sensor data must advance; do not busy-spin.
 }
 
@@ -350,7 +350,8 @@ collected sample receives at most three STATUS checks and one data read, with a
 20 ms accelerometer or 5 ms gyroscope zero-I2C gate after a read and between
 readiness checks. Three failed readiness checks produce `DATA_NOT_READY`. If
 stimulus may be active, any primary failure first attempts the same bounded
-sensor-power-down then self-test-disable sequence used by successful sampling.
+sensor-power-down then self-test-disable sequence used by successful self-test
+completion.
 The owner-visible primary-failure boundary occurs after that cleanup and before
 full-profile restoration. The callback ceiling is
 `16 * (samples + 1) + 87`, including one extra failure-cleanup callback.
@@ -465,6 +466,11 @@ pio run -e esp32s2dev
 pio pkg pack
 python tools/check_package_contract.py
 ```
+
+On Windows, invoke each `pio` command through `.\scripts\pio.cmd`; the wrapper
+honors `PLATFORMIO_CORE_DIR` and otherwise uses the current user's default
+PlatformIO installation. This keeps package and compiler selection consistent
+with the HIL tooling.
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile

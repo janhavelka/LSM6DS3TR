@@ -84,6 +84,7 @@ def main() -> int:
     expected = expected_files()
     observed: set[str] = set()
     markdown: dict[str, str] = {}
+    content_mismatches: list[str] = []
     with tarfile.open(archive, mode="r:gz") as package:
         for member in package.getmembers():
             name = member.name.removeprefix("./")
@@ -97,11 +98,16 @@ def main() -> int:
             if name in observed:
                 return fail(f"duplicate archive member: {name}")
             observed.add(name)
+            source = package.extractfile(member)
+            if source is None:
+                return fail(f"cannot read archive member: {name}")
+            packaged_bytes = source.read()
+            if name in expected:
+                repository_path = ROOT.joinpath(*path.parts)
+                if packaged_bytes != repository_path.read_bytes():
+                    content_mismatches.append(name)
             if name.endswith(".md"):
-                source = package.extractfile(member)
-                if source is None:
-                    return fail(f"cannot read Markdown member: {name}")
-                markdown[name] = source.read().decode("utf-8", errors="replace")
+                markdown[name] = packaged_bytes.decode("utf-8", errors="replace")
 
     missing = sorted(expected - observed)
     unexpected = sorted(observed - expected)
@@ -111,6 +117,12 @@ def main() -> int:
             print(f"  missing: {name}")
         for name in unexpected:
             print(f"  unexpected: {name}")
+        return 1
+
+    if content_mismatches:
+        print("Package contract FAILED: archive contains stale file content")
+        for name in content_mismatches:
+            print(f"  changed: {name}")
         return 1
 
     patterns = (

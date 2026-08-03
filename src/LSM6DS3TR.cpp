@@ -8,6 +8,11 @@ namespace LSM6DS3TR {
 namespace {
 
 constexpr uint8_t SELF_TEST_DISCARD_SAMPLES = 1;
+constexpr uint16_t SELF_TEST_MIN_SAMPLES = 5;
+constexpr uint16_t SELF_TEST_MAX_SAMPLES = 100;
+constexpr uint16_t CALIBRATION_MIN_SAMPLES = 1;
+constexpr uint16_t CALIBRATION_MAX_SAMPLES = 1000;
+constexpr uint16_t FIFO_CAPACITY_WORDS = 2048;
 constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
@@ -426,7 +431,7 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
 }
 
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
-  if (samples < 5U || samples > 100U) return 0U;
+  if (samples < SELF_TEST_MIN_SAMPLES || samples > SELF_TEST_MAX_SAMPLES) return 0U;
   // Each sample reserves three ready checks and one burst in four phases.
   // Fixed work reserves the 20 normal test writes, one failure-cleanup write,
   // and the 66-callback profile restore.
@@ -435,12 +440,12 @@ uint32_t maximumSelfTestTransactions(uint16_t samples) {
 }
 
 uint32_t maximumCalibrationTransactions(uint16_t samples) {
-  if (samples == 0U || samples > 1000U) return 0U;
+  if (samples < CALIBRATION_MIN_SAMPLES || samples > CALIBRATION_MAX_SAMPLES) return 0U;
   return 4U * static_cast<uint32_t>(samples);
 }
 
 uint32_t maximumFifoPurgeTransactions(uint16_t maxWords) {
-  if (maxWords == 0U || maxWords > 2048U) return 0U;
+  if (maxWords == 0U || maxWords > FIFO_CAPACITY_WORDS) return 0U;
   return static_cast<uint32_t>(maxWords) + 5U;
 }
 
@@ -498,9 +503,14 @@ int32_t decodeTemperatureMilliC(int16_t raw) {
 }
 
 Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
+  const bool qualityConsistent =
+      (raw.quality != SampleQuality::READY_CHECKED ||
+       raw.freshMask == raw.validMask) &&
+      (raw.quality != SampleQuality::DIRECT_UNVERIFIED ||
+       raw.freshMask == 0U);
   if (raw.validMask == 0U || (raw.validMask & ~SAMPLE_ALL) != 0U ||
       (raw.freshMask & ~raw.validMask) != 0U ||
-      !validSampleQuality(raw.quality)) {
+      !validSampleQuality(raw.quality) || !qualityConsistent) {
     return Status::Error(Err::INVALID_PARAM, "Invalid raw sample provenance");
   }
   ConvertedSample candidate{};
@@ -528,7 +538,8 @@ Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
 }
 
 Status validateCalibrationRequest(const CalibrationRequest& request) {
-  if (request.samples == 0U || request.samples > 1000U) {
+  if (request.samples < CALIBRATION_MIN_SAMPLES ||
+      request.samples > CALIBRATION_MAX_SAMPLES) {
     return Status::Error(Err::INVALID_PARAM, "Calibration samples must be 1..1000");
   }
   if (request.kind != CalibrationKind::ACCELEROMETER_BIAS &&
@@ -814,7 +825,8 @@ Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
   token = {};
   const Status admission = _checkStart(timing);
   if (!admission.ok()) return admission;
-  if (request.samples < 5U || request.samples > MAX_SELF_TEST_SAMPLES) {
+  if (request.samples < SELF_TEST_MIN_SAMPLES ||
+      request.samples > SELF_TEST_MAX_SAMPLES) {
     return Status::Error(Err::INVALID_PARAM, "Self-test samples must be 5..100");
   }
   const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
@@ -872,7 +884,7 @@ Status LSM6DS3TR::startFifoPurge(const FifoPurgeRequest& request,
   token = {};
   const Status admission = _checkStart(timing);
   if (!admission.ok()) return admission;
-  if (request.maxWords == 0U || request.maxWords > 2048U) {
+  if (request.maxWords == 0U || request.maxWords > FIFO_CAPACITY_WORDS) {
     return Status::Error(Err::INVALID_PARAM, "FIFO purge maximum must be 1..2048");
   }
   const Status status = _start(JobKind::FIFO_PURGE, timing, token);
@@ -1799,10 +1811,11 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
   result.kind = _calibrationRequest.kind;
   result.samples = _samplesDone;
   if (accel) {
-    const int32_t sensitivity =
-        _verifiedProfile.accelFullScale == AccelFs::G_2 ? 61 :
-        _verifiedProfile.accelFullScale == AccelFs::G_4 ? 122 :
-        _verifiedProfile.accelFullScale == AccelFs::G_8 ? 244 : 488;
+    int32_t sensitivity = 0;
+    const Status sensitivityStatus =
+        accelSensitivityMicroGPerLsb(_verifiedProfile.accelFullScale,
+                                     sensitivity);
+    if (!sensitivityStatus.ok()) return sensitivityStatus;
     const float scale = static_cast<float>(sensitivity) / 1000000.0f;
     const Axes measured = rawAxesToFloat(mean, scale);
     result.bias = subtractAxes(measured, _calibrationRequest.expectedAccelerationG);
@@ -1850,7 +1863,7 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
               (static_cast<uint16_t>(data[3] & 0x03U) << 8U);
     overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0U;
     empty = (data[1] & cmd::MASK_FIFO_EMPTY) != 0U;
-    if (overrun && unread == 0U) unread = 2048U;
+    if (overrun && unread == 0U) unread = FIFO_CAPACITY_WORDS;
   };
 
   if (_step == 0U) {

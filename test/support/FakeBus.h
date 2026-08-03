@@ -102,9 +102,9 @@ struct FakeBus {
     readCalls = 0;
     writeCalls = 0;
     traceCount = 0;
-    std::memset(trace, 0, sizeof(trace));
+    for (Transfer& transfer : trace) transfer = {};
     faultCount = 0;
-    std::memset(faults, 0, sizeof(faults));
+    for (TransferFault& fault : faults) fault = {};
   }
 
   void addFault(uint32_t call, const Status& status, bool applyEffect = false) {

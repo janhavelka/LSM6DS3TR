@@ -6,9 +6,10 @@ Before editing, fetch remotes and fast-forward the newest intended working
 branch to its upstream. Stop and report dirty, divergent, or conflicted state;
 never overwrite work to force a sync.
 
-On Windows, use `.\scripts\pio.cmd <arguments>`; it selects the current user's
-VS Code-managed installation. Never install another PlatformIO Core; if the
-wrapper cannot find it, stop and report the missing installation.
+On Windows, use `.\scripts\pio.cmd <arguments>`; it honors
+`PLATFORMIO_CORE_DIR` and otherwise selects the current user's default
+PlatformIO installation. Never install another PlatformIO Core automatically;
+if the wrapper cannot find the selected installation, stop and report it.
 
 ## Role and Target
 You are a professional embedded software engineer building a production-grade LSM6DS3TR-C IMU library.

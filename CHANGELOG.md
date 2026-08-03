@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-03
+
+### Added
+
+- Promoted the vendor-audited LSM6DS3TR-C notes into a packaged,
+  Doxygen-linked `docs/chip-reference/` source of truth for engineers and AI
+  coders, with an official-source manifest, explicit ST ambiguity ledger,
+  filter/settling and FIFO semantics, exact self-test procedures, and a
+  library support matrix.
+
 ### Changed
 
 - Updated the pinned pioarduino platform from `54.03.20` to `55.03.311`
@@ -18,10 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the physical HIL runner for esptool 5 command names, runtime platform
   and memory verification, strict self-test/calibration success, and zero final
   transport failures.
-- Revalidated the upgraded stack on the ESP32-S3 fixture with the complete
-  targeted campaign and a one-hour owner soak: 35,989 ordered samples, 54,461
-  successful transport callbacks, 11 paired maintenance cycles, and zero
-  operation, contract, or transport failures.
+- Revalidated the upgraded stack at commit `94126c8` on the ESP32-S3 fixture
+  with the complete targeted campaign and a one-hour owner soak: 35,989 ordered
+  samples, 54,461 successful transport callbacks, 11 paired maintenance
+  cycles, and zero operation, contract, or transport failures. Later driver
+  corrections received focused campaigns rather than another soak.
 - Made both HIL runners require an explicit serial port, derive the expected
   library version from `library.json`, and share their temporary evidence-path
   helper instead of retaining fixture-specific or duplicated defaults.
@@ -29,13 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   README and HIL guide, including exact tested revisions and the prior platform
   baseline. Reclassified the implementation extraction as non-API source
   material and removed it from the generated public API reference.
-- Removed obsolete native Arduino stubs, unused example/checker symbols,
-  no-op source-filter entries, empty timing-guard exception machinery, a dead
-  probe parameter, and the unused generic internal block-write path.
-- Promoted the vendor-audited LSM6DS3TR-C notes into a packaged, Doxygen-linked
-  `docs/chip-reference/` source of truth for engineers and AI coders, with an
-  official-source manifest, explicit ST ambiguity ledger, filter/settling and
-  FIFO semantics, exact self-test procedures, and a library support matrix.
 - Preserved the old monolithic extraction as a clearly unsafe repository-only
   audit archive instead of allowing its stale recipes and duplicated sections
   to compete with the maintained reference.
@@ -44,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No newer LSM6DS3TR-C silicon-document revision or programming migration was
   found; expanded the maintained reference with the newly checked electrical,
   protocol, filter, FIFO, sensor-hub, embedded-engine, and ambiguity details.
+- Made the Windows PlatformIO wrapper honor `PLATFORMIO_CORE_DIR` before the
+  default user package store, matching the HIL tooling and allowing a
+  short-path Core to avoid incomplete framework/toolchain extraction.
+- Enabled the native build's warning set to match embedded builds, centralized
+  internal self-test/calibration/FIFO bounds, and reused the canonical
+  accelerometer sensitivity helper in calibration.
+- Hardened package validation to compare every archived file byte-for-byte
+  with the release tree, preventing a stale same-name archive from passing.
 
 ### Fixed
 
@@ -82,15 +94,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the maintained high-ODR HM-mode table: 416 Hz through 6.66 kHz are
   high-performance regardless of the HM bit; the public API rejects an
   impossible low-power/normal request rather than an invalid register code.
-- Re-ran the targeted physical campaign after these corrections on the same
-  ESP32-S3/LSM6DS3TR-C fixture: all lifecycle and changed maintenance paths,
-  both self-tests/calibrations, 40 invalid-input cases, and 825 successful
-  transport callbacks passed with zero transport failures. Per request, no
-  additional one-hour soak was run.
-- Repeated that targeted campaign on the exact final firmware after the
-  failure-path hardening; it again completed with 825 successful callbacks,
-  zero transport failures, successful self-tests/calibrations, and all 40
-  invalid-input checks passing. No soak was run.
+- Made `convertSample()` reject contradictory ready-checked/direct freshness
+  provenance atomically instead of accepting evidence the driver itself never
+  emits.
+- Re-ran the targeted physical campaign after the datasheet corrections,
+  failure-path hardening, and final `2.0.1` release audit. The release-candidate
+  run covered every public operation family, both self-tests/calibrations, and
+  all 40 invalid inputs with 825 successful callbacks and zero transport
+  failures. Per request, no additional one-hour soak was run.
+
+### Removed
+
+- Removed obsolete native Arduino stubs, unused example/checker symbols,
+  no-op source-filter entries, empty timing-guard exception machinery, a dead
+  probe parameter, and the unused generic internal block-write path.
+- Removed the tracked post-tag `LSM6DS3TR-2.0.0.tar.gz` build artifact and
+  redundant native PlatformIO entries; generated release archives are now
+  ignored.
 
 ## [2.0.0] - 2026-07-22
 
@@ -386,7 +406,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.0.0...v1.1.0

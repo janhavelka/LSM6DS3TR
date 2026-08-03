@@ -2,7 +2,8 @@
 
 > Source confidence: self-test is a vendor-recommended procedure; calibration
 > is explicit library/application policy. Library status: both are supported as
-> bounded owner-scheduled operations with exact profile restoration.
+> bounded owner-scheduled operations with full-profile restoration/readback and
+> explicit restoration evidence.
 
 ## Accelerometer Self-Test — AN5130 Figure 37
 

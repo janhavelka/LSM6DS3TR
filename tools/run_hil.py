@@ -541,7 +541,8 @@ def esptool_command() -> list[str]:
         if python.is_file() and script.is_file():
             return [str(python), str(script)]
     raise HilFailure(
-        "PlatformIO esptool was not found; omit --watchdog-reset or install PlatformIO"
+        "PlatformIO esptool was not found; check PLATFORMIO_CORE_DIR or omit "
+        "--watchdog-reset"
     )
 
 

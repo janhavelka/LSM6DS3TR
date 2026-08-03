@@ -1,10 +1,16 @@
 @echo off
 setlocal
 
-set "PIO_EXE=%USERPROFILE%\.platformio\penv\Scripts\pio.exe"
+if defined PLATFORMIO_CORE_DIR (
+    set "PIO_CORE=%PLATFORMIO_CORE_DIR%"
+) else (
+    set "PIO_CORE=%USERPROFILE%\.platformio"
+)
+
+set "PIO_EXE=%PIO_CORE%\penv\Scripts\pio.exe"
 
 if not exist "%PIO_EXE%" (
-    >&2 echo VS Code-managed PlatformIO was not found at: "%PIO_EXE%". Stop and report the missing installation; do not install another PlatformIO Core.
+    >&2 echo PlatformIO was not found at: "%PIO_EXE%". Check PLATFORMIO_CORE_DIR or the current user's PlatformIO installation; do not install another Core automatically.
     exit /b 1
 )
 

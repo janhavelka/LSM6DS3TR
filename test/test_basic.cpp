@@ -269,7 +269,8 @@ void test_convert_sample_is_self_contained_and_preserves_provenance() {
   raw.gyro = RawAxes{100, -100, 1};
   raw.temperatureRaw = 256;
   raw.validMask = SAMPLE_ALL;
-  raw.freshMask = SAMPLE_ACCELERATION;
+  raw.freshMask = SAMPLE_ALL;
+  raw.quality = SampleQuality::READY_CHECKED;
   raw.sequence = 77;
   raw.configGeneration = 42;
   raw.readUptimeMs = UINT64_C(0x100000001);
@@ -2672,6 +2673,23 @@ void test_conversion_preserves_quality_and_rejects_malformed_masks_atomically() 
   raw.quality = static_cast<SampleQuality>(0x7Fu);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
                           static_cast<uint8_t>(convertSample(raw, sentinel).code));
+
+  raw.quality = SampleQuality::READY_CHECKED;
+  raw.freshMask = 0u;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(convertSample(raw, sentinel).code));
+
+  raw.quality = SampleQuality::DIRECT_UNVERIFIED;
+  raw.freshMask = SAMPLE_ACCELERATION;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(convertSample(raw, sentinel).code));
+
+  raw.freshMask = 0u;
+  ConvertedSample direct;
+  TEST_ASSERT_TRUE(convertSample(raw, direct).ok());
+  TEST_ASSERT_EQUAL_UINT8(0u, direct.freshMask);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SampleQuality::DIRECT_UNVERIFIED),
+                          static_cast<uint8_t>(direct.quality));
   TEST_ASSERT_EQUAL_UINT8(original.validMask, sentinel.validMask);
   TEST_ASSERT_EQUAL_UINT8(original.freshMask, sentinel.freshMask);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(original.quality),

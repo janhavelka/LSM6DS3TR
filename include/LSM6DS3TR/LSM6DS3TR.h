@@ -125,10 +125,10 @@ static constexpr uint8_t SAMPLE_ALL =
 
 /// @brief Evidence level attached to a raw or converted sample.
 enum class SampleQuality : uint8_t {
-  READY_CHECKED,      ///< Requested fields had fresh data-ready evidence.
-  DIRECT_UNVERIFIED,  ///< Direct burst without freshness evidence.
-  CONFIG_UNKNOWN,     ///< Sample configuration provenance is unavailable.
-  SETTLING            ///< Quality label for a verified but unsettled profile.
+  READY_CHECKED,      ///< Every valid field has fresh data-ready evidence.
+  DIRECT_UNVERIFIED,  ///< Direct burst; freshMask must be zero.
+  CONFIG_UNKNOWN,     ///< Configuration unknown; freshness remains field-specific.
+  SETTLING            ///< Verified profile unsettled; freshness remains field-specific.
 };
 
 /// @brief Quantity and readiness policy for one atomic sample operation.
@@ -145,7 +145,7 @@ struct RawSampleResult {
   RawAxes gyro = {};  ///< Raw angular rate; meaningful when its valid bit is set.
   int16_t temperatureRaw = 0;  ///< Raw temperature count when valid.
   uint8_t validMask = 0;  ///< Quantity fields that contain meaningful data.
-  uint8_t freshMask = 0;  ///< Valid fields proven ready for this request.
+  uint8_t freshMask = 0;  ///< Ready evidence; all valid bits or zero for direct reads.
   SampleQuality quality = SampleQuality::DIRECT_UNVERIFIED;  ///< Acquisition evidence.
   uint32_t configGeneration = 0;  ///< Verified profile generation used for the read.
   AccelFs accelFullScale = AccelFs::G_2;  ///< Immutable acceleration scale provenance.
@@ -211,7 +211,8 @@ enum class CalibrationKind : uint8_t {
 /// expectedAccelerationG makes mounting/orientation policy explicit; for
 /// example, a Z-up fixture supplies {0, 0, 1}. Accelerometer calibration
 /// requires a finite vector with magnitude 0.8..1.2 g. The driver never
-/// assumes Z-up. Gyroscope calibration ignores the vector.
+/// assumes Z-up. Gyroscope measurement ignores the vector, but common request
+/// validation still requires every vector component to be finite and bounded.
 struct CalibrationRequest {
   CalibrationKind kind = CalibrationKind::GYROSCOPE_BIAS;  ///< Sensor to calibrate.
   uint16_t samples = 32;  ///< 1..1000.
@@ -381,6 +382,9 @@ int32_t decodeTemperatureMilliC(int16_t raw);
 /// @param raw Atomic raw sample and interpretation provenance.
 /// @param out Receives the converted sample atomically on success.
 /// @return OK or INVALID_PARAM for inconsistent masks, quality, or scale.
+/// @note READY_CHECKED requires freshMask == validMask; DIRECT_UNVERIFIED
+/// requires freshMask == 0. CONFIG_UNKNOWN and SETTLING retain any per-field
+/// freshness subset. Failure leaves @p out unchanged.
 Status convertSample(const RawSampleResult& raw, ConvertedSample& out);
 
 /// @brief Validate calibration bounds and fixture semantics without I2C.
@@ -489,8 +493,9 @@ public:
   /// @note Success leaves configuration UNCONFIGURED; no other register is claimed.
   Status startPowerDown(const OperationTiming& timing, OperationToken& token);
 
-  /// @brief Start the bounded built-in self-test and exact profile restoration.
+  /// @brief Start bounded built-in self-test and full-profile restoration/readback.
   /// @note Keep the device stationary for the complete operation.
+  /// @note SelfTestResult reports the primary and restoration outcomes separately.
   /// @param request Average count for each test phase.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
@@ -593,8 +598,6 @@ public:
 
 private:
   static constexpr uint8_t MANAGED_REGISTER_COUNT = 33;
-  static constexpr uint16_t MAX_SELF_TEST_SAMPLES = 100;
-  static constexpr uint16_t MAX_CALIBRATION_SAMPLES = 1000;
 
   Status _start(JobKind kind, const OperationTiming& timing, OperationToken& token);
   PollResult _pollOne(uint64_t nowMs);
