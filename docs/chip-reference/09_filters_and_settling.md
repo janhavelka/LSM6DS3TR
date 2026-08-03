@@ -29,6 +29,26 @@ while the gate is active. Ready bits are checked only after the gate.
   event threshold sees the same signal as a host burst read. Source: datasheet
   filter block, pp. 32-35.
 
+### Accelerometer Composite Filter Table
+
+For the low-pass output path, AN5130 Table 9 gives the following LPF2 choices.
+The counts are worst-case samples discarded for 99% settling, independent of
+the separate mode-transition additions below.
+
+| `LPF2_XL_EN` / `HPCF_XL` | Bandwidth | Samples discarded |
+|---|---:|---:|
+| LPF2 off, LPF1 output ODR/2 or ODR/4 | ODR/2 or ODR/4 | 14 |
+| LPF2 on, `00` | ODR/50 | 40 |
+| LPF2 on, `01` low noise | ODR/100 | 80 |
+| LPF2 on, `10` low latency | ODR/9 | 15 |
+| LPF2 on, `11` | ODR/400 | 320 |
+
+With the high-pass path selected, `HPCF_XL=00` selects the slope path at
+ODR/4 with 14 samples, while `01`/`10`/`11` select high-pass cutoffs ODR/100,
+ODR/9, and ODR/400 with 80/15/320 samples. Reference mode additionally
+requires `HP_REF_MODE=1`, high-pass path selected, and `HPCF_XL!=00`; discard
+its first output sample. Source: AN5130 Table 9, p. 14.
+
 ### Accelerometer Samples To Discard
 
 This is AN5130 Table 13 for the combinations the library can reason about.
@@ -62,6 +82,10 @@ pp. 15-18.
 - `CTRL4_C.LPF1_SEL_G` enables LPF1; `CTRL6_C.FTYPE[1:0]` selects bandwidth.
 - At 416 Hz ODR with LPF1 enabled, AN5130 Table 11 gives overall bandwidths
   138, 131, 121, and 138 Hz for FTYPE `00`, `01`, `10`, and `11` respectively.
+
+`DeviceProfile` owns only `FTYPE=00`; consequently its LPF1 settling counts are
+the first FTYPE column in the table below. Other FTYPE values are silicon facts
+for diagnostics/future typed profiles, not current production configuration.
 
 The production profile rejects gyro HPF because AN5130's source-backed
 turn-on/discard tables explicitly exclude that filter. A raw diagnostic write

@@ -14,7 +14,7 @@ LSM6DS3TR-C is a system-in-package with a 3-axis digital accelerometer and a 3-a
 | Gyroscope full-scale | +/-125, +/-250, +/-500, +/-1000, +/-2000 dps. | Datasheet, pp. 21-22 |
 | Accelerometer ODR | 1.6 Hz low-power-only, then 12.5, 26, 52, 104, 208, 416, 833, 1666, 3332, 6664 Hz. | Datasheet, p. 22 |
 | Gyroscope ODR | 12.5, 26, 52, 104, 208, 416, 833, 1666, 3332, 6664 Hz. | Datasheet, p. 22 |
-| Temperature sensor | 16-bit output, 52 Hz refresh, 256 LSB/degC, typ. 0 LSB at 25 degC. | Datasheet, p. 25 |
+| Temperature sensor | 16-bit output, at most 52 Hz with mode-dependent cadence, 256 LSB/degC, typ. 0 LSB at 25 degC. The 1.6 Hz accelerometer case is a documented ambiguity. | Datasheet, p. 25; [ambiguity ledger](12_source_ambiguities.md) |
 | FIFO | Up to 4 kbyte with dynamic allocation of accelerometer and gyroscope data. | Datasheet, pp. 15-16 |
 | Embedded functions | Free-fall, wakeup, 6D orientation, tap/double tap, activity/inactivity, pedometer, tilt, significant motion, sensor hub. | Datasheet, p. 16 |
 

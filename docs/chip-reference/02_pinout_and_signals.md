@@ -33,4 +33,6 @@
 
 - Use 100 nF ceramic decoupling capacitors near `VDD` and `VDDIO`. Source: datasheet, pp. 20, 45-46.
 - `SCL` and `SDA` inputs have no internal pull-up. Source: datasheet, p. 48.
-- Internal pull-ups on NC pins 10 and 11 are enabled by default; the datasheet gives a procedure to disable them. Source: datasheet, pp. 47-48.
+- `SDO/SA0` has no pull-up in the default two-interface configuration; its pull-up is enabled in 3-wire SPI. `SDx`/`SCx` auxiliary-bus pull-ups are controlled by `MASTER_CONFIG.PULL_UP_EN`. Source: datasheet, pp. 47-48, 69.
+- `INT1` and `INT2` are forced low by default. `CS` has an internal pull-up enabled by default; setting `CTRL4_C.I2C_disable=1` disables that pull-up together with the I2C interface. Source: datasheet, pp. 47-48, 64.
+- Internal 30..50 kohm pull-ups on NC pins 10 and 11 are enabled by default. The vendor disable sequence is `0x00 <- 0x80`, `0x05 <- 0x01`, `0x00 <- 0x00`; it accesses undocumented controls and is therefore board/diagnostic guidance, not a production-profile recipe. Source: datasheet, pp. 47-48.

@@ -14,7 +14,7 @@ same authority.
   transport boundary.
 - [HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md): repeatable targeted and
   owner-soak procedures plus retained validation evidence.
-- <a href="chip-reference/README.md">Maintained chip reference</a>:
+- <a href="chip-reference/00_reference_index.md">Maintained chip reference</a>:
   source-audited,
   AI-facing translation of LSM6DS3TR-C registers, modes, conversions, timing,
   procedures, vendor ambiguities, and library support boundaries.

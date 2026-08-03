@@ -197,8 +197,8 @@ Total callback ceilings are part of the public contract:
 | Probe | 2 |
 | Configure | 68 |
 | Sample | 66 |
-| Reset or boot | 88 |
-| Recover | 87 |
+| Reset or boot | 89 |
+| Recover | 88 |
 | Reconcile | 35 |
 | Power-down | 8 worst case; 6 when already in the main bank |
 | Self-test | `maximumSelfTestTransactions(samples)` |
@@ -216,8 +216,10 @@ absent it fails `DATA_NOT_READY`, preserving the 66th callback for the burst
 when readiness succeeds. Reset and boot permit at most 16 command-bit read
 polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 66 callbacks for full
 profile reapply/readback. Their ceiling also includes the verified main-bank
-clear, identity validation, and command preparation; recovery instead includes
-a main-bank precheck and identity validation before its preparation writes.
+clear, identity validation, gyroscope Power-Down, an explicitly active
+high-performance accelerometer, and command preparation; recovery instead
+includes a main-bank precheck and identity validation before those preparation
+writes.
 
 ## Operation Classes
 
@@ -345,12 +347,13 @@ as required by AN5130. The operation uses the vendor's 52 Hz / +/-4 g
 accelerometer setup and 208 Hz / +/-2000 dps gyroscope setup. Four fixed,
 bus-silent settle gates total 400 ms. Every discarded or
 collected sample receives at most three STATUS checks and one data read, with a
-3 ms zero-I2C gate after a read. Three failed readiness checks produce
-`DATA_NOT_READY` and route through the reserved full-profile restoration
-budget. The poll that first reports a primary self-test failure performs no
-restoration I2C; operation state remains active while its progress status
-reports the primary error, so the owner observes a boundary before a later poll
-begins restoration. The callback ceiling is `16 * (samples + 5) + 80`.
+20 ms accelerometer or 5 ms gyroscope zero-I2C gate after a read and between
+readiness checks. Three failed readiness checks produce `DATA_NOT_READY`. If
+stimulus may be active, any primary failure first attempts the same bounded
+sensor-power-down then self-test-disable sequence used by successful sampling.
+The owner-visible primary-failure boundary occurs after that cleanup and before
+full-profile restoration. The callback ceiling is
+`16 * (samples + 1) + 87`, including one extra failure-cleanup callback.
 Self-test temporarily removes the managed user-offset contribution, establishes
 the required sensor modes,
 and powers down the opposite sensor where required. A verified gyro-sleep
@@ -376,7 +379,9 @@ and the managed IF_INC/BDU prerequisites, then destroys unread FIFO data. Its
 result reports initial unread count/pattern, discarded words, final unread
 count, overrun, and truncation. It performs at most `maxWords + 5` callbacks,
 retries none, and completes only after the final FIFO status read or a terminal
-failure. It is not a FIFO acquisition or waveform API.
+failure. The unread count must be zero exactly when `FIFO_EMPTY` is asserted;
+either contradictory status fails visibly, and asserted `FIFO_EMPTY` always
+prevents a destructive read. It is not a FIFO acquisition or waveform API.
 
 ## Advanced Diagnostics
 
@@ -474,7 +479,7 @@ stale generated pages and build the local reference under
 comments, this README, and the checked-in guides remain authoritative. The
 <a href="docs/DOCUMENTATION.md">Documentation map</a> distinguishes maintained contracts
 from source reference material. The packaged
-<a href="docs/chip-reference/README.md">LSM6DS3TR-C chip reference</a> is the maintained,
+<a href="docs/chip-reference/00_reference_index.md">LSM6DS3TR-C chip reference</a> is the maintained,
 source-audited translation of the datasheet and AN5130 for engineers and AI
 coders; it also separates silicon capability from this library's support
 contract.

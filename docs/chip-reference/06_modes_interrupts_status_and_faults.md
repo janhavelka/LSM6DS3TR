@@ -56,8 +56,8 @@
 |---:|---|---|
 | `000` | Bypass; FIFO disabled. | Datasheet, p. 58 |
 | `001` | FIFO mode; stops collecting data when full. | Datasheet, p. 58 |
-| `011` | Continuous-to-FIFO; continuous mode until trigger is deasserted, then FIFO mode. | Datasheet, p. 58 |
-| `100` | Bypass-to-continuous; bypass until trigger is deasserted, then continuous mode. | Datasheet, p. 58 |
+| `011` | Continuous-to-FIFO; overwrite before the configured trigger event, then latch into FIFO mode, fill remaining space, and stop full. | Datasheet, p. 58; AN5130, pp. 80-83; [ambiguity ledger](12_source_ambiguities.md) |
+| `100` | Bypass-to-continuous; latch into continuous overwrite mode on the first configured trigger event and remain there until Bypass is selected. | Datasheet, p. 58; AN5130, pp. 84-86; [ambiguity ledger](12_source_ambiguities.md) |
 | `110` | Continuous; when full, new sample overwrites older sample. | Datasheet, p. 58 |
 
 `FIFO_MODE` values `010`, `101`, and `111` are not assigned in the datasheet table. Source: datasheet, p. 58.

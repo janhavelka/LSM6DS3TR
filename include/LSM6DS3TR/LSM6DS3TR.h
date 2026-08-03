@@ -206,7 +206,7 @@ enum class CalibrationKind : uint8_t {
   GYROSCOPE_BIAS       ///< Measure stationary angular-rate bias.
 };
 
-/// @brief Bounded sensor-native calibration request.
+/// @brief Bounded software bias-estimation request using sensor samples.
 ///
 /// expectedAccelerationG makes mounting/orientation policy explicit; for
 /// example, a Z-up fixture supplies {0, 0, 1}. Accelerometer calibration
@@ -294,8 +294,8 @@ struct DriverDiagnostics {
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
 static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 68;  ///< Configure ceiling.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 88;  ///< Reset/boot ceiling.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 87;  ///< Recovery ceiling.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 89;  ///< Reset/boot ceiling.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 88;  ///< Recovery ceiling.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 8;  ///< Worst power-down ceiling.
 ///@}
@@ -490,6 +490,7 @@ public:
   Status startPowerDown(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Start the bounded built-in self-test and exact profile restoration.
+  /// @note Keep the device stationary for the complete operation.
   /// @param request Average count for each test phase.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
@@ -497,7 +498,7 @@ public:
   Status startSelfTest(const SelfTestRequest& request, const OperationTiming& timing,
                        OperationToken& token);
 
-  /// @brief Start bounded sensor-native bias calibration.
+  /// @brief Start bounded software bias estimation using sensor samples.
   /// @param request Sensor, sample count, fixture vector, and stability limits.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.

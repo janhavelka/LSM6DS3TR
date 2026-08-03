@@ -58,6 +58,7 @@ struct FakeBus {
 
   uint8_t regs[256] = {};
   uint32_t notReadyStatusReads = 0;
+  uint32_t selfTestNotReadyStatusReads = 0;
   uint8_t corruptReadRegister = 0;
   uint8_t corruptReadValue = 0;
   uint32_t corruptReadRemaining = 0;
@@ -78,6 +79,9 @@ struct FakeBus {
   uint16_t fifoPattern = 0;
   uint16_t fifoNextWord = 0;
   bool fifoOverrun = false;
+  bool forceFifoEmptyClear = false;
+  bool forceFifoEmptySet = false;
+  bool forceFifoEmptySetAfterDataRead = false;
   uint16_t fifoConcurrentArrivalWords = 0;
   uint16_t fifoDataReads = 0;
   bool fifoArrivalInjected = false;
@@ -179,7 +183,8 @@ struct FakeBus {
     regs[cmd::REG_FIFO_STATUS1] = static_cast<uint8_t>(reportedUnread & 0xFFu);
     regs[cmd::REG_FIFO_STATUS2] =
         static_cast<uint8_t>((reportedUnread >> 8) & cmd::MASK_DIFF_FIFO_HI);
-    if (fifoUnreadWords == 0u) {
+    if ((fifoUnreadWords == 0u && !forceFifoEmptyClear) || forceFifoEmptySet ||
+        (forceFifoEmptySetAfterDataRead && fifoDataReads > 0u)) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_EMPTY;
     }
     if (fifoOverrun) {
@@ -303,8 +308,14 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     return fault->status;
   }
 
+  const bool selfTestActive =
+      (bus.regs[cmd::REG_CTRL5_C] & (cmd::MASK_ST_XL | cmd::MASK_ST_G)) != 0u;
   if (startReg == cmd::REG_STATUS_REG && bus.notReadyStatusReads > 0u) {
     bus.notReadyStatusReads--;
+    std::memset(rxData, 0, rxLength);
+  } else if (startReg == cmd::REG_STATUS_REG && selfTestActive &&
+             bus.selfTestNotReadyStatusReads > 0u) {
+    bus.selfTestNotReadyStatusReads--;
     std::memset(rxData, 0, rxLength);
   } else {
     const bool countdownReset = startReg == cmd::REG_CTRL3_C &&

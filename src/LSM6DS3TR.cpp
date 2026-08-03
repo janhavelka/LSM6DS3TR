@@ -11,7 +11,7 @@ constexpr uint8_t SELF_TEST_DISCARD_SAMPLES = 1;
 constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
-constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 86;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 87;
 constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
 constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
 constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
@@ -129,6 +129,8 @@ bool validSampleQuality(SampleQuality quality) {
 }
 
 uint16_t gyroSettleSamples(const DeviceProfile& profile) {
+  // DeviceProfile supports the LPF1 FTYPE=00 path only. These LPF1 counts are
+  // therefore the AN5130 Table 13 FTYPE=00 values, not a generic LPF1 bound.
   switch (profile.gyroOdr) {
     case Odr::HZ_12_5: return 2;
     case Odr::HZ_26: return 3;
@@ -426,7 +428,8 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
   if (samples < 5U || samples > 100U) return 0U;
   // Each sample reserves three ready checks and one burst in four phases.
-  // Fixed work is 20 test-setup writes plus the 66-callback profile restore.
+  // Fixed work reserves the 20 normal test writes, one failure-cleanup write,
+  // and the 66-callback profile restore.
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
          SELF_TEST_FIXED_TRANSACTIONS;
 }
@@ -1273,17 +1276,30 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
     return inProgressStatus();
   }
   if (_substep == 5U) {
+    DeviceProfile activeAccel = _desiredProfile;
+    activeAccel.accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
+    if (activeAccel.accelOdr == Odr::POWER_DOWN ||
+        activeAccel.accelOdr == Odr::HZ_1_6) {
+      activeAccel.accelOdr = Odr::HZ_12_5;
+    }
+    const Status status =
+        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(activeAccel), nowMs, true);
+    if (!status.ok()) return status;
+    _substep = 6;
+    return inProgressStatus();
+  }
+  if (_substep == 6U) {
     const uint8_t command = static_cast<uint8_t>(buildCtrl3(_desiredProfile) |
                                                  (boot ? cmd::MASK_BOOT
                                                        : cmd::MASK_SW_RESET));
     const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs, true);
     if (!status.ok()) return status;
     _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS);
-    _substep = 6;
+    _substep = 7;
     _waiting = true;
     return inProgressStatus();
   }
-  if (_substep == 6U) {
+  if (_substep == 7U) {
     if (nowMs < _waitUntilMs) {
       _waiting = true;
       return inProgressStatus();
@@ -1304,7 +1320,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
     }
     _readyPolls = 0;
     _step = 0;
-    _substep = 7;
+    _substep = 8;
     _prepareManagedImage(_desiredProfile);
     return inProgressStatus();
   }
@@ -1401,14 +1417,41 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
-  auto routeFailureToRestore = [this](const Status& status) -> Status {
-    if (status.ok() || status.inProgress()) return status;
-    if (_primaryStatus.ok()) _primaryStatus = status;
+  auto beginRestore = [this]() {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _substep = 100;
     _step = 0;
     _prepareManagedImage(_selfTestRestoreProfile);
-    _pollBoundary = true;
+  };
+
+  auto routeFailureToRestore =
+      [this, &beginRestore](const Status& status) -> Status {
+    if (status.ok() || status.inProgress()) return status;
+    if (_primaryStatus.ok()) _primaryStatus = status;
+
+    // If stimulus may be active, preserve the vendor's terminal order on the
+    // failure path too: power down the tested sensor, then disable self-test.
+    // A failure in either cleanup write proceeds to bounded profile restore;
+    // there is no loop or unbounded retry.
+    if (_substep >= 6U && _substep <= 10U) {
+      _substep = 90;
+      _step = 0;
+    } else if (_substep == 11U) {
+      _substep = 91;
+      _step = 0;
+    } else if (_substep >= 16U && _substep < 20U) {
+      _substep = 92;
+      _step = 0;
+    } else if (_substep == 20U && _step == 0U) {
+      _substep = 92;
+      _step = 0;
+    } else if (_substep == 20U) {
+      _substep = 93;
+      _step = 0;
+    } else {
+      beginRestore();
+      _pollBoundary = true;
+    }
     return inProgressStatus();
   };
 
@@ -1416,6 +1459,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
                                    bool& complete) -> Status {
     complete = false;
     const uint8_t readyMask = accel ? cmd::MASK_XLDA : cmd::MASK_GDA;
+    const uint64_t samplePeriodMs = accel ? 20U : 5U;
     if (_step == 0U) {
       if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
         _waiting = true;
@@ -1430,7 +1474,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
           return Status::Error(Err::DATA_NOT_READY,
                                "Self-test data was not ready within three checks");
         }
-        _waitUntilMs = saturatingAdd(nowMs, 3U);
+        _waitUntilMs = saturatingAdd(nowMs, samplePeriodMs);
         _waiting = true;
         return inProgressStatus();
       }
@@ -1452,7 +1496,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     }
     ++_samplesDone;
     _step = 0;
-    _waitUntilMs = saturatingAdd(nowMs, 3U);
+    _waitUntilMs = saturatingAdd(nowMs, samplePeriodMs);
     if (_samplesDone >= target) complete = true;
     return inProgressStatus();
   };
@@ -1621,27 +1665,14 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 10U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
     if (!status.ok()) return routeFailureToRestore(status);
     ++_substep;
     return inProgressStatus();
   }
   if (_substep == 11U) {
-    if (_step == 0U) {
-      const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
-      if (!status.ok()) return routeFailureToRestore(status);
-      _step = 1;
-      return inProgressStatus();
-    }
-    if (_step == 1U) {
-      const Status status = _writeByte(cmd::REG_CTRL4_C, 0, nowMs, true);
-      if (!status.ok()) return routeFailureToRestore(status);
-      _step = 2;
-      return inProgressStatus();
-    }
-    const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
     if (!status.ok()) return routeFailureToRestore(status);
-    _step = 0;
     ++_substep;
     return inProgressStatus();
   }
@@ -1667,11 +1698,42 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 20U) {
-    _workingResult.selfTest.primaryStatus = _primaryStatus;
-    _substep = 100;
-    _step = 0;
-    _prepareManagedImage(_selfTestRestoreProfile);
+    if (_step == 0U) {
+      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+      if (!status.ok()) return routeFailureToRestore(status);
+      _step = 1;
+      return inProgressStatus();
+    }
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    beginRestore();
     if (!_primaryStatus.ok()) _pollBoundary = true;
+    return inProgressStatus();
+  }
+  if (_substep == 90U) {
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _substep = 91;
+    return inProgressStatus();
+  }
+  if (_substep == 91U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    beginRestore();
+    _pollBoundary = true;
+    return inProgressStatus();
+  }
+  if (_substep == 92U) {
+    const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    _substep = 93;
+    return inProgressStatus();
+  }
+  if (_substep == 93U) {
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    if (!status.ok()) return routeFailureToRestore(status);
+    beginRestore();
+    _pollBoundary = true;
     return inProgressStatus();
   }
   return routeFailureToRestore(
@@ -1781,12 +1843,13 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
 
 Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
   auto decodeStatus = [](const uint8_t* data, uint16_t& unread,
-                         uint16_t& pattern, bool& overrun) {
+                         uint16_t& pattern, bool& overrun, bool& empty) {
     unread = static_cast<uint16_t>(data[0]) |
              (static_cast<uint16_t>(data[1] & cmd::MASK_DIFF_FIFO_HI) << 8U);
     pattern = static_cast<uint16_t>(data[2]) |
               (static_cast<uint16_t>(data[3] & 0x03U) << 8U);
     overrun = (data[1] & cmd::MASK_FIFO_OVER_RUN) != 0U;
+    empty = (data[1] & cmd::MASK_FIFO_EMPTY) != 0U;
     if (overrun && unread == 0U) unread = 2048U;
   };
 
@@ -1836,11 +1899,18 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
     uint16_t unread = 0;
     uint16_t pattern = 0;
     bool overrun = false;
-    decodeStatus(data, unread, pattern, overrun);
+    bool empty = false;
+    decodeStatus(data, unread, pattern, overrun, empty);
+    const bool statusConsistent = empty == (unread == 0U);
     _workingResult.fifoPurge.initialUnreadWords = unread;
     _workingResult.fifoPurge.initialPattern = pattern;
     _workingResult.fifoPurge.overrunObserved = overrun;
-    _workingResult.fifoPurge.truncated = unread > _fifoPurgeRequest.maxWords;
+    _workingResult.fifoPurge.truncated =
+        unread > _fifoPurgeRequest.maxWords || !statusConsistent;
+    if (!statusConsistent) {
+      return Status::Error(Err::OPERATION_INDETERMINATE,
+                           "FIFO count and EMPTY status disagreed");
+    }
     _step = 4;
     if (unread == 0U) _step = 5;
     return inProgressStatus();
@@ -1868,16 +1938,27 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
   if (!status.ok()) return status;
   uint16_t pattern = 0;
   bool overrun = false;
-  decodeStatus(data, _workingResult.fifoPurge.finalUnreadWords, pattern, overrun);
+  bool empty = false;
+  decodeStatus(data, _workingResult.fifoPurge.finalUnreadWords, pattern, overrun,
+               empty);
+  const bool statusConsistent =
+      empty == (_workingResult.fifoPurge.finalUnreadWords == 0U);
   _workingResult.fifoPurge.overrunObserved =
       _workingResult.fifoPurge.overrunObserved || overrun;
   _workingResult.fifoPurge.truncated =
       _workingResult.fifoPurge.truncated ||
-      _workingResult.fifoPurge.finalUnreadWords != 0U;
+      _workingResult.fifoPurge.finalUnreadWords != 0U || !statusConsistent;
   if (_workingResult.fifoPurge.overrunObserved) {
     return _finish(Status::Error(Err::FIFO_OVERRUN,
                                  "FIFO overrun observed while purging"),
                    OperationState::FAILED);
+  }
+  if (!statusConsistent) {
+    return _finish(Status::Error(Err::OPERATION_INDETERMINATE,
+                                 "FIFO count and EMPTY status disagreed"),
+                   _hardwareStateMayHaveChanged
+                       ? OperationState::INDETERMINATE
+                       : OperationState::FAILED);
   }
   return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
@@ -2062,11 +2143,11 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
       safeComputeStep = true;
     } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
                 _job == JobKind::RECOVER) &&
-               _substep >= 7U && _step >= configurationDone) {
+               _substep >= 8U && _step >= configurationDone) {
       safeComputeStep = true;
     } else if (_job == JobKind::SELF_TEST &&
                ((_substep == 3U || _substep == 7U || _substep == 13U ||
-                 _substep == 17U || _substep == 20U) ||
+                 _substep == 17U) ||
                 (_substep == 100U && _step >= configurationDone))) {
       safeComputeStep = true;
     }
@@ -2077,7 +2158,7 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     }
     if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
          _job == JobKind::RECOVER) &&
-        _substep == 6U) {
+        _substep == 7U) {
       _waiting = nowMs < _waitUntilMs;
     } else if ((_job == JobKind::SAMPLE || _job == JobKind::CALIBRATION) &&
                _waitUntilMs != 0U) {

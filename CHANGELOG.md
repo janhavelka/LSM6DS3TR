@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserved the old monolithic extraction as a clearly unsafe repository-only
   audit archive instead of allowing its stale recipes and duplicated sections
   to compete with the maintained reference.
+- Re-audited the live ST product page, Rev. 3 datasheet, Rev. 1 AN5130, current
+  v2.2.2 standard driver, near-name parts, and current manufacturing notices.
+  No newer LSM6DS3TR-C silicon-document revision or programming migration was
+  found; expanded the maintained reference with the newly checked electrical,
+  protocol, filter, FIFO, sensor-hub, embedded-engine, and ambiguity details.
 
 ### Fixed
 
@@ -61,6 +66,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gyroscope filter bandwidth/current, dynamic register defaults, and
   mode-dependent ODR encoding; vendor contradictions are now recorded rather
   than silently resolved.
+- Corrected self-test sample cadence to the configured vendor test ODRs
+  (20 ms accelerometer, 5 ms gyroscope) and enforced the AN5130 terminal order:
+  tested sensor Power-Down, self-test disable, then managed-profile restoration.
+- Applied that self-test terminal order to active-stimulus failure exits as a
+  bounded cleanup pass. The hard ceiling is now
+  `16 * (samples + 1) + 87`, including one worst-case cleanup callback.
+- Made reset, boot, and recovery explicitly activate the accelerometer in
+  high-performance mode before the command even when the desired profile has
+  it powered down. The exact reset/boot and recovery ceilings are now 89 and
+  88 callbacks.
+- Made FIFO purge require the unread count and `FIFO_EMPTY` to agree in both
+  directions, preventing both false success and a destructive read while the
+  device asserts that the FIFO is empty.
+- Corrected the maintained high-ODR HM-mode table: 416 Hz through 6.66 kHz are
+  high-performance regardless of the HM bit; the public API rejects an
+  impossible low-power/normal request rather than an invalid register code.
+- Re-ran the targeted physical campaign after these corrections on the same
+  ESP32-S3/LSM6DS3TR-C fixture: all lifecycle and changed maintenance paths,
+  both self-tests/calibrations, 40 invalid-input cases, and 825 successful
+  transport callbacks passed with zero transport failures. Per request, no
+  additional one-hour soak was run.
+- Repeated that targeted campaign on the exact final firmware after the
+  failure-path hardening; it again completed with 825 successful callbacks,
+  zero transport failures, successful self-tests/calibrations, and all 40
+  invalid-input checks passing. No soak was run.
 
 ## [2.0.0] - 2026-07-22
 

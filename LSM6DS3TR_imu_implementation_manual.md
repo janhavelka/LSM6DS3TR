@@ -1,7 +1,7 @@
 # LSM6DS3TR-C Maintained Implementation Reference
 
 The maintained, source-audited chip reference is
-[docs/chip-reference/README.md](docs/chip-reference/README.md).
+[docs/chip-reference/00_reference_index.md](docs/chip-reference/00_reference_index.md).
 
 It contains the current official ST source manifest, register and protocol
 facts, ODR/power constraints, conversions, filters and settling rules, FIFO and

@@ -53,22 +53,23 @@
 | `0011` | 52 Hz | 52 Hz | 52 Hz | 52 Hz | Datasheet, pp. 31, 61-62 |
 | `0100` | 104 Hz normal | 104 Hz high-performance | 104 Hz normal | 104 Hz high-performance | Datasheet, pp. 31, 61-62 |
 | `0101` | 208 Hz normal | 208 Hz high-performance | 208 Hz normal | 208 Hz high-performance | Datasheet, pp. 31, 61-62 |
-| `0110` | invalid mode/ODR pairing | 416 Hz high-performance | invalid mode/ODR pairing | 416 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
-| `0111` | invalid mode/ODR pairing | 833 Hz high-performance | invalid mode/ODR pairing | 833 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
-| `1000` | invalid mode/ODR pairing | 1.66 kHz high-performance | invalid mode/ODR pairing | 1.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
-| `1001` | invalid mode/ODR pairing | 3.33 kHz high-performance | invalid mode/ODR pairing | 3.33 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
-| `1010` | invalid mode/ODR pairing | 6.66 kHz high-performance | invalid mode/ODR pairing | 6.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `0110` | 416 Hz high-performance | 416 Hz high-performance | 416 Hz high-performance | 416 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `0111` | 833 Hz high-performance | 833 Hz high-performance | 833 Hz high-performance | 833 Hz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1000` | 1.66 kHz high-performance | 1.66 kHz high-performance | 1.66 kHz high-performance | 1.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1001` | 3.33 kHz high-performance | 3.33 kHz high-performance | 3.33 kHz high-performance | 3.33 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
+| `1010` | 6.66 kHz high-performance | 6.66 kHz high-performance | 6.66 kHz high-performance | 6.66 kHz high-performance | Datasheet, pp. 31, 61-62; AN5130, pp. 10-11 |
 | `1011` | 1.6 Hz low-power-only | 12.5 Hz high-performance | not available | not available | Datasheet, pp. 61-62 |
 | `11xx` | not allowed | not allowed | not available | not available | Datasheet, pp. 61-62 |
 
-`XL_HM_MODE=1` and `G_HM_MODE=1` disable high-performance operation. Low-power
-or normal operation is limited to ODRs through 208 Hz; the register encoding
-still exists at higher values, but the pairing is not an admissible operating
-mode. The library rejects it instead of relying on unspecified silicon behavior.
+`XL_HM_MODE=1` and `G_HM_MODE=1` request low-power/normal behavior only where
+that mode exists. For ODR encodings above 208 Hz, the tables select
+high-performance operation regardless of the HM bit. The library still rejects
+a public `LOW_POWER_NORMAL` request above 208 Hz because silicon cannot honor
+the requested mode; the register encoding itself is not invalid.
 
 ## Offset Registers
 
-`X_OFS_USR` (`0x73`), `Y_OFS_USR` (`0x74`), and `Z_OFS_USR` (`0x75`) are signed 8-bit two's-complement accelerometer user offsets in range -127..+127. The weight is selected by `CTRL6_C.USR_OFF_W`: 2^-10 g/LSB when `0`, or 2^-6 g/LSB when `1`. Source: datasheet, pp. 66, 96.
+`X_OFS_USR` (`0x73`), `Y_OFS_USR` (`0x74`), and `Z_OFS_USR` (`0x75`) are signed 8-bit two's-complement accelerometer user offsets in range -127..+127. The weight is selected by `CTRL6_C.USR_OFF_W`: 2^-10 g/LSB (0.9765625 mg/LSB, nominally 1 mg) when `0`, or 2^-6 g/LSB (15.625 mg/LSB, nominally 16 mg) when `1`. X and Y register values are added to measured acceleration; Z is subtracted. Source: datasheet, pp. 66, 96.
 
 ## Extended User Register Anchors
 

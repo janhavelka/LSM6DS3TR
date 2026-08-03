@@ -1177,7 +1177,9 @@ void test_reset_orders_required_modes_and_enforces_no_i2c_gate() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR driver;
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
-  (void)configure(driver, bus);
+  DeviceProfile profile = makeProfile();
+  profile.accelOdr = Odr::POWER_DOWN;
+  (void)configure(driver, bus, profile);
   bus.clearTrace();
   bus.commandInaccessibleMs = 15;
   bus.resetRegistersOnSoftwareReset = true;
@@ -1194,8 +1196,12 @@ void test_reset_orders_required_modes_and_enforces_no_i2c_gate() {
   const size_t gyroDown = findWrite(bus, cmd::REG_CTRL2_G, 0xF0u, 0u);
   const size_t accelHighPerformance = findWrite(bus, cmd::REG_CTRL6_C,
                                                 cmd::MASK_XL_HM_MODE, 0u);
+  const size_t accelActive =
+      findWrite(bus, cmd::REG_CTRL1_XL, cmd::MASK_ODR_XL, 0x10u);
   TEST_ASSERT_LESS_THAN(commandIndex, gyroDown);
   TEST_ASSERT_LESS_THAN(commandIndex, accelHighPerformance);
+  TEST_ASSERT_LESS_THAN(commandIndex, accelActive);
+  TEST_ASSERT_LESS_THAN(accelActive, accelHighPerformance);
   const uint64_t commandTime = bus.trace[commandIndex].atMs;
   const uint32_t transfers = bus.transferCalls;
   const PollResult waiting = driver.poll(bus.nowMs, 4);
@@ -1420,7 +1426,7 @@ void test_reset_boot_and_recover_completion_poll_boundaries_are_exact() {
       TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
       TEST_ASSERT_LESS_OR_EQUAL_UINT32(result.transactionLimit,
                                        result.transactions);
-      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 21u : 22u,
+      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 22u : 23u,
                                result.transactions);
       uint32_t commandReads = 0;
       bool commandWritten = false;
@@ -1467,7 +1473,7 @@ void test_reset_and_boot_wait_deadlines_saturate_at_uint64_max() {
                                          std::numeric_limits<uint64_t>::max()},
                          token)
                          .inProgress());
-    for (uint8_t transfer = 0; transfer < 6u; ++transfer) {
+    for (uint8_t transfer = 0; transfer < 7u; ++transfer) {
       TEST_ASSERT_EQUAL_UINT8(1u, driver.poll(bus.nowMs, 1).transactionsUsed);
     }
     const uint32_t transfers = bus.transferCalls;
@@ -1615,6 +1621,47 @@ void test_self_test_failures_are_bounded_at_every_transfer_stage() {
           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
     }
   }
+}
+
+void test_self_test_active_failure_uses_vendor_shutdown_order() {
+  FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  (void)configure(driver, bus);
+  bus.clearTrace();
+  bus.selfTestNotReadyStatusReads = 3;
+
+  OperationToken token;
+  TEST_ASSERT_TRUE(
+      driver.startSelfTest(SelfTestRequest{5}, timing(bus), token).inProgress());
+  const PollResult terminal = runToTerminal(driver, bus, 3);
+  const OperationResult result = take(driver, token);
+  assertTerminalFailure(terminal, result, Err::DATA_NOT_READY,
+                        OperationState::FAILED);
+  TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
+  TEST_ASSERT_LESS_OR_EQUAL_UINT32(result.transactionLimit,
+                                   result.transactions);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
+                          static_cast<uint8_t>(
+                              driver.configurationState(bus.nowMs)));
+
+  const size_t stimulusOn =
+      findWrite(bus, cmd::REG_CTRL5_C, cmd::MASK_ST_XL,
+                static_cast<uint8_t>(1U << cmd::BIT_ST_XL));
+  const size_t accelOff =
+      findWrite(bus, cmd::REG_CTRL1_XL, 0xFFu, 0u, stimulusOn + 1u);
+  const size_t stimulusOff =
+      findWrite(bus, cmd::REG_CTRL5_C, 0xFFu, 0u, accelOff + 1u);
+  const size_t firstRestore =
+      findWrite(bus, cmd::REG_FUNC_CFG_ACCESS, 0xFFu, 0u,
+                stimulusOff + 1u);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, stimulusOn);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelOff);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, stimulusOff);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, firstRestore);
+  TEST_ASSERT_LESS_THAN(accelOff, stimulusOn);
+  TEST_ASSERT_LESS_THAN(stimulusOff, accelOff);
+  TEST_ASSERT_LESS_THAN(firstRestore, stimulusOff);
 }
 
 void test_self_test_preserves_primary_and_restoration_failures() {
@@ -1772,8 +1819,8 @@ void test_self_test_intermittent_not_ready_uses_bounded_bus_silent_cadence() {
     }
   }
   TEST_ASSERT_EQUAL_UINT32(3u, statusCount);
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(statusTimes[0] + 3u, statusTimes[1]);
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(statusTimes[1] + 3u, statusTimes[2]);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(statusTimes[0] + 20u, statusTimes[1]);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(statusTimes[1] + 20u, statusTimes[2]);
 }
 
 void test_self_test_three_not_ready_checks_restore_known_configuration() {
@@ -2716,8 +2763,12 @@ void test_self_test_normalizes_low_power_offsets_and_restores_exact_profile() {
       static_cast<uint8_t>(1U << cmd::BIT_ST_XL), accelBaselineRead + 1u);
   const size_t accelStimulusRead =
       findRead(bus, cmd::REG_DATA_START_ACCEL, accelStimulus + 1u);
-  const size_t gyroTest =
-      findWrite(bus, cmd::REG_CTRL2_G, 0xFFu, 0x5Cu, accelStimulusRead + 1u);
+  const size_t accelOff =
+      findWrite(bus, cmd::REG_CTRL1_XL, 0xFFu, 0u, accelStimulusRead + 1u);
+  const size_t accelSelfTestOff =
+      findWrite(bus, cmd::REG_CTRL5_C, 0xFFu, 0u, accelOff + 1u);
+  const size_t gyroTest = findWrite(bus, cmd::REG_CTRL2_G, 0xFFu, 0x5Cu,
+                                    accelSelfTestOff + 1u);
   const size_t gyroBaselineRead =
       findRead(bus, cmd::REG_DATA_START_GYRO, gyroTest + 1u);
   const size_t gyroStimulus = findWrite(
@@ -2725,13 +2776,29 @@ void test_self_test_normalizes_low_power_offsets_and_restores_exact_profile() {
       static_cast<uint8_t>(1U << cmd::BIT_ST_G), gyroBaselineRead + 1u);
   const size_t gyroStimulusRead =
       findRead(bus, cmd::REG_DATA_START_GYRO, gyroStimulus + 1u);
+  const size_t gyroOffAfterTest =
+      findWrite(bus, cmd::REG_CTRL2_G, 0xFFu, 0u, gyroStimulusRead + 1u);
+  const size_t gyroSelfTestOff =
+      findWrite(bus, cmd::REG_CTRL5_C, 0xFFu, 0u, gyroOffAfterTest + 1u);
+  const size_t firstRestoreWrite =
+      findWrite(bus, cmd::REG_FUNC_CFG_ACCESS, 0xFFu, 0u,
+                gyroSelfTestOff + 1u);
   TEST_ASSERT_LESS_THAN(bus.traceCount, accelBaselineRead);
   TEST_ASSERT_LESS_THAN(bus.traceCount, accelStimulus);
   TEST_ASSERT_LESS_THAN(bus.traceCount, accelStimulusRead);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelOff);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, accelSelfTestOff);
   TEST_ASSERT_LESS_THAN(bus.traceCount, gyroTest);
   TEST_ASSERT_LESS_THAN(bus.traceCount, gyroBaselineRead);
   TEST_ASSERT_LESS_THAN(bus.traceCount, gyroStimulus);
   TEST_ASSERT_LESS_THAN(bus.traceCount, gyroStimulusRead);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroOffAfterTest);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, gyroSelfTestOff);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, firstRestoreWrite);
+  TEST_ASSERT_LESS_THAN(accelSelfTestOff, accelOff);
+  TEST_ASSERT_LESS_THAN(gyroTest, accelSelfTestOff);
+  TEST_ASSERT_LESS_THAN(gyroSelfTestOff, gyroOffAfterTest);
+  TEST_ASSERT_LESS_THAN(firstRestoreWrite, gyroSelfTestOff);
   TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[accelTest].atMs + 100u,
                                       bus.trace[accelBaselineRead].atMs);
   TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[accelStimulus].atMs + 100u,
@@ -2740,6 +2807,29 @@ void test_self_test_normalizes_low_power_offsets_and_restores_exact_profile() {
                                       bus.trace[gyroBaselineRead].atMs);
   TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[gyroStimulus].atMs + 50u,
                                       bus.trace[gyroStimulusRead].atMs);
+
+  bool haveAccelRead = false;
+  bool haveGyroRead = false;
+  uint64_t lastAccelReadMs = 0;
+  uint64_t lastGyroReadMs = 0;
+  for (size_t i = 0; i < bus.traceCount; ++i) {
+    if (bus.trace[i].kind != TransferKind::WRITE_READ) continue;
+    if (bus.trace[i].startReg == cmd::REG_DATA_START_ACCEL) {
+      if (haveAccelRead) {
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(lastAccelReadMs + 20u,
+                                            bus.trace[i].atMs);
+      }
+      lastAccelReadMs = bus.trace[i].atMs;
+      haveAccelRead = true;
+    } else if (bus.trace[i].startReg == cmd::REG_DATA_START_GYRO) {
+      if (haveGyroRead) {
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(lastGyroReadMs + 5u,
+                                            bus.trace[i].atMs);
+      }
+      lastGyroReadMs = bus.trace[i].atMs;
+      haveGyroRead = true;
+    }
+  }
 
   TEST_ASSERT_EQUAL_HEX8(0x18u, bus.regs[cmd::REG_CTRL6_C]);
   TEST_ASSERT_EQUAL_HEX8(11u, bus.regs[cmd::REG_X_OFS_USR]);
@@ -2931,10 +3021,17 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
   }
   TEST_ASSERT_EQUAL_UINT8(12u, gyroDataReads);
   const uint32_t thresholdTransfers = thresholdBus.transferCalls;
-  const PollResult thresholdFailure =
+  const PollResult beforeShutdown =
       thresholdDriver.poll(thresholdBus.nowMs, 0);
   TEST_ASSERT_EQUAL_UINT32(thresholdTransfers, thresholdBus.transferCalls);
-  TEST_ASSERT_EQUAL_UINT8(0u, thresholdFailure.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(0u, beforeShutdown.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
+                          static_cast<uint8_t>(beforeShutdown.state));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::IN_PROGRESS),
+                          static_cast<uint8_t>(beforeShutdown.status.code));
+  const PollResult thresholdFailure =
+      thresholdDriver.poll(thresholdBus.nowMs, 2);
+  TEST_ASSERT_EQUAL_UINT8(2u, thresholdFailure.transactionsUsed);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
                           static_cast<uint8_t>(thresholdFailure.state));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::SELF_TEST_FAIL),
@@ -2949,8 +3046,8 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
 
 void test_maximum_transaction_helpers_cover_exact_boundaries() {
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(4));
-  TEST_ASSERT_EQUAL_UINT32(182u, maximumSelfTestTransactions(5));
-  TEST_ASSERT_EQUAL_UINT32(1702u, maximumSelfTestTransactions(100));
+  TEST_ASSERT_EQUAL_UINT32(183u, maximumSelfTestTransactions(5));
+  TEST_ASSERT_EQUAL_UINT32(1703u, maximumSelfTestTransactions(100));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(101));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumCalibrationTransactions(0));
   TEST_ASSERT_EQUAL_UINT32(4u, maximumCalibrationTransactions(1));
@@ -3099,6 +3196,92 @@ void test_main_bank_preconditions_and_explicit_bank_recovery_paths() {
 }
 
 void test_fifo_preconditions_overrun_and_ambiguous_consumption_are_precise() {
+  {
+    FakeBus bus;
+    setFifoPurgePrerequisites(bus);
+    bus.forceFifoEmptySet = true;
+    bus.setFifo(1, 0, 0x3EC0);
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    OperationToken token;
+    TEST_ASSERT_TRUE(
+        driver.startFifoPurge(FifoPurgeRequest{1}, timing(bus), token)
+            .inProgress());
+    const PollResult terminal = runToTerminal(driver, bus);
+    const OperationResult result = take(driver, token);
+    assertTerminalFailure(terminal, result, Err::OPERATION_INDETERMINATE,
+                          OperationState::FAILED);
+    TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_TRUE(result.fifoPurge.truncated);
+    TEST_ASSERT_EQUAL_UINT16(1u, result.fifoPurge.initialUnreadWords);
+    TEST_ASSERT_EQUAL_UINT32(4u, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT16(0u, bus.fifoDataReads);
+  }
+
+  {
+    FakeBus bus;
+    setFifoPurgePrerequisites(bus);
+    bus.forceFifoEmptyClear = true;
+    bus.setFifo(0, 0, 0x3F00);
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    OperationToken token;
+    TEST_ASSERT_TRUE(
+        driver.startFifoPurge(FifoPurgeRequest{1}, timing(bus), token)
+            .inProgress());
+    const PollResult terminal = runToTerminal(driver, bus);
+    const OperationResult result = take(driver, token);
+    assertTerminalFailure(terminal, result, Err::OPERATION_INDETERMINATE,
+                          OperationState::FAILED);
+    TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_TRUE(result.fifoPurge.truncated);
+    TEST_ASSERT_EQUAL_UINT32(4u, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT16(0u, bus.fifoDataReads);
+  }
+
+  {
+    FakeBus bus;
+    setFifoPurgePrerequisites(bus);
+    bus.forceFifoEmptyClear = true;
+    bus.setFifo(1, 0, 0x3F80);
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    OperationToken token;
+    TEST_ASSERT_TRUE(
+        driver.startFifoPurge(FifoPurgeRequest{1}, timing(bus), token)
+            .inProgress());
+    const PollResult terminal = runToTerminal(driver, bus);
+    const OperationResult result = take(driver, token);
+    assertTerminalFailure(terminal, result, Err::OPERATION_INDETERMINATE,
+                          OperationState::INDETERMINATE);
+    TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_TRUE(result.fifoPurge.truncated);
+    TEST_ASSERT_EQUAL_UINT16(1u, result.fifoPurge.wordsDiscarded);
+    TEST_ASSERT_EQUAL_UINT16(0u, result.fifoPurge.finalUnreadWords);
+  }
+
+  {
+    FakeBus bus;
+    setFifoPurgePrerequisites(bus);
+    bus.forceFifoEmptySetAfterDataRead = true;
+    bus.fifoConcurrentArrivalWords = 1;
+    bus.setFifo(1, 0, 0x3FC0);
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    OperationToken token;
+    TEST_ASSERT_TRUE(
+        driver.startFifoPurge(FifoPurgeRequest{1}, timing(bus), token)
+            .inProgress());
+    const PollResult terminal = runToTerminal(driver, bus);
+    const OperationResult result = take(driver, token);
+    assertTerminalFailure(terminal, result, Err::OPERATION_INDETERMINATE,
+                          OperationState::INDETERMINATE);
+    TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_TRUE(result.fifoPurge.truncated);
+    TEST_ASSERT_EQUAL_UINT16(1u, result.fifoPurge.wordsDiscarded);
+    TEST_ASSERT_EQUAL_UINT16(1u, result.fifoPurge.finalUnreadWords);
+  }
+
   {
     FakeBus bus;
     setFifoPurgePrerequisites(bus);
@@ -3366,6 +3549,7 @@ int main() {
   RUN_TEST(test_self_test_is_staged_bounded_and_restores_configuration);
   RUN_TEST(test_self_test_wakes_and_restores_a_sleeping_gyro_profile);
   RUN_TEST(test_self_test_failures_are_bounded_at_every_transfer_stage);
+  RUN_TEST(test_self_test_active_failure_uses_vendor_shutdown_order);
   RUN_TEST(test_self_test_preserves_primary_and_restoration_failures);
   RUN_TEST(test_self_test_restoration_deadline_preserves_primary_failure);
   RUN_TEST(test_self_test_negative_stimulus_reports_absolute_deltas);

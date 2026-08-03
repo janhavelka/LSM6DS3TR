@@ -39,7 +39,7 @@ Rules:
 - Keep the layout boring and predictable.
 - Before changing a register constant, validation rule, conversion, timing
   bound, self-test stage, or other chip-facing behavior, read
-  `docs/chip-reference/README.md` and the applicable topic. Resolve any source
+  `docs/chip-reference/00_reference_index.md` and the applicable topic. Resolve any source
   conflict through `12_source_ambiguities.md`; do not reinterpret the vendor
   PDFs silently in code.
 
@@ -186,12 +186,15 @@ The driver follows one fixed-memory, owner-scheduled operation model:
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
   and reserve the complete 66-callback profile reapply/readback budget.
-  Reset/boot use at most 88 callbacks, recovery 87, and FIFO purge
+  Reset/boot use at most 89 callbacks, recovery 88, and FIFO purge
   `maxWords + 5`; all validate identity before their first destructive device
   action after bank selection is proved.
 - Self-test and calibration allow at most three status checks per required
-  sample. Self-test inserts 3 ms post-sample gates; calibration gates by the
-  configured ODR period rounded up to milliseconds.
+  sample. Self-test gates by its active sensor ODR period rounded up to
+  milliseconds (20 ms accelerometer, 5 ms gyroscope); calibration gates by the
+  configured ODR period rounded up to milliseconds. Self-test reserves
+  `16 * (samples + 1) + 87` callbacks, including bounded failure cleanup and
+  full profile restoration.
 
 ---
 

@@ -107,12 +107,13 @@ enum class GyroHpfMode : uint8_t {
 
 /// @brief Accelerometer user-offset scale.
 enum class AccelOffsetWeight : uint8_t {
-  MG_1 = 0,  ///< 1 mg per LSB.
-  MG_16 = 1  ///< 16 mg per LSB.
+  MG_1 = 0,  ///< Nominal 1 mg/LSB; exactly 2^-10 g = 0.9765625 mg/LSB.
+  MG_16 = 1  ///< Nominal 16 mg/LSB; exactly 2^-6 g = 15.625 mg/LSB.
 };
 
 /// @brief Signed sensor-native accelerometer user offsets.
 /// @note Each value must be in -127..127; -128 is a reserved encoding.
+/// @note Register values are added to X/Y output and subtracted from Z output.
 struct AccelUserOffset {
   int8_t x = 0;  ///< X-axis register value.
   int8_t y = 0;  ///< Y-axis register value.

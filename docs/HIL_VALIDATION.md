@@ -88,6 +88,25 @@ and both configured memory sizes before functional testing began.
   cancellation, destructive, and recovery stage. Accelerometer and gyroscope
   self-test passed, both 16-sample calibrations succeeded, and transport
   counters moved from 70 to 1,178 successes with zero failures.
+- Post-datasheet-re-audit targeted check: passed from 15:01:57 to 15:02:47 UTC
+  on the same USB identity after the self-test cadence/shutdown,
+  reset/boot/recovery prerequisite, and FIFO-empty-proof corrections. The
+  campaign covered the complete lifecycle and maintenance surface, both
+  self-tests and 16-sample calibrations succeeded, all 40 invalid-input checks
+  passed, and transport counters moved from 70 to 825 successes with zero
+  failures. The requested focused check intentionally did not repeat the
+  one-hour soak.
+- Final post-hardening targeted check: passed from 06:02:36 to 06:03:26 UTC on
+  2026-08-01 after flashing the exact final firmware to the same fixture. This
+  rechecked reset, boot, recovery, self-test, calibration, sampling,
+  cancellation, diagnostics, and the strict invalid-input matrix after adding
+  active-stimulus failure cleanup and bidirectional FIFO count/`FIFO_EMPTY`
+  validation. Both self-tests and both 16-sample calibrations succeeded, all
+  40 invalid-input checks passed, and transport counters again moved from 70
+  to 825 successes with zero failures. The contradictory FIFO and injected
+  self-test-failure branches remain native fault-injection checks because the
+  fixture cannot safely force those internal status/transport faults. No soak
+  was run.
 - One-hour owner soak: passed from 09:52:52 to 10:52:54 UTC. At the exact
   3,600,000 ms terminal record the device reported 35,989 samples with matching
   sequence, configuration generation 1, 54,461 successful transport callbacks,

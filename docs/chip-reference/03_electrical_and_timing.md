@@ -37,11 +37,21 @@
 | Gyro +/-1000 dps | 35 mdps/LSB | Datasheet, p. 21 |
 | Gyro +/-2000 dps | 70 mdps/LSB | Datasheet, p. 21 |
 
+Use the declared sensitivities directly. In particular, do not divide the
+nominal +/-2000 dps label by the signed-code count to invent 61.03 mdps/LSB;
+the characterized transfer function is 70 mdps/LSB. The register-table
+245/250 dps naming difference is handled in the
+[ambiguity ledger](12_source_ambiguities.md). Source: datasheet, pp. 21, 62.
+
+The temperature channel is characterized with typ. +/-15 degC offset over its
+operating range and typ. 500 us stabilization time; it is not a precision
+thermometer. Source: datasheet, p. 25.
+
 ## Bus Timing
 
 | Interface | Timing facts | Source |
 |---|---|---|
-| SPI | Max 10 MHz; 100 ns clock cycle; values apply to 4-wire and 3-wire SPI. | Datasheet, p. 26 |
+| SPI | Max 10 MHz; 100 ns clock cycle; CS setup min 5 ns, CS hold min 20 ns, SDI setup/hold min 5/15 ns, SDO valid max 50 ns, SDO hold min 5 ns, and SDO disable max 50 ns. Values apply to 4-wire and 3-wire SPI. | Datasheet, p. 26 |
 | I2C slave standard mode | 0 to 100 kHz. | Datasheet, p. 27 |
 | I2C slave fast mode | 0 to 400 kHz. | Datasheet, p. 27 |
 | I2C sensor-hub master mode | Fixed generated SCL of 116.3 kHz; the timing table is characterized against Fast-mode limits. | Datasheet Table 8, p. 28 |

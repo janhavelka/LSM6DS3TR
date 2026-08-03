@@ -12,7 +12,7 @@ REFERENCE_DIR = ROOT / "docs" / "chip-reference"
 RAW_DIR = ROOT / "docs" / "pdf-extracted-md"
 
 REFERENCE_DOCS = (
-    "README.md",
+    "00_reference_index.md",
     "01_chip_overview.md",
     "02_pinout_and_signals.md",
     "03_electrical_and_timing.md",
@@ -142,7 +142,7 @@ HEADER_FACTS = {
 }
 
 EXACT_DOCUMENT_FACTS = {
-    "README.md": (
+    "00_reference_index.md": (
         "DocID030071 Rev 3, May 2017",
         "AN5130 Rev 1, March 2018",
         "Official pages | Repository evidence",
@@ -154,7 +154,8 @@ EXACT_DOCUMENT_FACTS = {
     ),
     "05_register_map.md": (
         "`1011` | 1.6 Hz low-power-only | 12.5 Hz high-performance",
-        "invalid mode/ODR pairing",
+        "`0110` | 416 Hz high-performance | 416 Hz high-performance",
+        "silicon cannot honor",
         "Table 19 says `0x00`, while Table 75 field defaults imply `0xE0`",
     ),
     "09_filters_and_settling.md": (
@@ -164,8 +165,10 @@ EXACT_DOCUMENT_FACTS = {
     ),
     "10_fifo_and_embedded_functions.md": (
         "`min(max(ODR_XL, ODR_G), ODR_FIFO)`",
-        "zero is not empty unless `FIFO_EMPTY=1`",
+        "require decoded `DIFF_FIFO=0` exactly when `FIFO_EMPTY=1`",
         "continue filling if space remains, then stop when full",
+        "`010`/`011`/`100`/`101`/`110`/`111`",
+        "`0x3C` for slave-0 write",
     ),
     "11_self_test_and_calibration.md": (
         "`CTRL1_XL=0x38`",
@@ -174,11 +177,16 @@ EXACT_DOCUMENT_FACTS = {
         "Wait 50 ms",
         "90..1700 mg inclusive",
         "150..700 dps inclusive",
+        "20 ms at the 52 Hz accelerometer",
+        "`CTRL2_G=0x00` to power down the gyroscope",
+        "`16 * (samples + 1) + 87`",
     ),
     "12_source_ambiguities.md": (
         "`FUNC_CFG_ACCESS[4]=0`",
         "`A_WRIST_TILT_MASK=0xC0`",
         "requires `STATUS_REG.TDA`",
+        "transmit one 8-bit register sub-address",
+        "`D4D_EN=1` enables 4D",
     ),
     "13_library_support_matrix.md": (
         "FIFO configuration, acquisition, pattern decoding | unsupported",

@@ -17,6 +17,15 @@ LSM6DS3TR-C exposes 7-bit register addresses over I2C and SPI. The register map 
 | Auto-increment | Controlled by `CTRL3_C.IF_INC` (`0x12[2]`); default value is 1. | Datasheet, pp. 40, 63 |
 | Bit order | Data bytes transmit most-significant bit first. | Datasheet, p. 40 |
 
+The slave may hold SCL low for clock stretching. A host adapter must tolerate
+that behavior within its finite transaction timeout and map timeout/fault
+outcomes into the library `Status` contract. Source: datasheet, p. 40.
+
+The p. 40 prose says that two sub-address bytes are transmitted, but the
+transaction figures, the 8-bit register map, and the p. 39 protocol description
+all use one sub-address byte. Use one byte; see the
+[ambiguity ledger](12_source_ambiguities.md).
+
 ## SPI Protocol
 
 | Item | Behavior | Source |
@@ -27,6 +36,10 @@ LSM6DS3TR-C exposes 7-bit register addresses over I2C and SPI. The register map 
 | Control byte | The first transmitted control bit is the read/write bit; `0` write, `1` read; address field is AD[6:0]. In byte-oriented MSB-first code, use `0x80 | addr` for reads and `addr & 0x7F` for writes. | Datasheet, p. 41 |
 | Multi-byte access | Add 8 clocks per extra byte; address stays same when `IF_INC=0` and increments when `IF_INC=1`. | Datasheet, p. 41 |
 | 3-wire mode | Set `CTRL3_C.SIM` (`0x12[3]`) to 1. | Datasheet, pp. 44, 63 |
+
+Keep `SPC` high while `CS` is high. A transaction begins at the `CS` falling
+edge, uses rising-edge capture/falling-edge drive, and ends when `CS` returns
+high. Source: datasheet, pp. 41-44.
 
 ## Output Reads
 

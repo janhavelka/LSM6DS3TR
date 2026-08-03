@@ -10,14 +10,23 @@
 |---|---|---|
 | Device name | The primary PDF is for `LSM6DS3TR-C`; compact notes keep that suffix when citing datasheet facts. | Datasheet, p. 1 |
 | Source priority | Register addresses and bit meanings in these notes come from the Rev. 3 datasheet, not general design-tip PDFs. | Inventory |
-| Application note | AN5130 defines feature recipes, filter behavior, settling, FIFO interpretation, and self-test procedures. Long verbatim examples remain in audit-only extracts rather than this maintained paraphrase. | [Source baseline](README.md#current-official-source-baseline) |
+| Application note | AN5130 defines feature recipes, filter behavior, settling, FIFO interpretation, and self-test procedures. Long verbatim examples remain in audit-only extracts rather than this maintained paraphrase. | [Source baseline](00_reference_index.md#current-official-source-baseline) |
 
 ## Revision Notes
 
 - The source datasheet is Rev. 3, May 2017. Source: datasheet, p. 1.
 - Revision history includes updates to the I2C interface section, FIFO section,
   FIFO reading procedure, `SW_RESET`, `CTRL1_XL`, and `CTRL8_XL`. Source:
-  datasheet, p. 113.
+  datasheet, p. 114.
+- ST's product page still marks LSM6DS3TR-C active/in volume production. The
+  latest official standard-driver release checked was v2.2.2 (2026-03-18), and
+  master commit `83f1e3f783a9d4693705f3559afd147fca774062` (2026-04-09) contains
+  software representation/compiler fixes, not a new silicon specification.
+  Source: [ST product page](https://www.st.com/en/mems-and-sensors/lsm6ds3tr-c.html),
+  [ST standard driver](https://github.com/STMicroelectronics/lsm6ds3tr-c-pid).
+- Manufacturing-change notices reviewed during the 2026-07-31 audit describe
+  assembly/marking/manufacturing changes with no claimed functional or
+  electrical programming change. They do not supersede the datasheet.
 
 ## Known Naming Difference
 
@@ -25,6 +34,15 @@ The sensitivity table uses +/-250 dps with 8.75 mdps/LSB, while the
 `CTRL2_G.FS_G=00` register table labels the range as 245 dps. The public API
 follows the sensitivity table and names this range `DPS_250`. Source:
 datasheet, pp. 21, 62.
+
+## Near-Name Parts Are Not Register-Compatible Evidence
+
+Search results for LSM6DS3, LSM6DSO, LSM6DSR, and LSM6DSV documents do not
+update this device. For example, LSM6DS3/TR uses `WHO_AM_I=0x69`, LSM6DSO uses
+`0x6C`, and LSM6DSV uses `0x70`; LSM6DS3TR-C is `0x6A`. A newer revision number
+for one of those PDFs must never be used to change this register map without an
+explicit part migration. Source: the corresponding ST datasheets and
+LSM6DS3TR-C datasheet p. 60.
 
 ## Feature Scope Facts
 

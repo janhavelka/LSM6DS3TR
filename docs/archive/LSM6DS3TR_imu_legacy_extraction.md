@@ -5,7 +5,7 @@
 > but the 2026-07-31 source audit found stale page citations, duplicated
 > sections, unlabelled inference, and unsafe recipes. The maintained,
 > corrected AI-facing source of truth is the
-> [chip reference](../chip-reference/README.md).
+> [chip reference](../chip-reference/00_reference_index.md).
 >
 > Known unsafe statements below include an invalid I2C auto-increment rule,
 > wrong hidden-register addresses for the NC-pin pull-up procedure, misplaced
