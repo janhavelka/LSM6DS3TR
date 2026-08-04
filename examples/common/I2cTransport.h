@@ -46,6 +46,34 @@ inline void applyTimeout(TwoWire& wire, uint32_t timeoutMs) {
 }
 
 /**
+ * @brief Perform one address-only ACK probe on the example-owned bus.
+ * @note An ACK proves only that some device is present. Use the driver's
+ *       WHO_AM_I probe to establish LSM6DS3TR-C identity.
+ * @note This owner-level transaction is intentionally outside the driver's
+ *       passive transport counters. The CLI records scan failures separately.
+ */
+inline LSM6DS3TR::Status wireProbe(TwoWire& wire, uint8_t address,
+                                   uint32_t timeoutMs) {
+  applyTimeout(wire, timeoutMs);
+  wire.beginTransmission(address);
+  return mapWireResult(wire.endTransmission(true), "I2C address probe failed");
+}
+
+/**
+ * @brief Change the application-owned Wire clock without touching the sensor.
+ * @note Success preserves driver configuration provenance because no sensor
+ *       register is accessed; the caller must serialize this owner mutation.
+ */
+inline LSM6DS3TR::Status setWireFrequency(TwoWire& wire, uint32_t frequencyHz) {
+  if (!wire.setClock(frequencyHz)) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
+                                    "Wire clock change failed",
+                                    static_cast<int32_t>(frequencyHz));
+  }
+  return LSM6DS3TR::Status::Ok();
+}
+
+/**
  * @brief Wire-based I2C write implementation.
  */
 inline LSM6DS3TR::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
@@ -126,11 +154,18 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
 
 /**
  * @brief Initialize Wire with application-selected pins, frequency, and timeout.
+ * @return OK only when bus initialization and clock selection both succeed.
  */
-inline void initWire(int sda, int scl, uint32_t freq, uint16_t timeoutMs) {
-  Wire.begin(sda, scl);
-  Wire.setClock(freq);
+inline LSM6DS3TR::Status initWire(int sda, int scl, uint32_t freq,
+                                  uint16_t timeoutMs) {
+  if (!Wire.begin(sda, scl)) {
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
+                                    "Wire initialization failed");
+  }
+  const LSM6DS3TR::Status frequency = setWireFrequency(Wire, freq);
+  if (!frequency.ok()) return frequency;
   Wire.setTimeOut(timeoutMs);
+  return LSM6DS3TR::Status::Ok();
 }
 
 }  // namespace transport

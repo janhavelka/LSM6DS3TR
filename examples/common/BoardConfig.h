@@ -38,8 +38,9 @@ static constexpr uint32_t I2C_FREQ_HZ = 400000;
 static constexpr uint16_t I2C_TIMEOUT_MS = 50;
 
 /// @brief Initialize I2C for examples using the default config.
-inline void initI2c() {
-  transport::initWire(I2C_SDA, I2C_SCL, I2C_FREQ_HZ, I2C_TIMEOUT_MS);
+/// @return Confirmed example-bus initialization status.
+inline LSM6DS3TR::Status initI2c() {
+  return transport::initWire(I2C_SDA, I2C_SCL, I2C_FREQ_HZ, I2C_TIMEOUT_MS);
 }
 
 }  // namespace board

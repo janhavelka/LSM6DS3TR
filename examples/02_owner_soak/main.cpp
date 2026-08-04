@@ -346,7 +346,15 @@ void scheduleWork(uint64_t now) {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  board::initI2c();
+  const Status busStatus = board::initI2c();
+  if (!busStatus.ok()) {
+    Serial.printf("HIL_SOAK_ABORT reason=i2c_init code=%u detail=%ld message=%s\n",
+                  static_cast<unsigned>(busStatus.code),
+                  static_cast<long>(busStatus.detail), busStatus.msg);
+    Serial.flush();
+    phase = Phase::COMPLETE;
+    return;
+  }
 
   DriverConfig config{};
   config.i2cWrite = transport::wireWrite;

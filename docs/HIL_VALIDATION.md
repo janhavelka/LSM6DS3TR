@@ -23,23 +23,76 @@ On Windows, invoke the upload as `.\scripts\pio.cmd run ...`; the wrapper
 honors `PLATFORMIO_CORE_DIR` before the default user package store. The bare
 `pio` spelling above is for POSIX shells and CI.
 
+If pioarduino 55.03.311 extraction crosses the legacy Win32 path limit, use an
+existing PlatformIO Core from a short location for the entire build/HIL shell:
+
+```powershell
+$env:PLATFORMIO_CORE_DIR = 'C:\pio'
+.\scripts\pio.cmd run -e esp32s3dev -t upload --upload-port COMx
+python tools/run_hil.py --port COMx --watchdog-reset
+```
+
+The short directory must already contain
+`C:\pio\penv\Scripts\pio.exe`; the wrapper intentionally reports a missing
+Core instead of installing another one. The HIL runner uses the same variable
+to find the matching esptool executable.
+
 On Windows, run the upload in a UTF-8 Python console (for example, set
 `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` in the invoking shell). This keeps
 esptool 5 progress and reset output from being decoded through a legacy console
 code page.
 
-First-time Windows installs may also require Win32 long-path support. The
-platform reports when it is disabled; enable it if extracting the 55.03.311
-framework package fails under the legacy path limit.
+Enabling Win32 long-path support is the system-wide alternative. The short
+Core path above is useful when policy cannot be changed.
 
-The campaign covers bind/unbind lifecycle, probe/configure, every combination
-of all/acceleration/angular-rate/temperature with ready-checked and direct
-sampling, strict invalid input, busy admission, cancellation, token/result
-identity, diagnostic reads/writes and provenance invalidation, self-test,
-accelerometer and gyroscope calibration, FIFO purge, power-down, reset, boot,
-recover, and reconcile. It checks transaction ceilings and finishes with zero
-driver transport failures. Self-test and both calibrations must succeed; a
-terminal operation with a failed primary result is not accepted as coverage.
+The targeted campaign now checks the complete operator surface in deliberate
+phases:
+
+1. It proves library, Arduino-ESP32, bundled ESP-IDF, flash, and PSRAM metadata;
+   bus-ready/address/frequency diagnostics; complete last-error/mismatch
+   records; and `help`, `?`, `version`, and `ver` output.
+2. It scans both valid SA0 addresses cooperatively and requires `0x6A` to ACK,
+   `0x6B` not to ACK, and the summary to distinguish expected address NACK from
+   a bus failure. WHO_AM_I is then proved separately by the driver.
+3. It exercises bind/unbind, same-binding no-op, job progress, busy admission,
+   bus-silent cancellation, exactly correlated terminal tokens, cached
+   last-result inspection, and configuration invalidation after a cancelled
+   self-test effect.
+4. It changes the owner bus to 100 kHz and back while sampling, rebinds to the
+   fixture-absent `0x6B`, proves the explicit transport error and its diagnostic
+   timestamp/detail, then restores `0x6A` and proves that rebind reset passive
+   diagnostic provenance.
+5. It exercises every typed profile field through the device CLI, including
+   ODR, full-scale, power, filter, sleep, HPF-mode, offset, and fixed production
+   invariants; applies and verifies the complete profile; samples with it;
+   checks the coupled 1.6 Hz/low-power rule atomically; and restores/applies the
+   default profile.
+6. It samples all, acceleration, angular rate, and temperature in both
+   ready-checked and direct modes, checking terminal timestamps/budgets,
+   nonzero transactions, validity/freshness/quality, raw and full-scale
+   provenance, monotonic sequence, conversion, and physical ranges.
+7. It runs exact cooperative `stress` counts in ready and direct modes, an
+   eight-operation `stress_mix` rotation with two probes, two reconciliations,
+   and four samples, requires successful physical-transaction deltas, then
+   cancels a long stress session and proves cancellation is not counted as a
+   failure.
+8. It performs controlled register reads/block reads, injects a one-bit managed
+   register mismatch through the restricted raw-write path, proves
+   configuration invalidation and sample gating, checks exact mismatch
+   register/expected/observed evidence, and restores the profile through the
+   normal configure job.
+9. It requires successful default self-test, both default-argument and custom
+   16-sample calibration forms, FIFO purge, power-down, configure, reset, boot,
+   recovery, and reconciliation. Failed primary maintenance results never count
+   as coverage.
+10. It finishes with a strict invalid-input matrix covering every new grammar
+    family, requires an error status where one is emitted, verifies that
+    rejected profile edits are atomic and that the matrix performs no I2C, and
+    requires zero final driver transport failures.
+
+Every driver terminal record must remain within its published transaction
+ceiling. Raw serial output and a JSON summary are written outside the repository
+unless explicit paths are supplied.
 
 ## One-Hour Owner Soak
 
@@ -71,6 +124,12 @@ ESP32-S3 native USB, DTR and RTS are set before opening the port; do not replace
 this with a monitor that momentarily asserts the boot straps.
 
 ## Retained ESP32-S3 Evidence
+
+The table and results below are retained historical physical evidence. They
+predate the expanded staged-profile, scan/address/frequency, job-inspection, and
+cooperative-stress CLI campaign described above. Do not treat the expanded
+campaign as physically passed until a new dated result is added here; its
+native parser/coordinator and HIL-runner tests are separate host evidence.
 
 All retained campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
 address `0x6A`, WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a

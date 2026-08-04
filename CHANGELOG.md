@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Expanded the fixed-memory Arduino and native ESP-IDF bring-up CLIs with
+  complete bus/configuration/transport diagnostics, current-job progress,
+  cached last-result inspection, the `help`/`version` aliases, and explicit
+  bus-readiness evidence.
+- Added application-owned ACK scanning of both valid SA0 addresses, runtime
+  `0x6A`/`0x6B` selection, and 100/400 kHz bus-frequency controls. Address
+  changes reset driver provenance and require a new identity/configuration
+  proof; ACK scanning never substitutes for WHO_AM_I.
+- Added a shared framework-neutral `ProfileCli.h` with atomic staged setters for
+  every `DeviceProfile` field, complete-profile validation, explicit rejection
+  of the BDU/FIFO/interrupt/filter invariants that version 2 does not support,
+  and exhaustive native parser/atomicity tests.
+- Added cooperative `stress` and `stress_mix` sessions with exact counts,
+  cancellation, bounded progress output, terminal/result/transaction checks,
+  sample provenance validation, stable configuration-generation checks, and
+  first/last failure plus transport-delta summaries.
+- Extended the targeted HIL runner with bus scan/address/frequency ownership,
+  staged profile apply/readback/restore, all sample quantity/readiness modes,
+  exact stress rotations and cancellation, complete diagnostic/mismatch
+  evidence, cached-result inspection, and an expanded bus-silent invalid-input
+  matrix. These are maintained campaign checks; no new physical result is
+  claimed until that runner completes on the fixture.
+
+### Changed
+
+- Kept the Arduino and native ESP-IDF operator grammars aligned while retaining
+  native transports: application-owned `Wire` on Arduino and
+  `driver/i2c_master.h` add-before-remove device-handle replacement on ESP-IDF.
+- Documented self-test/calibration arguments, maintenance boundaries, staged
+  profile values and ordering, cooperative stress semantics, diagnostic
+  evidence, and the short `PLATFORMIO_CORE_DIR=C:\pio` Windows extraction
+  workaround throughout the README, native-IDF, and HIL guides.
+- Updated CLI/IDF contract guards and HIL-runner unit tests for the expanded
+  command surface, strict arity, output records, and framework boundary.
+
+### Fixed
+
+- Prevented more than one completed console command from running in an owner
+  turn and sampled monotonic time after input handling, so a newly started job
+  cannot be polled with an earlier timestamp or share a turn with another
+  immediate diagnostic transfer.
+- Made failed Arduino bus initialization remain explicit and gate later bus
+  operations instead of allowing a zero-I2C bind to imply that the application
+  transport was ready.
+- Cleared cached terminal evidence when binding identity changes, preventing an
+  old-address result from being presented as evidence for the newly selected
+  device.
+- Reset poll-progress evidence at job admission, rejected zero-transaction
+  stress results, and made calibration deadlines scale with the verified ODR
+  and requested sample count instead of imposing a fixed 30-second ceiling.
+- Preserved the working native ESP-IDF device handle until its replacement is
+  allocated, exposed candidate-cleanup evidence, retained at most one failed
+  cleanup handle for bounded retry, and kept selected/actual address state
+  repairable after a rollback failure.
+- Hardened the targeted HIL oracle against truncated profile/sample records,
+  successful-status invalid commands, zero-I2C stress summaries, reversed job
+  timestamps, stale serial result records, missing raw/full-scale/quality
+  evidence, and incomplete default/custom calibration grammar coverage.
+
 ## [2.0.1] - 2026-08-03
 
 ### Added

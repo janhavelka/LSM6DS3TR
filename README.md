@@ -59,6 +59,20 @@ The ESP32-S3 example and HIL environments describe the validated fixture's
 4 MB embedded flash and 2 MB QSPI PSRAM. Override those board settings when
 building the repository examples for different ESP32-S3 hardware.
 
+On Windows hosts that still enforce the legacy path limit, keep the existing
+PlatformIO Core in a short directory and point the repository wrapper and HIL
+tooling at it for the current shell:
+
+```powershell
+$env:PLATFORMIO_CORE_DIR = 'C:\pio'
+.\scripts\pio.cmd run -e esp32s3dev
+```
+
+`C:\pio` must already contain the selected Core at
+`C:\pio\penv\Scripts\pio.exe`; the wrapper deliberately never installs a
+second Core. This avoids incomplete pioarduino framework/toolchain extraction
+without changing the repository's pinned platform.
+
 ### ESP-IDF
 
 Use the repository as a component through `EXTRA_COMPONENT_DIRS`, or copy it
@@ -445,9 +459,61 @@ This repository does not invent those decisions or add a second bus owner.
   runs a low-output, fixed-memory physical campaign with one callback per poll
   and checks all ready/direct quantity combinations on-device.
 
-The Arduino and native ESP-IDF CLI examples expose the same compact command
-set. `rreg`, `wreg`, `dump`, calibration, self-test, and purge are explicitly
-advanced/maintenance commands.
+### Bring-Up CLI
+
+The Arduino and native ESP-IDF examples expose the same fixed-memory operator
+surface. The console processes bounded input while the application owner keeps
+advancing at most one driver transport callback per `poll()`. Commands that
+change the binding, bus, staged profile, or hardware require the application
+and driver to be idle. `help`, `version`, `status`, `diag`, and job inspection
+remain available as evidence while work is active.
+
+| Command | Contract |
+| --- | --- |
+| `help` / `?`, `version` / `ver` | Print the exact grammar and library/platform metadata. |
+| `status` / `diag` | Print bus readiness, selected and bound address, bus frequency and timeout, binding/job/result state, configuration generation and settling time, complete last transport error with timestamp/age, register mismatch evidence, current poll progress, and staged/desired/verified profiles. No I2C. |
+| `job [current\|last]`, `result` | Show the cooperative session counters, active driver token/kind, cumulative and per-poll transaction evidence, wait/status state, and optionally the cached last terminal result. `result` is the `job last` convenience form; it does not call `takeResult()` again. |
+| `bind`, `unbind`, `cancel` | Bind/unbind are zero-sensor-I2C lifecycle operations. `cancel` is the normal bus-silent terminal path. `unbind` is an explicit hard teardown that may discard an active or untaken result and clears cached evidence. |
+| `scan` | Cooperatively issue one address-only ACK check per owner turn for the two valid SA0 addresses, `0x6A` and `0x6B`. ACK is presence only; `probe` still performs the WHO_AM_I identity proof. |
+| `addr [0x6a\|0x6b]` | Show or select the driver address. A changed address replaces the binding without a sensor transfer, resets configuration/diagnostic provenance, and requires a new `probe`/`configure`. |
+| `freq [100000\|400000]` | Show or select an owner-controlled I2C rate allowed by the chip. A successful owner-side clock/handle change preserves verified sensor configuration. |
+| `probe`, `configure`, `sample [all\|accel\|gyro\|temp] [ready\|direct]` | Start the matching tokened driver job. `configure` applies the staged profile; ready-checked and direct samples retain distinct freshness evidence. |
+| `reset`, `boot`, `recover`, `reconcile`, `powerdown` | Start the bounded lifecycle procedure and publish its exact terminal configuration/effect evidence. |
+| `selftest [5..100]` | Run both vendor self-test paths with the requested samples per baseline/stimulated phase; the default is 5. The fixture must be stationary. |
+| `calxl [samples [x y z [max_p2p_g]]]` | Run 1..1000 accelerometer samples (default 32) against an expected gravity vector (default `0 0 1`, each component -16..16 g, vector magnitude 0.8..1.2 g) and a positive peak-to-peak limit up to 4 g (default 0.08 g). The CLI derives its absolute deadline from sample count and the verified accelerometer ODR. |
+| `calg [samples [max_p2p_dps]]` | Run 1..1000 gyroscope samples (default 32) with a positive peak-to-peak limit up to 2000 dps (default 3 dps). The CLI derives its absolute deadline from sample count and the verified gyroscope ODR. |
+| `purge <1..2048>`, `rreg <reg>`, `wreg <reg> <value>`, `dump <reg> <1..32>` | Explicit maintenance/diagnostic calls. Purge is destructive. Accepted raw writes invalidate configuration provenance; diagnostics are never normal acquisition policy. |
+| `stress [count] [quantity] [mode]` | Cooperatively run an exact 1..10000 operation count (default 100), validating terminal kind/state/status, nonzero bounded transactions, no hardware-change claim, sample masks/freshness, stable configuration generation, monotonic sequence, and conversion. Quantity defaults to `all`; mode defaults to `ready`, and quantity/mode may be supplied while count is omitted. |
+| `stress_mix [count]` | Run a deterministic non-destructive rotation of probe, reconcile, ready-checked sample, and direct sample. It reports exact success/failure and transport deltas and accepts `cancel`. |
+
+`profile`, `profile show`, `cfg`, and `settings` print the staged draft plus
+the driver's desired and verified copies and whether each matches. `profile
+validate` rechecks the whole draft, `profile defaults` stages a fresh default,
+and `profile apply` starts the normal identity-checking configure job. Every
+`profile set` builds a candidate copy and commits it only when the entire
+resulting `DeviceProfile` is valid; a parse, arity, cross-field, or unsupported
+value error leaves the draft unchanged.
+
+| `profile set` field | Accepted value |
+| --- | --- |
+| `xl_odr` | `pd`/`powerdown`, `1.6`, `12.5`, `26`, `52`, `104`, `208`, `416`, `833`, `1660`, `3330`, or `6660` |
+| `xl_fs` | `2`, `4`, `8`, or `16` g |
+| `xl_power` | `hp`/`high` or `lp`/`low`; 1.6 Hz requires LP and LP is limited to 208 Hz |
+| `xl_lpf2` | Boolean `0/1`, `off/on`, or `false/true` |
+| `g_odr` | `pd`/`powerdown`, `12.5`, `26`, `52`, `104`, `208`, `416`, `833`, `1660`, `3330`, or `6660` |
+| `g_fs` | `125`, `250`, `500`, `1000`, or `2000` dps |
+| `g_power` | `hp`/`high` or `lp`/`low`; LP is limited to 208 Hz |
+| `g_lpf1`, `g_sleep` | Boolean; LPF1 requires gyro high-performance mode |
+| `g_hpf_mode` | `0.016`, `0.065`, `0.260`, or `1.040`; the register mode is staged while production HPF remains disabled |
+| `offset_weight` | `1` or `16`, selecting the chip's nominal 1 mg/LSB or 16 mg/LSB modes (0.9765625 or 15.625 mg/LSB exactly) |
+| `offset` | Three signed register values, each from -127 through 127 |
+| `xl_slope_hp`, `xl_6d_lpf`, `g_hpf`, `fifo`, `interrupts` | Boolean invariant probes; only `false`/`off`/`0` is a valid version 2 production profile |
+| `bdu` | Boolean invariant probe; only `true`/`on`/`1` is valid for managed burst reads |
+
+Because every field edit must leave a valid complete draft, coupled changes
+may require a safe order. For example, stage 208 Hz before selecting LP, then
+stage 1.6 Hz. `profile defaults` is the deterministic escape from an unwanted
+draft; it does not touch hardware until `profile apply`.
 
 ## Building And Validation
 
@@ -457,7 +523,8 @@ python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python tools/check_chip_docs_coverage.py
-python -m py_compile tools/run_hil.py tools/run_owner_soak.py
+python -m py_compile tools/run_hil.py tools/run_owner_soak.py tools/test_run_hil.py
+python tools/test_run_hil.py
 python tools/build_docs.py
 pio test -e native
 pio run -e esp32s3dev
@@ -470,7 +537,9 @@ python tools/check_package_contract.py
 On Windows, invoke each `pio` command through `.\scripts\pio.cmd`; the wrapper
 honors `PLATFORMIO_CORE_DIR` and otherwise uses the current user's default
 PlatformIO installation. This keeps package and compiler selection consistent
-with the HIL tooling.
+with the HIL tooling. The short `C:\pio` session example under Installation is
+the recommended workaround when Windows path limits prevent pioarduino package
+extraction.
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile

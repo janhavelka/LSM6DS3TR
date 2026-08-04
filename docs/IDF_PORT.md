@@ -35,9 +35,60 @@ also has a hard total callback ceiling reported in its terminal result.
 
 The native example must not include `Arduino.h`, `Wire.h`, `String`, `Serial`,
 `TwoWire`, Arduino compatibility facades, or Arduino CLI sources.
-The Arduino and native ESP-IDF examples expose the same compact command set;
-repository guards enforce parity without compiling Arduino sources into the
-IDF component.
+The Arduino and native ESP-IDF examples expose the same fixed-memory operator
+grammar; repository guards enforce parity without compiling Arduino sources
+into the IDF component. Both process at most one completed console command per
+owner turn, sample the operation time after input handling, and grant the
+driver one callback per `poll()`. This keeps direct diagnostics, cooperative
+sessions, and driver jobs from silently sharing a turn's physical-transfer
+budget.
+
+## Native CLI Ownership Details
+
+The expanded example is an application owner, not an alternate driver layer:
+
+- `status`/`diag` report bus readiness, selected and bound address, frequency,
+  timeout, configuration state/generation/settling, transport totals, complete
+  last-error status and time/age, mismatch evidence, active/pending state,
+  current poll transactions/wait status, and staged/desired/verified profiles.
+  `job [current|last]` adds cooperative-session progress and optional cached
+  terminal evidence; `result` is its last-result convenience form. These paths
+  perform no I2C.
+- `scan` calls `i2c_master_probe()` for `0x6A` and `0x6B`, one address per owner
+  turn. An ACK proves presence only; the tokened driver `probe` still checks
+  WHO_AM_I before identity-dependent use.
+- `addr [0x6a|0x6b]` registers a candidate owner device handle before retiring
+  the working handle. Allocation failure therefore preserves the old handle;
+  removal failure attempts to discard the candidate, reports cleanup evidence,
+  and retains at most one failed-cleanup handle for a bounded retry. The
+  owner then rebinds the library with zero sensor I2C. A successful address
+  change deliberately clears
+  configuration/transport/result provenance and requires a fresh
+  probe/configure.
+- `freq [100000|400000]` changes `i2c_device_config_t::scl_speed_hz` through the
+  same bounded handle-replacement/rollback path. Because this changes only the
+  owner transport, successful frequency replacement preserves verified sensor
+  configuration.
+- `profile set` uses the shared framework-neutral `ProfileCli.h` parser. It
+  copies the staged `DeviceProfile`, applies one typed field, validates the
+  complete candidate, and commits only on success. All profile fields have an
+  explicit CLI representation; unsupported production values such as BDU off,
+  FIFO/interrupt enable, gyro HPF enable, slope/high-pass output, and 6D
+  filtering are accepted as grammar probes but rejected atomically by the
+  production validator. `profile apply` is the ordinary tokened configure job.
+- `stress [count] [quantity] [mode]` and `stress_mix [count]` are fixed-memory
+  application coordinators over ordinary driver jobs. They keep only counters,
+  first/last failure, pending request identity, sequence/generation evidence,
+  and transport baselines; they do not add a request queue or retry policy.
+  Every terminal result is checked for success, a nonzero transaction count,
+  transaction bounds, a
+  non-destructive hardware-effect claim, and job-specific provenance before it
+  counts as successful.
+
+The complete command/value grammar, including self-test and calibration
+arguments, is maintained in the main
+[bring-up CLI reference](../README.md#bring-up-cli) and the
+[native example README](../examples/idf/basic/README.md#cli-surface).
 
 Run the repository guards after changing the example:
 

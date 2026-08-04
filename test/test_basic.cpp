@@ -14,6 +14,8 @@
 using namespace LSM6DS3TR;
 using namespace LSM6DS3TRTest;
 
+void runProfileCliTests();
+
 namespace {
 
 DeviceProfile makeProfile() {
@@ -3520,6 +3522,7 @@ void test_read_only_and_destructive_jobs_fail_precisely_at_every_transfer_stage(
 
 int main() {
   UNITY_BEGIN();
+  runProfileCliTests();
   RUN_TEST(test_status_contract);
   RUN_TEST(test_validate_driver_config_and_address);
   RUN_TEST(test_validate_profile_rejects_all_unsupported_or_unsafe_values);
