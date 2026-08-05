@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-05
+
 ### Added
 
 - Expanded the fixed-memory Arduino and native ESP-IDF bring-up CLIs with
@@ -29,8 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   staged profile apply/readback/restore, all sample quantity/readiness modes,
   exact stress rotations and cancellation, complete diagnostic/mismatch
   evidence, cached-result inspection, and an expanded bus-silent invalid-input
-  matrix. These are maintained campaign checks; no new physical result is
-  claimed until that runner completes on the fixture.
+  matrix. The expanded campaign completed on the ESP32-S2 fixture with 1,634
+  final successful callbacks, zero final transport failures, both self-tests,
+  gyroscope calibration, and 94 strict invalid-input checks. Accelerometer
+  calibration was explicitly omitted because no validated gravity-orientation
+  fixture was available.
 
 ### Changed
 
@@ -76,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made Arduino example bus startup pass the owner-selected clock atomically to
   `Wire.begin()` instead of requiring an immediate S2 clock reconfiguration,
   and retained the exact bus-initialization code/detail/message in diagnostics.
+
+### Removed
+
+- Removed the superseded implementation-manual forwarding stub and unsafe
+  legacy monolithic extraction. The maintained chip reference, official ST
+  datasheet and application note, their offline text extracts, and the optional
+  application-math design-tip PDFs remain available in the repository.
 
 ## [2.0.1] - 2026-08-03
 
@@ -476,7 +488,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added sensor-sync register constants (corrected in 2.0.0).
 - Made public headers safe to include from Arduino translation units by removing the `DISABLED` macro collision around `FifoDecimation`
 
-[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/janhavelka/LSM6DS3TR/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/janhavelka/LSM6DS3TR/compare/v1.1.0...v1.2.0

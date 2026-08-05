@@ -278,13 +278,6 @@ def main() -> int:
                 f"observed {observed!r}"
             )
 
-    for path in (
-        ROOT / "LSM6DS3TR_imu_implementation_manual.md",
-        ROOT / "docs" / "archive" / "LSM6DS3TR_imu_legacy_extraction.md",
-    ):
-        if not path.is_file():
-            errors.append(f"missing retained documentation path: {path.relative_to(ROOT)}")
-
     if errors:
         print("Chip documentation coverage FAILED")
         for error in errors:

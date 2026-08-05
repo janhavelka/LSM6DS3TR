@@ -150,13 +150,39 @@ nonzero gravitational acceleration evidence. For
 ESP32-S3 native USB, DTR and RTS are set before opening the port; do not replace
 this with a monitor that momentarily asserts the boot straps.
 
-## Retained ESP32-S3 Evidence
+## Retained Physical Evidence
 
-The table and results below are retained historical physical evidence. They
-predate the expanded staged-profile, scan/address/frequency, job-inspection, and
-cooperative-stress CLI campaign described above. Do not treat the expanded
-campaign as physically passed until a new dated result is added here; its
-native parser/coordinator and HIL-runner tests are separate host evidence.
+### ESP32-S2 Expanded Campaign
+
+The expanded targeted campaign passed on 2026-08-05 from 14:15:27 to 14:17:16
+UTC on the ESP32-S2 native-TinyUSB fixture at `COM10`. The fixture used 4 MB
+embedded flash, no PSRAM, address `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C,
+and a 50 ms callback timeout. Runtime metadata proved Arduino-ESP32 3.3.11 and
+bundled ESP-IDF 5.5.5.
+
+The firmware banner recorded `40ba050` with a dirty tree because the validated
+candidate was committed immediately after the run; those tested source changes
+are commit [`1419ea2`](https://github.com/janhavelka/LSM6DS3TR/commit/1419ea2a50b56e04875cf4a7268661ffc8f01165).
+The campaign completed every profile, sampling, stress, cancellation,
+diagnostic, invalidation, reconciliation, FIFO-purge, power-down, reset, boot,
+recovery, and strict invalid-input phase. Both sensor self-tests and both
+gyroscope calibration forms passed. Transport counters moved from 70 to 1,634
+successful callbacks with zero final failures; all 94 invalid-input checks
+passed.
+
+Both accelerometer calibration forms were explicitly skipped because no
+validated `+Z` gravity fixture was available. This result proves the mechanical
+driver, transport, self-test, and lifecycle contracts but makes no physical
+accelerometer-calibration or mounting-transform claim. No one-hour S2 soak was
+run.
+
+### ESP32-S3 Historical Evidence
+
+The ESP32-S3 table and results below predate the expanded staged-profile,
+scan/address/frequency, job-inspection, and cooperative-stress campaign. They
+remain evidence for the driver operation families, calibrated fixture, and
+long owner soak; the expanded operator campaign is evidenced by the S2 result
+above.
 
 All retained campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
 address `0x6A`, WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a
@@ -266,10 +292,11 @@ device result. TunnelMonitor-node's complete native suite then passed
 
 ## Intentional Physical Limits
 
-This board is strapped at `0x6A`; it cannot validate the alternate `0x6B`
-address without a hardware change. The campaign also does not disconnect the
-sensor, force SDA/SCL low, inject electrical NACK/timeout/brownout faults, or
-claim a product mounting transform. Deterministic software fault behavior,
+The retained fixtures are strapped at `0x6A`; they cannot validate a physical
+sensor at alternate address `0x6B` without a hardware change. The campaigns do
+not disconnect the sensor, force SDA/SCL low, inject electrical
+NACK/timeout/brownout faults, or claim a product mounting transform.
+Deterministic software fault behavior,
 partial/ambiguous effects, deadlines, cancellation, clock boundaries, and
 every transfer-stage failure are covered by the native fault-injection suite.
 Electrical fault recovery, alternate-address hardware, mounting/axis signs,

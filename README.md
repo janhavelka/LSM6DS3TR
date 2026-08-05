@@ -46,7 +46,7 @@ Add this repository at an exact release tag or commit:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/LSM6DS3TR.git#v2.0.1
+  https://github.com/janhavelka/LSM6DS3TR.git#v2.1.0
 ```
 
 The repository's `platformio.ini` pins pioarduino `platform-espressif32`
@@ -543,7 +543,10 @@ extraction.
 
 CI also compiles the native IDF example for `esp32s2` and `esp32s3` with
 ESP-IDF 5.4.4. Hardware-in-loop validation is separate from host and compile
-evidence; maintained commands, coverage, and retained physical results are in
+evidence. The expanded version 2.1 campaign passed on the ESP32-S2 fixture with
+accelerometer calibration explicitly omitted because no validated gravity
+orientation was available. Maintained commands, exact coverage limits, and
+retained physical results are in
 the [HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md).
 
 ### API Documentation

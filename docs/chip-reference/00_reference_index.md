@@ -78,8 +78,8 @@ not choose whichever statement is more convenient.
   semantic facts, high-risk register fields, support labels, and agreement with
   `CommandTable.h`.
 - The curated `docs/chip-reference/` tree is included in library packages and
-  generated documentation. Vendor PDFs, raw text extracts, and the legacy
-  monolithic extraction remain repository-only audit artifacts.
+  generated documentation. Vendor PDFs and raw text extracts remain
+  repository-only audit artifacts.
 - A source update must record the new official revision, date, page count,
   source URL, local SHA-256, changed datasheet revision-history entries, and a
   fresh semantic audit. A matching filename alone is not evidence of alignment.

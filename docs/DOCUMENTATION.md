@@ -33,12 +33,9 @@ README, guide, and <a href="../CHANGELOG.md">changelog</a> in the same change.
   PDFs, their mechanically extracted text, and local hashes are retained in the
   repository for offline source audit. They are deliberately excluded from the
   library package.
-- The [legacy monolithic extraction](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/archive/LSM6DS3TR_imu_legacy_extraction.md)
-  preserves previously collected detail but contains known unsafe statements.
-  It is not an implementation source; the maintained chip reference supersedes
-  it.
-- Vendor design-tip PDFs are optional application-math background. They do not
-  define this chip's register map or the production library contract.
+- The PDFs under `docs/design_tips/` are retained as optional application-math
+  background for calibration, tilt, dead reckoning, and noise analysis. They
+  do not define this chip's register map or the production library contract.
 
 Vendor sources define silicon facts but do not automatically define the library
 API. When they conflict with a maintained contract, update the owning chip
