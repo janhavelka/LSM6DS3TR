@@ -97,6 +97,7 @@ OWNER_SAFE_TOKENS = [
     "samples < 5U",
     "samples == 0U",
     "last_error present=",
+    "bus_init code=",
     "mismatch present=",
     "settle_remaining_ms=",
     "job poll token=",

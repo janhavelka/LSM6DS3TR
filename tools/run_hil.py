@@ -60,6 +60,9 @@ BUS_RE = re.compile(
     r"bus ready=(yes|no) selected_address=0x([0-9A-Fa-f]{2}) bound_address=([^\s]+) "
     r"frequency_hz=(\d+) timeout_ms=(\d+)"
 )
+BUS_INIT_RE = re.compile(
+    r"bus_init code=(\d+) detail=(-?\d+) message=([^\r\n]+)"
+)
 DRIVER_STATE_RE = re.compile(
     r"bound=(yes|no) active=(yes|no) result_pending=(yes|no) "
     r"config=(\w+) generation=(\d+) valid_after=(\d+) settle_remaining_ms=(\d+)"
@@ -113,9 +116,12 @@ class JobResult:
 
 
 class SerialCli:
-    def __init__(self, port: str, baud: int, raw_log: pathlib.Path) -> None:
+    def __init__(
+        self, port: str, baud: int, raw_log: pathlib.Path, assert_dtr: bool = False
+    ) -> None:
         self.port = port
         self.baud = baud
+        self.assert_dtr = assert_dtr
         self.raw_log = raw_log.open("a", encoding="utf-8", newline="\n")
         self.serial: serial.Serial | None = None
         self.last_command_at = 0.0
@@ -137,11 +143,15 @@ class SerialCli:
         endpoint.dsrdtr = False
         # Configure these before open. Setting the pyserial defaults after open
         # can hold GPIO0 active and reset an ESP32-S3 into its ROM downloader.
-        endpoint.dtr = False
+        endpoint.dtr = self.assert_dtr
         endpoint.rts = False
         endpoint.open()
         self.serial = endpoint
-        self.log("HOST", f"opened {self.port} baud={self.baud} dtr=0 rts=0")
+        self.log(
+            "HOST",
+            f"opened {self.port} baud={self.baud} "
+            f"dtr={int(self.assert_dtr)} rts=0",
+        )
 
     def close(self) -> None:
         self.close_endpoint()
@@ -339,6 +349,21 @@ def parse_bus(output: str) -> tuple[bool, int, str, int, int]:
         int(match.group(4)),
         int(match.group(5)),
     )
+
+
+def require_last_transport_error(output: str) -> None:
+    match = LAST_ERROR_RE.search(output)
+    require(match is not None and match.group(1) == "yes",
+            "last transport error evidence was not exposed")
+    assert match is not None
+    require(int(match.group(2)) != 0,
+            "transport error code was not exposed")
+    # The detail field is context-specific. Zero is meaningful for a read
+    # length mismatch because it records that the transport returned no bytes.
+    require(bool(match.group(4).strip()),
+            "transport error message was not exposed")
+    require(int(match.group(5)) > 0,
+            "transport error timestamp was not exposed")
 
 
 def parse_driver_state(output: str) -> tuple[str, str, str, str, int, int, int]:
@@ -602,7 +627,13 @@ def update_ranges(ranges: dict[str, list[int]], output: str) -> None:
             require(-40_000 <= value <= 85_000, f"temperature outside rating: {value}")
 
 
-def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
+def run_targeted(
+    cli: SerialCli,
+    summary: dict[str, object],
+    expected_flash_bytes: int = EXPECTED_FLASH_BYTES,
+    expected_psram_bytes: int = EXPECTED_PSRAM_BYTES,
+    run_accel_calibration: bool = True,
+) -> None:
     print("HIL targeted: metadata and startup", flush=True)
     version = cli.exchange("version", "platform arduino=")
     expected_banner = f"LSM6DS3TR {EXPECTED_LIBRARY_VERSION}"
@@ -622,11 +653,11 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
         f"wrong ESP-IDF version {platform_match.group(2)}",
     )
     require(
-        int(platform_match.group(3)) == EXPECTED_FLASH_BYTES,
+        int(platform_match.group(3)) == expected_flash_bytes,
         f"wrong flash size {platform_match.group(3)}",
     )
     require(
-        int(platform_match.group(4)) == EXPECTED_PSRAM_BYTES,
+        int(platform_match.group(4)) == expected_psram_bytes,
         f"PSRAM was not initialized: {platform_match.group(4)} bytes",
     )
     summary["platform"] = {
@@ -642,6 +673,11 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
     require("bound=yes" in status, "driver was not bound at baseline")
     bus = parse_bus(status)
     require(bus[0], "application-owned I2C bus was not ready")
+    bus_init = BUS_INIT_RE.search(status)
+    require(bus_init is not None, "missing retained bus initialization status")
+    assert bus_init is not None
+    require(int(bus_init.group(1)) == 0,
+            f"bus initialization failed: {bus_init.group(3)}")
     require(bus[1] == 0x6A and bus[2] == "0x6A", "wrong initial address")
     require(bus[3] == 400000, "wrong initial I2C frequency")
     require(bus[4] == 50, "wrong transport timeout")
@@ -701,16 +737,7 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
     require(absent_probe.state == "failed" and absent_probe.status_code != 0,
             "absent 0x6B probe did not fail explicitly")
     failed_diag = cli.exchange("diag", "mismatch present=")
-    last_error_match = LAST_ERROR_RE.search(failed_diag)
-    require(last_error_match is not None and last_error_match.group(1) == "yes",
-            "last transport error evidence was not exposed")
-    assert last_error_match is not None
-    require(int(last_error_match.group(3)) != 0,
-            "transport error detail was not exposed")
-    require(bool(last_error_match.group(4).strip()),
-            "transport error message was not exposed")
-    require(int(last_error_match.group(5)) > 0,
-            "transport error timestamp was not exposed")
+    require_last_transport_error(failed_diag)
     require(parse_status_code(cli.exchange("addr 0x6a", "profile_apply_required=yes")) == 0,
             "0x6A restore failed")
     require(parse_transport(cli.exchange("status", "transport ok="))[1] == 0,
@@ -911,12 +938,25 @@ def run_targeted(cli: SerialCli, summary: dict[str, object]) -> None:
     require("restore_code=0" in self_test.output,
             "self-test did not restore configuration")
 
-    for key, command in (
+    calibration_commands = [
         ("calg_default", "calg"),
-        ("calxl_default", "calxl"),
         ("calg_custom", "calg 16 5"),
-        ("calxl_custom", "calxl 16 0 0 1 0.1"),
-    ):
+    ]
+    if run_accel_calibration:
+        calibration_commands.extend((
+            ("calxl_default", "calxl"),
+            ("calxl_custom", "calxl 16 0 0 1 0.1"),
+        ))
+    else:
+        summary["calxl_default"] = {
+            "skipped": True,
+            "reason": "validated +Z gravity fixture not supplied",
+        }
+        summary["calxl_custom"] = {
+            "skipped": True,
+            "reason": "validated +Z gravity fixture not supplied",
+        }
+    for key, command in calibration_commands:
         calibration = cli.job(command)
         summary[key] = {
             "state": calibration.state,
@@ -999,9 +1039,9 @@ def esptool_command() -> list[str]:
     )
 
 
-def watchdog_reset(port: str, raw_log: pathlib.Path) -> None:
+def watchdog_reset(port: str, raw_log: pathlib.Path, chip: str) -> None:
     command = esptool_command() + [
-        "--chip", "esp32s3", "--port", port, "--baud", "115200",
+        "--chip", chip, "--port", port, "--baud", "115200",
         "--before", "default-reset", "--after", "watchdog-reset",
         "--no-stub", "chip-id",
     ]
@@ -1014,13 +1054,14 @@ def watchdog_reset(port: str, raw_log: pathlib.Path) -> None:
     known_windows_disconnect = (
         os.name == "nt" and "A serial exception error occurred" in evidence
     )
-    if ("ESP32-S3" not in evidence or not reset_reported or
+    chip_label = "ESP32-S2" if chip == "esp32s2" else "ESP32-S3"
+    if (chip_label not in evidence or not reset_reported or
             (completed.returncode != 0 and not known_windows_disconnect)):
         raise HilFailure(f"watchdog reset did not execute: {evidence}")
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         if port_present(port):
-            # Windows publishes the ESP32-S3 native USB COM name before the
+            # Windows publishes the ESP32 native USB COM name before the
             # replacement endpoint is fully stable. Opening during that window
             # can lose later packets even though the first command succeeds.
             time.sleep(2.5)
@@ -1043,6 +1084,26 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
     parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--chip", choices=("esp32s2", "esp32s3"), default="esp32s3")
+    parser.add_argument(
+        "--assert-dtr",
+        action="store_true",
+        help="assert DTR while open (required by the ESP32-S2 TinyUSB fixture)",
+    )
+    parser.add_argument(
+        "--expected-flash-bytes", type=int, default=EXPECTED_FLASH_BYTES
+    )
+    parser.add_argument(
+        "--expected-psram-bytes", type=int, default=EXPECTED_PSRAM_BYTES
+    )
+    parser.add_argument(
+        "--skip-accel-calibration",
+        action="store_true",
+        help=(
+            "skip accelerometer calibration when no validated +Z gravity "
+            "fixture is available; the summary records the omitted coverage"
+        ),
+    )
     parser.add_argument("--watchdog-reset", action="store_true")
     parser.add_argument("--raw-log", type=pathlib.Path)
     parser.add_argument("--summary", type=pathlib.Path)
@@ -1064,19 +1125,30 @@ def main() -> int:
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "port": args.port,
         "baud": args.baud,
+        "chip": args.chip,
+        "assert_dtr": args.assert_dtr,
+        "expected_flash_bytes": args.expected_flash_bytes,
+        "expected_psram_bytes": args.expected_psram_bytes,
+        "skip_accel_calibration": args.skip_accel_calibration,
         "raw_log": str(raw_log.resolve()),
         "result": "running",
     }
     cli: SerialCli | None = None
     try:
         if args.watchdog_reset:
-            watchdog_reset(args.port, raw_log)
-        cli = SerialCli(args.port, args.baud, raw_log)
+            watchdog_reset(args.port, raw_log, args.chip)
+        cli = SerialCli(args.port, args.baud, raw_log, args.assert_dtr)
         try:
             cli.drain(2.0)
         except HilFailure:
             pass
-        run_targeted(cli, summary)
+        run_targeted(
+            cli,
+            summary,
+            args.expected_flash_bytes,
+            args.expected_psram_bytes,
+            not args.skip_accel_calibration,
+        )
         summary["result"] = "passed"
         print("HIL campaign PASSED", flush=True)
         return_code = 0

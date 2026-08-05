@@ -158,12 +158,20 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
  */
 inline LSM6DS3TR::Status initWire(int sda, int scl, uint32_t freq,
                                   uint16_t timeoutMs) {
-  if (!Wire.begin(sda, scl)) {
+  // Supply the owner-selected clock to begin() so initialization is one
+  // atomic peripheral operation. ESP32-S2 must not depend on a second
+  // immediate i2cSetClock() reconfiguration succeeding.
+  if (!Wire.begin(sda, scl, freq)) {
     return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
                                     "Wire initialization failed");
   }
-  const LSM6DS3TR::Status frequency = setWireFrequency(Wire, freq);
-  if (!frequency.ok()) return frequency;
+  const uint32_t actualFrequency = Wire.getClock();
+  if (actualFrequency != freq) {
+    (void)Wire.end();
+    return LSM6DS3TR::Status::Error(
+        LSM6DS3TR::Err::I2C_ERROR, "Wire frequency verification failed",
+        static_cast<int32_t>(actualFrequency));
+  }
   Wire.setTimeOut(timeoutMs);
   return LSM6DS3TR::Status::Ok();
 }

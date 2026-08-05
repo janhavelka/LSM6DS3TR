@@ -4,15 +4,40 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import run_hil
 
 
 class HilParserTests(unittest.TestCase):
+    def test_hil_target_options_preserve_s3_defaults_and_accept_s2_fixture(self) -> None:
+        with mock.patch("sys.argv", ["run_hil.py", "--port", "COM30"]):
+            defaults = run_hil.parse_args()
+        self.assertEqual(defaults.chip, "esp32s3")
+        self.assertFalse(defaults.assert_dtr)
+        self.assertFalse(defaults.skip_accel_calibration)
+        self.assertEqual(defaults.expected_flash_bytes, 4 * 1024 * 1024)
+        self.assertEqual(defaults.expected_psram_bytes, 2 * 1024 * 1024)
+
+        with mock.patch(
+            "sys.argv",
+            [
+                "run_hil.py", "--port", "COM8", "--chip", "esp32s2",
+                "--assert-dtr", "--expected-psram-bytes", "0",
+                "--skip-accel-calibration",
+            ],
+        ):
+            s2 = run_hil.parse_args()
+        self.assertEqual(s2.chip, "esp32s2")
+        self.assertTrue(s2.assert_dtr)
+        self.assertTrue(s2.skip_accel_calibration)
+        self.assertEqual(s2.expected_psram_bytes, 0)
+
     def test_bus_and_full_diagnostics_parsers(self) -> None:
         transcript = (
             "bus ready=yes selected_address=0x6A bound_address=0x6A "
             "frequency_hz=400000 timeout_ms=50\n"
+            "bus_init code=0 detail=0 message=OK\n"
             "last_error present=yes code=27 detail=2 message=address NACK "
             "time_ms=1234 age_ms=7\n"
             "mismatch present=yes register=0x10 expected=0x40 observed=0x44\n"
@@ -21,6 +46,10 @@ class HilParserTests(unittest.TestCase):
             run_hil.parse_bus(transcript),
             (True, 0x6A, "0x6A", 400000, 50),
         )
+        bus_init = run_hil.BUS_INIT_RE.search(transcript)
+        self.assertIsNotNone(bus_init)
+        assert bus_init is not None
+        self.assertEqual((bus_init.group(1), bus_init.group(3)), ("0", "OK"))
         error = run_hil.LAST_ERROR_RE.search(transcript)
         self.assertIsNotNone(error)
         assert error is not None
@@ -31,6 +60,19 @@ class HilParserTests(unittest.TestCase):
         assert mismatch is not None
         self.assertEqual((mismatch.group(1), mismatch.group(2), mismatch.group(3),
                           mismatch.group(4)), ("yes", "10", "40", "44"))
+
+    def test_transport_error_evidence_accepts_zero_bytes_received(self) -> None:
+        transcript = (
+            "last_error present=yes code=25 detail=0 "
+            "message=I2C read length mismatch time_ms=17183 age_ms=499\n"
+        )
+        run_hil.require_last_transport_error(transcript)
+
+        with self.assertRaises(run_hil.HilFailure):
+            run_hil.require_last_transport_error(
+                "last_error present=yes code=0 detail=0 message=OK "
+                "time_ms=17183 age_ms=499\n"
+            )
 
     def test_profile_parser_accumulates_all_staged_lines(self) -> None:
         transcript = (

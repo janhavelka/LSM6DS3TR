@@ -66,7 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened the targeted HIL oracle against truncated profile/sample records,
   successful-status invalid commands, zero-I2C stress summaries, reversed job
   timestamps, stale serial result records, missing raw/full-scale/quality
-  evidence, and incomplete default/custom calibration grammar coverage.
+  evidence, valid zero-byte transport-error details, and incomplete
+  default/custom calibration grammar coverage.
+- Added explicit ESP32-S2 HIL endpoint support with target-selectable watchdog
+  reset, asserted-DTR TinyUSB operation, and fixture-specific flash/PSRAM
+  metadata assertions while preserving the existing ESP32-S3 defaults. The
+  runner can explicitly skip accelerometer calibration when no validated
+  gravity-orientation fixture is available and records the omitted coverage.
+- Made Arduino example bus startup pass the owner-selected clock atomically to
+  `Wire.begin()` instead of requiring an immediate S2 clock reconfiguration,
+  and retained the exact bus-initialization code/detail/message in diagnostics.
 
 ## [2.0.1] - 2026-08-03
 

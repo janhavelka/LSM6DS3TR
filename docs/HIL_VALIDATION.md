@@ -37,6 +37,31 @@ The short directory must already contain
 Core instead of installing another one. The HIL runner uses the same variable
 to find the matching esptool executable.
 
+The retained ESP32-S3 fixture uses the runner defaults: DTR deasserted and
+2 MiB expected PSRAM. For an ESP32-S2 native-TinyUSB fixture with no PSRAM,
+assert DTR so CDC traffic is delivered and state the hardware expectation
+explicitly:
+
+```powershell
+python tools/run_hil.py --port COMx --chip esp32s2 --assert-dtr --expected-psram-bytes 0
+```
+
+These options change only host endpoint handling and metadata assertions; they
+do not weaken any driver, transaction, diagnostic, setter, or maintenance
+check in the targeted campaign.
+
+Accelerometer calibration additionally requires a stationary fixture with a
+validated `+Z` gravity orientation. When that mechanical reference is not
+available, omit only that optional operation and record the coverage limit:
+
+```powershell
+python tools/run_hil.py --port COMx --chip esp32s2 --assert-dtr --expected-psram-bytes 0 --skip-accel-calibration
+```
+
+The campaign still runs gyroscope calibration, both sensor self-tests, every
+sampling mode, stress, diagnostics, recovery, and lifecycle procedure. A pass
+with this option does not claim physical accelerometer-calibration coverage.
+
 On Windows, run the upload in a UTF-8 Python console (for example, set
 `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` in the invoking shell). This keeps
 esptool 5 progress and reset output from being decoded through a legacy console
@@ -83,8 +108,10 @@ phases:
    normal configure job.
 9. It requires successful default self-test, both default-argument and custom
    16-sample calibration forms, FIFO purge, power-down, configure, reset, boot,
-   recovery, and reconciliation. Failed primary maintenance results never count
-   as coverage.
+   recovery, and reconciliation. `--skip-accel-calibration` omits only the two
+   orientation-dependent accelerometer calibration forms and records that
+   limitation in the JSON summary. Failed primary maintenance results never
+   count as coverage.
 10. It finishes with a strict invalid-input matrix covering every new grammar
     family, requires an error status where one is emitted, verifies that
     rejected profile edits are atomic and that the matrix performs no I2C, and

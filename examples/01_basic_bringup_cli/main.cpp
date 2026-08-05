@@ -29,6 +29,8 @@ DeviceProfile stagedProfile{};
 SensorAddress selectedAddress = SensorAddress::SA0_GND;
 uint32_t selectedFrequencyHz = board::I2C_FREQ_HZ;
 bool busReady = false;
+Status busInitializationStatus =
+    Status::Error(Err::I2C_ERROR, "I2C bus initialization not attempted");
 OperationToken pendingToken{};
 bool configureAfterProbe = false;
 PollResult lastPoll{};
@@ -727,6 +729,10 @@ void printDiagnostics(uint64_t now) {
                     : "none",
                 static_cast<unsigned long>(selectedFrequencyHz),
                 board::I2C_TIMEOUT_MS);
+  Serial.printf("bus_init code=%u detail=%ld message=%s\n",
+                static_cast<unsigned>(busInitializationStatus.code),
+                static_cast<long>(busInitializationStatus.detail),
+                busInitializationStatus.msg);
   Serial.printf("bound=%s active=%s result_pending=%s config=%s generation=%lu valid_after=%" PRIu64 " settle_remaining_ms=%" PRIu64 "\n",
                 device.isBound() ? "yes" : "no",
                 device.operationActive() ? "yes" : "no",
@@ -1210,9 +1216,9 @@ void setup() {
   Serial.printf("LSM6DS3TR owner-safe example %s\n", LSM6DS3TR::VERSION_FULL);
   printHelp();
 
-  const Status busStatus = board::initI2c();
-  printStatus(busStatus);
-  if (!busStatus.ok()) return;
+  busInitializationStatus = board::initI2c();
+  printStatus(busInitializationStatus);
+  if (!busInitializationStatus.ok()) return;
   busReady = true;
   const Status bound = bindDriver();
   printStatus(bound);

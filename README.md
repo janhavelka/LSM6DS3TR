@@ -471,7 +471,7 @@ remain available as evidence while work is active.
 | Command | Contract |
 | --- | --- |
 | `help` / `?`, `version` / `ver` | Print the exact grammar and library/platform metadata. |
-| `status` / `diag` | Print bus readiness, selected and bound address, bus frequency and timeout, binding/job/result state, configuration generation and settling time, complete last transport error with timestamp/age, register mismatch evidence, current poll progress, and staged/desired/verified profiles. No I2C. |
+| `status` / `diag` | Print bus readiness plus the retained initialization code/detail/message, selected and bound address, bus frequency and timeout, binding/job/result state, configuration generation and settling time, complete last transport error with timestamp/age, register mismatch evidence, current poll progress, and staged/desired/verified profiles. No I2C. |
 | `job [current\|last]`, `result` | Show the cooperative session counters, active driver token/kind, cumulative and per-poll transaction evidence, wait/status state, and optionally the cached last terminal result. `result` is the `job last` convenience form; it does not call `takeResult()` again. |
 | `bind`, `unbind`, `cancel` | Bind/unbind are zero-sensor-I2C lifecycle operations. `cancel` is the normal bus-silent terminal path. `unbind` is an explicit hard teardown that may discard an active or untaken result and clears cached evidence. |
 | `scan` | Cooperatively issue one address-only ACK check per owner turn for the two valid SA0 addresses, `0x6A` and `0x6B`. ACK is presence only; `probe` still performs the WHO_AM_I identity proof. |
