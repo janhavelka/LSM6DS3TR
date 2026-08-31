@@ -1,456 +1,245 @@
-# LSM6DS3TR-C Library Audit — 2026-08-27
-
-Source-backed audit of the driver, examples, and tooling against the
-LSM6DS3TR-C datasheet (Rev 3) and AN5130 (Rev 1). Every claim below was
-re-derived from the vendor text or from a compiled repro, not from a similar
-part.
-
-Baseline at audit time: 100/100 native tests pass; every repository contract
-checker passes.
-
-**Already fixed in this change** (mechanical, verified, tests green) — see
-[CHANGELOG.md](../CHANGELOG.md). This report covers only what still needs a
-decision.
-
-Each item states the defect, the failure it produces, and one concrete minimal
-fix. Fixes prefer removing or relocating logic over adding guards.
-
----
-
-## Priority 1 — Wrong results or broken tooling
-
-### 1.1 Calibration averaging throws away the precision it exists to produce
-
-**Where:** [src/LSM6DS3TR.cpp:1807](../src/LSM6DS3TR.cpp#L1807)
-
-`_stepCalibration` accumulates every sample into `int64_t` sums, then collapses
-the mean back to `int16_t` raw counts before scaling:
-
-```cpp
-const RawAxes mean{static_cast<int16_t>(_sumX / _samplesDone), ...};
-const Axes measured = rawAxesToFloat(mean, scale);
-```
-
-The integer divide discards the fractional part — exactly the quantity that
-averaging up to 1000 samples is meant to recover. Worse, C++ integer division
-truncates toward zero, so the error is asymmetric: positive means round down,
-negative means round up. Because noise dithers the samples, the expected
-reported bias is biased toward zero by roughly half an LSB, and that offset
-does **not** shrink as `samples` grows.
-
-**Failure:** a gyroscope bias of +0.004 dps at ±250 dps (8.75 mdps/LSB) is
-reported as 0.000 dps regardless of whether the caller averaged 32 or 1000
-samples. The documented purpose of `CalibrationRequest::samples` is defeated.
-
-**Fix — one helper, two call sites, no new state.** Beside `rawAxesToFloat`
-([src/LSM6DS3TR.cpp:302](../src/LSM6DS3TR.cpp#L302)):
-
-```cpp
-Axes meanMicroAxesToFloat(int64_t sumX, int64_t sumY, int64_t sumZ,
-                          uint16_t count, int32_t microPerLsb) {
-  const float divisor = 1000000.0f * static_cast<float>(count);
-  return Axes{static_cast<float>(sumX * microPerLsb) / divisor,
-              static_cast<float>(sumY * microPerLsb) / divisor,
-              static_cast<float>(sumZ * microPerLsb) / divisor};
-}
-```
-
-Delete the `mean` declaration (it has no other use) and replace the two
-`rawAxesToFloat(mean, scale)` calls with
-`meanMicroAxesToFloat(_sumX, _sumY, _sumZ, _samplesDone, sensitivity)`. Keep
-the `scale` locals: `peakToPeak` is a genuine integer count span and is already
-correct.
-
-`count` cannot be zero (control reaches this point only once
-`_samplesDone >= request.samples`, and `samples` is validated 1..1000).
-Overflow is impossible: `|sum| <= 1000 * 32768 = 3.28e7`, times 70000 =
-2.3e12, far inside `int64_t`.
-
-**Do not** apply the same change to the self-test averages at
-[src/LSM6DS3TR.cpp:1626](../src/LSM6DS3TR.cpp#L1626). `_phaseBaseline` and
-`_phaseStimulus` are `RawAxes` members carried across substeps; converting them
-would require changing the member types and would shift the reported deltas
-against the vendor's 90..1700 mg / 150..700 dps thresholds. That is a separate,
-HIL-revalidated change.
-
----
-
-### 1.2 Owner-soak firmware spins at full rate when a job start is rejected
-
-**Where:** [examples/02_owner_soak/main.cpp:338](../examples/02_owner_soak/main.cpp#L338)
-
-`startProbe`/`startReconcile`/`startSample` set `phase` before `acceptStart()`,
-and no schedule deadline (`nextSampleMs`, `nextMaintenanceMs`) is advanced when
-a start is rejected — they advance only inside `handleTerminal()`, which never
-runs because no token was issued. `scheduleWork()` therefore re-evaluates the
-same overdue deadline on the next `loop()` iteration, forever.
-
-**Failure:** each attempt runs `Serial.printf("HIL_START_FAILURE ...")` plus
-`Serial.flush()`. Once the driver enters a state that rejects starts (for
-example a configuration invalidated by a mismatch, which `reconcile` does not
-repair), the device enters an unbounded full-rate print loop for the remaining
-~1 hour of the soak, swamping the host monitor.
-
-**Fix — stop, do not back off.** A persistent start rejection already means the
-soak has failed (`operationFailures > 0` guarantees `HIL_SOAK_FAIL`), so match
-the existing abort style at lines 248-266 rather than adding a retry policy:
-
-1. Propagate the `bool` that `acceptStart`/`start*` already return but every
-   call site discards.
-2. Add `uint32_t consecutiveStartFailures = 0;` beside the other file-scope
-   counters.
-3. In `scheduleWork()`, route both branches through one handler that increments
-   the counter on rejection, resets it on success, and aborts the soak with the
-   existing terminal-record path once it exceeds a small fixed bound.
-
-This removes the loop without inventing backoff, and keeps the "deterministic,
-bounded, no unbounded retries" contract the driver itself follows.
-
----
-
-### 1.3 Wire read transport cannot report NACK, timeout, or bus faults
-
-**Where:** [examples/common/I2cTransport.h:133](../examples/common/I2cTransport.h#L133)
-
-`wireWriteRead()` runs the write phase with `wire->endTransmission(false)` and
-checks the result. On Arduino-ESP32 — the only platform `library.json` declares
-— `endTransmission(false)` performs **no bus activity**: it sets `nonStop` and
-returns 0 unconditionally. So the `if (result != 0)` branch is unreachable, and
-the real combined transaction happens inside `requestFrom()`, which discards
-the underlying `esp_err_t` and returns only a byte count.
-
-**Failure:** every read failure — address NACK, data NACK, timeout, arbitration
-loss — surfaces as `Err::I2C_ERROR` / "I2C read length mismatch" / detail 0.
-`I2C_NACK_ADDR`, `I2C_NACK_DATA`, `I2C_TIMEOUT` and `I2C_BUS` can never be
-produced by a read. `DriverDiagnostics::lastTransportError` is therefore
-useless for read faults, and an owner cannot distinguish "sensor absent" from
-"bus stuck" — the exact distinction its recovery policy needs.
-
-**Fix — narrow, and mind two traps.**
-
-The tempting fix (call `i2cWriteReadNonStop()` directly to recover the
-`esp_err_t`) is **wrong as usually written**, for two reasons worth recording:
-
-- `TwoWire::num` is `protected`, so the adapter cannot recover the bus index
-  from the `TwoWire*` it receives in `user`. Hardcoding bus `0` would silently
-  drive the wrong peripheral when the caller passes `Wire1`.
-- `beginTransmission()` takes the TwoWire FreeRTOS semaphore, released only by
-  `endTransmission(true)` or `requestFrom()`. Jumping to the raw HAL without
-  one of those holds the lock forever and deadlocks the next Wire call.
-
-The safe minimal improvement is to keep the Wire API and classify what Wire
-does expose: distinguish `read == 0` (nothing arrived — treat as
-`I2C_NACK_ADDR`) from `0 < read < rxLen` (truncated transfer — `I2C_BUS`), and
-delete the unreachable `endTransmission(false)` result check with a comment
-explaining why it cannot fail. Full `esp_err_t` fidelity requires the native
-ESP-IDF transport, which already has it — that is the honest place to point
-owners who need it.
-
----
-
-### 1.4 ESP-IDF example hides its CLI exactly when it is needed
-
-**Where:** [examples/idf/basic/main/main.cpp:1520](../examples/idf/basic/main/main.cpp#L1520)
-
-`app_main()` prints the I2C failure and `return`s before `cliLoop()`. ESP-IDF
-deletes the main task when `app_main` returns, so `help`, `status`, `diag`,
-`scan`, `bind` are all unreachable in the one situation an operator needs them.
-The Arduino twin does the opposite: `setup()` returns early but `loop()` keeps
-servicing input, and `printDiagnostics()` reports the retained failure as
-`bus_init code=... detail=... message=...`.
-
-The IDF example also emits no `bus_init` line at all;
-`tools/check_cli_contract.py` requires that token in the Arduino main, while
-`check_idf_example_contract.py` silently omits it — so the guards do not catch
-the divergence.
-
-**Fix — mirror the Arduino lifecycle, do not band-aid the printf:**
-
-1. Add file-scope `Status busInitializationStatus = Status::Error(Err::INVALID_CONFIG, "I2C bus initialization not attempted");`
-2. Change `configureI2c()` to return `Status` via the existing `mapEspError()`
-   helper instead of raw `esp_err_t`, removing the impedance mismatch at the
-   call site rather than duplicating a mapping there.
-3. Rewrite the `app_main` tail to print status, bind only when the bus is
-   ready, and **always** enter `cliLoop()`.
-4. Add `bus_init code=` to `REQUIRED_IDF_TOKENS` in
-   `tools/check_idf_example_contract.py` so the two examples cannot diverge
-   again.
-
----
-
-## Priority 2 — Contract and provenance defects
-
-### 2.1 Successful results report a stale mismatch register
-
-**Where:** [src/LSM6DS3TR.cpp:1996](../src/LSM6DS3TR.cpp#L1996)
-
-`_finish()` unconditionally overwrites the per-operation
-`_workingResult.configuration.{mismatchRegister,expectedValue,observedValue}`
-with the *driver-lifetime* `_mismatch*` members. Those are cleared only by a
-fully successful CONFIGURE/RECONCILE/RESET/BOOT/RECOVER. Every other job kind —
-PROBE, SAMPLE, POWER_DOWN, CALIBRATION, FIFO_PURGE — therefore publishes a
-**SUCCEEDED** result carrying a mismatch triple from an earlier, unrelated
-operation.
-
-The header documents these as per-operation evidence ("First register with
-failed readback, or zero"), while the lifetime view already exists separately
-on `DriverDiagnostics`. The two structs are supposed to differ; today they do
-not.
-
-**Failure:** a CONFIGURE fails on `CTRL1_XL`; the owner then runs POWER_DOWN,
-which succeeds. `result.configuration.mismatchRegister` reads `0x10` on a
-successful power-down, so an owner that logs mismatch evidence on success
-reports a register fault that did not occur.
-
-**Fix — make `_finish` stop writing the field, and let `_recordMismatch` own it:**
-
-1. Delete the three `_workingResult.configuration.mismatch*` assignments in
-   `_finish()` (**lines 1996-1998**). Keep the `state`/`generation`/
-   `validAfterUptimeMs` assignments — those are genuinely current-state.
-2. Delete the three `_workingResult.configuration.* = 0;` lines in
-   `_stepConfigure()` (**lines 1102-1104**). **Keep lines 1099-1101**, which
-   clear the lifetime `_mismatch*`; removing those would stop `diagnostics()`
-   clearing after a successful repair.
-3. Keep `_recordMismatch()`'s `_workingResult` writes — after step 1 they
-   become the only populator of the per-operation triple.
-
-**Expected behavior change to note in the changelog:** if a SELF_TEST's primary
-phase recorded a mismatch and its restore then succeeded, the mismatch now
-survives into the result instead of being wiped by the restore's clearing
-block. That is the correct per-operation semantics, but it will look like a
-change.
-
-**Add a regression test** for the invariant nothing currently covers: a
-SUCCEEDED POWER_DOWN after a failed CONFIGURE must report
-`configuration.mismatchRegister == 0` while `diagnostics().mismatchRegister`
-still reports the failing register.
-
----
-
-### 2.2 A read-only reconcile can push data validity into the future
-
-**Where:** [src/LSM6DS3TR.cpp:1112](../src/LSM6DS3TR.cpp#L1112)
-
-The settle gate is preserved only when the state *before* the operation was
-`KNOWN`. If it was `SETTLING`, control falls into the `else` branch, which
-recomputes `requiredSettleUs()` and sets `_validAfterUptimeMs = nowMs + settleMs`.
-
-Reconcile issues no writes at all (`MAX_RECONCILE_TRANSACTIONS = 35` = 33
-readbacks + 2 identity reads), so it causes no filter or turn-on transient.
-Restarting the AN5130-derived gate delays validity for no silicon reason, and
-the reconcile job then blocks on its own fabricated deadline.
-
-`SETTLING`-before-operation is reachable and designed: a configure that times
-out inside its settle window leaves `SETTLING` with a valid
-`_validAfterUptimeMs`, because the rollback paths only restore state when it is
-`APPLYING`.
-
-**Fix — state the predicate the code already means:**
-
-```cpp
-const bool priorGateTrusted =
-    _configurationStateBeforeOperation == ConfigurationState::KNOWN ||
-    _configurationStateBeforeOperation == ConfigurationState::SETTLING;
-uint64_t settleMs = 0U;
-if (reconcileOnly && priorGateTrusted) {
-  _validAfterUptimeMs = _validAfterBeforeOperationMs;
-  _configurationState = _configurationStateBeforeOperation;
-} else { /* unchanged */ }
-```
-
-Restrict the predicate to exactly those two states: `UNKNOWN`/`UNCONFIGURED`
-must keep recomputing a conservative gate, because the write time is genuinely
-unknown there. `_validAfterBeforeOperationMs` is never garbage under either
-trusted state — `_invalidateConfiguration()` zeroes it whenever the state
-leaves KNOWN/SETTLING, and SETTLING is only ever set together with a freshly
-computed deadline.
-
-*(The related snapshot bug — the raw field never resolving SETTLING→KNOWN — is
-already fixed in this change.)*
-
----
-
-### 2.3 `poll(nowMs, 0)` under-reports `waiting` during self-test time gates
-
-**Where:** [src/LSM6DS3TR.cpp:2176](../src/LSM6DS3TR.cpp#L2176)
-
-`_stepSelfTest`'s `averageStep` enters a bus-silent ODR-cadence gate after every
-sample (`+20 ms` accelerometer, `+5 ms` gyroscope). In the `maxTransactions == 0`
-branch, `_waiting` is cleared and `safeComputeStep` covers only substeps
-3/7/13/17 and the restore — the sampling substeps 4/5/8/9/14/15/18/19 fall
-through to a residual chain that handles RESET/BOOT/RECOVER and
-SAMPLE/CALIBRATION but omits SELF_TEST.
-
-The identical gate in `_stepCalibration` *is* handled, so this is an oversight,
-not a design choice.
-
-**Failure:** the same driver state answers `waiting` differently depending on
-the budget passed. An owner following the documented contract ("`waiting` means
-time or sensor data must advance") busy-spins through a self-test's inter-sample
-gates instead of yielding.
-
-**Fix — four edits; edit 4 alone is not safe.** Establish under SELF_TEST the
-invariant SAMPLE and CALIBRATION already hold ("`_waitUntilMs != 0` means a live
-gate"):
-
-1. `beginRestore()` lambda — add `_waitUntilMs = 0;` after `_step = 0;`.
-   Safe: `_stepConfigure` never reads `_waitUntilMs`.
-2. `routeFailureToRestore` — add `_waitUntilMs = 0;` before the
-   `_substep = 90/91/92/93` chain.
-3. End of the averaged-phase completion block (~line 1665) — add
-   `_waitUntilMs = 0;` next to `_step = 0;`. **Do not** add it to the
-   substep 4/8/14/18 completion: substeps 5/9/15/19 legitimately consume that
-   gate.
-4. Widen the residual arm to include `_job == JobKind::SELF_TEST`.
-
-Applying 4 without 1-3 trades false negatives for false positives (a stale
-`_waitUntilMs` would claim a gate where none exists).
-
----
-
-### 2.4 Reset/boot 15 ms guard is anchored to a pre-write timestamp
-
-**Where:** [src/LSM6DS3TR.cpp:1309](../src/LSM6DS3TR.cpp#L1309)
-
-Substep 6 arms the device-inaccessible guard with
-`_waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS)`, where `nowMs` is the
-time the owner passed into `poll()` **before** the CTRL3_C command was written.
-Every transaction executed earlier in that same `poll()` call, plus the command
-write itself, is charged against the 15 ms budget; millisecond truncation costs
-up to another millisecond. The guard can therefore release ~14 ms of real time
-after the BOOT command, inside the window AN5130 says registers are
-inaccessible.
-
-**Fix — re-anchor only:**
-
-- Substep 6: clear the guard (`_waitUntilMs = 0;`) while keeping
-  `_substep = 7; _waiting = true;`. The poll loop then breaks and the owner
-  supplies a fresh clock.
-- Head of substep 7, before any read:
-  `if (_waitUntilMs == 0U) { _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS); _waiting = true; return inProgressStatus(); }`
-- **Also update** the zero-budget branch (~line 2172), which computes
-  `_waiting = nowMs < _waitUntilMs` for `_substep == 7U`; with the `0` sentinel
-  it would report `waiting=false` during the arming gap. Either use
-  `_waiting = (_waitUntilMs == 0U) || nowMs < _waitUntilMs;` or, cleaner,
-  introduce a dedicated `_guardArmed` bool instead of overloading `0`.
-
-**Do not** route the transport failure at line 1320 through `_readyPolls`. The
-README, the class contract, and `Config.h` all state the driver never retries
-transport; the owner is the retry authority.
-
----
-
-## Priority 3 — Dead surface and honest contracts
-
-### 3.1 `Err::DEVICE_NOT_FOUND` and `Err::FIFO_EMPTY` are never produced
-
-**Where:** [include/LSM6DS3TR/Status.h:30](../include/LSM6DS3TR/Status.h#L30)
-
-No line in `src/`, `include/`, `test/`, `examples/` or `tools/` constructs
-either code. An absent device surfaces as the raw transport error or as
-`CHIP_ID_MISMATCH`; an empty FIFO is treated as *success* by `_stepFifoPurge`.
-
-**Do not delete them.** `Err` is declared append-only within API major 2;
-removing values 19 and 25 renumbers `CHIP_ID_MISMATCH` through `I2C_BUSY` and
-silently breaks any consumer that logged or persisted the numeric code. Do not
-synthesize an emission site either — returning `FIFO_EMPTY` from the
-`unread == 0` short-circuit would turn a legitimately empty purge into an error
-the caller must special-case, contradicting the README.
-
-**Fix — the defect is in two doc comments, and the two values differ:**
-
-- `DEVICE_NOT_FOUND` belongs to the *transport* vocabulary an integrator's
-  `I2cWriteFn`/`I2cWriteReadFn` may return. Retag it: "Application transport
-  reported no device at the address; never synthesized by the driver."
-- `FIFO_EMPTY` describes an outcome of a driver generation that no longer
-  exists. Mark it reserved: "Reserved; the bounded FIFO purge reports an empty
-  FIFO as success."
-
-Revisit both at the next major version.
-
-### 3.2 `startSample`'s BDU guard is unreachable
-
-**Where:** [src/LSM6DS3TR.cpp:734](../src/LSM6DS3TR.cpp#L734)
-
-`_verifiedProfile` is only ever assigned from `_desiredProfile` (or from
-`_selfTestRestoreProfile`, itself a copy of `_verifiedProfile`), and
-`_desiredProfile` is only assigned in `startConfigure` **after**
-`validateProfile` has rejected `blockDataUpdate == false`. The preceding
-`_checkReadyForKnownConfiguration` additionally guarantees
-`_hasVerifiedProfile`. The branch cannot fire — and its error code would be
-wrong if it could: a profile legitimately lacking BDU is
-`UNSUPPORTED_PROFILE`, not `CONFIGURATION_UNKNOWN`.
-
-**Recommended fix:** delete the three lines and leave the BDU requirement at its
-single chokepoint, `validateProfile`, with a one-line comment noting that
-`_checkReadyForKnownConfiguration` guarantees a validated profile.
-
-**Do not** replace it with `assert()`: the library has zero assert usage today,
-`<cassert>` vanishes under `NDEBUG`, and aborting contradicts the Status-based
-error model. If real defense-in-depth against a device that silently diverged
-is wanted, the correct shape is the one `_stepFifoPurge` already uses — read
-CTRL3_C inside the sample state machine and fail with `CONFIGURATION_UNKNOWN`
-on a missing BDU bit. That costs one extra transaction per sample and requires
-bumping `MAX_SAMPLE_TRANSACTIONS`; it is a design change, not a cleanup, and
-must not be bundled with the deletion.
-
-### 3.3 Owner-soak physical-range guards do not match the configured full scale
-
-**Where:** [examples/02_owner_soak/main.cpp:130](../examples/02_owner_soak/main.cpp#L130)
-
-`updateRanges()` bounds converted samples against nominal-range literals:
-
-```cpp
-if (maximum > 2100000LL)   noteContractFailure("accel_range");   // 2.1 g
-if (maximum > 251000000LL) noteContractFailure("gyro_range");    // 251 dps
-```
-
-The soak always runs the default profile (±2 g, ±250 dps). ST's sensitivities
-are not `full_scale / 32768`:
-
-- Accelerometer: `61 µg/LSB × 32768 = 1,998,848 µg` — **below** the 2,100,000
-  threshold. The `accel_range` check is dead code that can never fire.
-- Gyroscope: `8750 µdps/LSB × 32768 = 286,720,000 µdps` = 286.7 dps — **above**
-  the 251 dps threshold. A legitimate saturated reading trips a false
-  `gyro_range` contract failure and fails an otherwise-passing soak.
-
-**Fix — split the two things this check conflates.** A range check computed
-from the nominal label cannot validate conversion; do the real check in
-`validateSample()`, where the raw sample is still in scope, by recomputing the
-expectation from the provenance the driver stamped on the sample and requiring
-exact equality:
-
-```cpp
-if (converted.accelMicroG.x != static_cast<int64_t>(result.sample.accel.x) * accelSens) ...
-```
-
-using `accelSensitivityMicroGPerLsb(result.sample.accelFullScale, ...)` and the
-gyroscope equivalent. That tests what the guide claims ("conversion") and is
-genuinely non-dead. If a plausibility bound is still wanted, derive it from
-`32768 × sensitivity`, not from the nominal range label.
-
----
-
-## Deliberately not changed
-
-Recorded so they are not re-litigated:
-
-- **`MAX_TRANSPORT_WRITE_BYTES = 33` while the driver writes at most 2 bytes.**
-  Not a defect. It is a hard upper bound on buffers presented to injected
-  callbacks, frozen by `test_compile_contracts.cpp` because external owners
-  size static buffers from it. A 2-byte write satisfies an at-most-33 bound; no
-  block-write API ever existed.
-- **The 14-byte output burst in `_stepSample` does not set
-  `hardwareStateMayHaveChanged`.** Reading the high output byte does clear the
-  latched ready flag, but "consuming read" is this repository's term for the
-  FIFO purge — the one read that destroys queued device data. Sampling is
-  documented as non-destructive throughout.
-- **`CTRL7_G` diagnostic mask `0xF8`.** Correct. In the column-mangled datasheet
-  extract, `ROUNDING_STATUS` is a wrapped cell occupying **bit 3** — the same
-  wrap pattern as `USR_OFF_W` in `CTRL6_C`, whose bit-3 position is
-  independently known. The mask covers bits 7:3 and excludes reserved bits 2:0.
-- **`SW_RESET` waits 15 ms though AN5130 specifies ~50 µs.** Deliberate library
-  policy, already recorded in the ambiguity ledger.
-- **Retaining host-integration contract facts in the HIL guide.** These were
-  generalized in this change rather than deleted; the capacity numbers are the
-  portable part and apply to any host firmware.
+# Code Audit Resolution Report — 2026-08-31
+
+This report records the resolution of every finding in the 2026-08-27 code
+audit. The review started from clean, synchronized `main` at `0183f63`, with
+local `HEAD` and `origin/main` identical. Each finding was checked against the
+current implementation rather than accepted from the report at face value.
+
+The review also checked the maintained chip-reference index and the applicable
+protocol, timing, initialization, filter, self-test, and ambiguity topics before
+changing silicon-facing behavior. For the Arduino transport finding, the
+pinned Arduino-ESP32 3.3.11 `Wire` and ESP32 HAL sources were inspected to
+verify the actual error and locking contracts.
+
+## Outcome
+
+| Finding | Verdict | Resolution |
+|---|---|---|
+| 1.1 Calibration averaging precision | Valid | Fixed with one shared floating-point mean-scale helper. |
+| 1.2 Owner-soak start rejection loop | Valid | Fixed with immediate terminal failure; no retry state was needed. |
+| 1.3 Arduino read error collapse | Valid; proposed remedy was incomplete | Replaced the lossy `Wire` staging path with the pinned ESP32 HAL combined transaction. |
+| 1.4 ESP-IDF CLI hidden on bus failure | Valid | Retained typed initialization status and always entered the CLI. |
+| 2.1 Stale mismatch in later results | Valid | Separated operation-local evidence from retained diagnostics. |
+| 2.2 Reconcile restarts a settle gate | Valid | Preserved trusted `KNOWN` and `SETTLING` gates exactly. |
+| 2.3 Self-test zero-budget wait evidence | Valid; adjacent positive-budget defect also existed | Made post-burst wait reporting consistent and cleared completed gates. |
+| 2.4 Reset/boot guard uses pre-write time | Valid; proposed 15 ms re-arm was still short at a clock boundary | Re-armed from fresh time with a one-tick quantization margin; applied the same rule to self-test settles. |
+| 3.1 Unused status values | Partly valid; the report's enum numbers and transport conclusion were wrong | Retained append-only values and corrected their API documentation. |
+| 3.2 Unreachable sample BDU guard | Valid | Removed the redundant branch. |
+| 3.3 Invalid owner-soak range guards | Valid | Replaced them with exact provenance-based conversion checks. |
+
+No breaking public API or enum reorder was introduced. `library.json` remains
+the version source of truth, and the changes are recorded under Unreleased.
+
+## Finding-by-finding decisions
+
+### 1.1 Calibration averaging precision
+
+The finding was correct. Both calibration paths divided the 64-bit raw sums
+using integer arithmetic, narrowed the result to `int16_t`, and only then
+converted to physical units. This discarded any fractional-LSB mean despite
+the fixed-count accumulator.
+
+The implementation now computes one floating-point scale of
+`sensitivity / sampleCount` and applies it directly to each 64-bit sum. This is
+simpler than adding separate mean members or multiplying large integer sums by
+fixed-unit sensitivities, and it avoids unnecessary integer-product bounds.
+Peak-to-peak calculation remains unchanged and exact over the signed 16-bit raw
+domain. A two-sample regression with raw X values 1 and 0 now proves the
+expected 0.004375 dps bias instead of zero.
+
+### 1.2 Owner-soak start rejection loop
+
+The finding was correct. The soak changed phase before knowing whether the
+driver had accepted the job. A rejected start therefore left no valid token but
+could repeatedly revisit the same phase.
+
+The simplest proper policy is not a retry counter: the soak scheduler only
+attempts starts while it owns an idle driver, so rejection is already an
+invariant failure. `acceptStart()` now commits the requested phase only after a
+valid accepted token and moves directly to `COMPLETE` after logging one
+`HIL_START_FAILURE`. The host runner already treats that marker as an immediate
+failure.
+
+### 1.3 Arduino write-read transport errors
+
+The defect was valid, but wrapping the existing `Wire` calls could not fix it.
+In the pinned Arduino-ESP32 3.3.11 implementation,
+`endTransmission(false)` only stages a non-stop transfer and returns success;
+the following `requestFrom()` performs the combined transaction and discards
+its native `esp_err_t`. Consequently the old adapter could not distinguish a
+timeout, NACK, busy bus, or generic bus failure.
+
+The adapter now calls `i2cWriteReadNonStop()` using the public
+`TwoWire::getBusNum()`. That HAL call performs the same combined repeated-start
+transaction, owns the bus lock, accepts the bounded timeout, and returns the
+native error. The mapping preserves timeout, busy, address-not-found, and raw
+error detail. Failures whose ACK phase is not identified remain generic
+`I2C_ERROR`; the adapter does not invent an address-versus-data NACK claim.
+Static contract checks now require this path and reject a return to
+`endTransmission(false)` staging.
+
+This remains intentionally specific to the repository's pinned ESP32 Arduino
+integration in `examples/common/`; no platform header entered the framework-
+neutral library core.
+
+### 1.4 ESP-IDF CLI availability after initialization failure
+
+The finding was correct. `app_main()` returned after bus creation or device
+registration failure, removing the diagnostic interface at the point it was
+most useful.
+
+`configureI2c()` now returns the example's normal typed `Status`; a file-scope
+status retains the exact initialization result. Binding and the startup probe
+only run after successful initialization, but `cliLoop()` is entered in either
+case. `diag` prints a stable `bus_init code=... detail=... message=...` record.
+The native-example checker pins both the diagnostic token and the non-fatal
+control flow.
+
+### 2.1 Operation-local versus lifetime mismatch evidence
+
+The finding was correct. `_recordMismatch()` correctly populated both the
+active result and lifetime diagnostics, but `_finish()` then copied the
+lifetime mismatch into every later result.
+
+The final copy was removed. A newly accepted operation already zero-initializes
+its working result, while `_recordMismatch()` remains the sole writer of that
+operation's mismatch evidence. The lifetime `_mismatch*` fields remain visible
+through `diagnostics()` until a complete verification clears them. A regression
+now fails configure readback, succeeds at power-down, proves that power-down's
+result has no mismatch, and independently proves that diagnostics retain the
+older failure.
+
+No special self-test status policy was added: self-test does not legitimately
+derive its primary result from an unrelated lifetime mismatch.
+
+### 2.2 Reconciliation of an unexpired settling profile
+
+The finding was correct. Reconcile preserved the prior gate only when the
+captured state was `KNOWN`; an unexpired, already-verified `SETTLING` profile
+therefore received a newly computed later `validAfterUptimeMs`.
+
+A read-only reconciliation now trusts both captured `KNOWN` and `SETTLING`
+states and restores the exact prior state and timestamp. Unknown or
+unconfigured provenance still receives a conservative newly computed gate.
+The earlier effective-state snapshot remains important: an already-expired raw
+`SETTLING` member is captured as `KNOWN` at admission. A regression constructs
+an unexpired gate, reconciles before it expires, checks all 35 callbacks are
+reads, and proves neither the timestamp nor generation changes.
+
+### 2.3 Self-test and calibration wait evidence
+
+The reported zero-budget inconsistency was real. The same omission also made a
+positive-budget poll that ended on a non-final data burst under-report the
+newly armed cadence wait. Calibration had the same adjacent positive-budget
+problem.
+
+Every non-final self-test and calibration data burst now arms both the deadline
+and `waiting`. A final self-test average explicitly clears both so it does not
+publish a stale wait while moving to the next write stage. Zero-budget polling
+recognizes self-test gates as it already did for sample/calibration gates.
+Regression coverage checks all 24 data bursts of the minimum self-test: the
+discard plus five averaged reads in each of four phases, including that each
+sixth/final burst reports no obsolete cadence wait.
+
+### 2.4 Post-command and self-test settle timing
+
+The finding was correct: reset/boot/recovery previously based their 15 ms guard
+on the `nowMs` supplied before the command transaction. Re-arming a nominal
+15 ms interval on a later poll was still not sufficient, however, because the
+public examples truncate monotonic time to whole milliseconds; the elapsed
+physical interval can otherwise be almost one tick short.
+
+After the command write, the state machine now leaves the deadline unarmed. A
+later safe compute-only step, including `poll(nowMs, 0)`, samples fresh time and
+sets the deadline to the policy interval plus one millisecond tick. The same
+pre-write anchoring pattern existed in all four vendor self-test settles
+(100 ms acceleration baseline, 100 ms stimulus, 150 ms gyroscope baseline,
+50 ms stimulus), so those were corrected consistently. Constants describing
+vendor or library minimums were not falsified, transaction ceilings did not
+change, and absolute operation deadlines still take precedence.
+
+The existing ready check following each self-test sample-cadence gate remains
+the final proof of new data; adding extra substeps there would not improve the
+hardware evidence.
+
+### 3.1 `DEVICE_NOT_FOUND` and `FIFO_EMPTY`
+
+The report correctly observed that the core does not synthesize these codes,
+but two details were wrong:
+
+- `DEVICE_NOT_FOUND` is value 18 and `FIFO_EMPTY` is value 23, not 19 and 25.
+- A user transport is allowed to return `DEVICE_NOT_FOUND`; the core preserves
+  typed callback status rather than normalizing it away.
+
+`FIFO_EMPTY` remains unnecessary for the current purge contract because an
+already-empty FIFO is a successful zero-discard result. Both values are
+append-only public API and removing them would renumber every following code.
+They were therefore retained with accurate Doxygen: `DEVICE_NOT_FOUND` is an
+optional transport classification, while `FIFO_EMPTY` is reserved by the
+current core contract.
+
+### 3.2 Redundant BDU guard
+
+The finding was correct. A sample can only use a verified profile, and every
+verified production profile has already passed `validateProfile()`, which
+requires BDU. The later runtime branch was unreachable and suggested a second
+source of truth. It was deleted and replaced with a local explanation of the
+existing invariant. Admission behavior and I2C traffic are unchanged.
+
+### 3.3 Owner-soak range assertions
+
+The finding was correct. The fixed acceleration threshold could never be
+crossed at the default ±2 g sensitivity, while the gyroscope threshold was
+below valid full-scale output at ±250 dps and could reject legitimate raw
+values.
+
+Acceleration and angular-rate maxima are still retained as useful telemetry,
+but the invalid physical-limit assertions were removed. The soak now verifies
+the meaningful invariant exactly: each converted axis must equal its raw
+signed count multiplied by the sensitivity selected by that sample's immutable
+full-scale provenance. Temperature retains the documented -40..85 °C
+operating-range check. The HIL guide now describes these checks accurately.
+
+## Additional contract guards
+
+- The Arduino CLI checker requires the error-preserving HAL combined read and
+  rejects the old lossy repeated-start sequence.
+- The same checker pins owner-soak phase commit after accepted starts, terminal
+  rejection handling, exact conversion checks, and removal of the stale range
+  literals.
+- The ESP-IDF checker requires retained `bus_init` diagnostics and proves the
+  owner CLI remains after conditional initialization/binding.
+- Chip timing and maintained-document coverage checks continue to pass.
+- Timing documentation now distinguishes vendor minima from the library's
+  one-tick integer-clock margin.
+- Strict documentation/package validation exposed two pre-existing stale
+  Markdown links; the documentation map and HIL changelog reference were
+  corrected instead of suppressing those validators.
+
+## Verification evidence
+
+The following completed locally on the synchronized source:
+
+- `.\scripts\pio.cmd test -e native`: **103/103 tests passed**.
+- `.\scripts\pio.cmd run -e esp32s3dev -e esp32s3hil -e esp32s2dev`:
+  **all three Arduino firmware environments built successfully** against
+  Arduino-ESP32 3.3.11 and bundled ESP-IDF 5.5.5.
+- `python tools/check_cli_contract.py`: passed.
+- `python tools/check_idf_example_contract.py`: passed.
+- `python tools/check_core_timing_guard.py`: passed.
+- `python tools/check_chip_docs_coverage.py`: passed, covering 14 maintained
+  topics and 50 exact register facts.
+- `python -m py_compile ...` and `python tools/test_run_hil.py`: passed,
+  including all 16 HIL-runner host tests.
+- `python tools/build_docs.py`: warning-free Doxygen build passed.
+- `pio pkg pack` plus `python tools/check_package_contract.py`: passed with 37
+  files and 20 linked Markdown documents, using an isolated temporary archive
+  so an older ignored local archive was not overwritten.
+- `python scripts/generate_version.py check`: all generated version artifacts
+  were current.
+
+The local shell did not contain `idf.py`, and repository policy forbids
+silently installing another toolchain. Therefore the native ESP-IDF example's
+static contract was checked here, while its two-target compilation remains a
+CI build gate. No physical sensor was connected for this review, so the
+targeted HIL campaign and one-hour soak were not claimed as new evidence.

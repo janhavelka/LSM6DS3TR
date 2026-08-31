@@ -16,6 +16,7 @@ constexpr uint16_t FIFO_CAPACITY_WORDS = 2048;
 constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
+constexpr uint64_t CLOCK_QUANTIZATION_MARGIN_MS = 1;
 constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 87;
 constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
 constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
@@ -308,6 +309,14 @@ Axes rawAxesToFloat(const RawAxes& raw, float sensitivity) {
   return Axes{static_cast<float>(raw.x) * sensitivity,
               static_cast<float>(raw.y) * sensitivity,
               static_cast<float>(raw.z) * sensitivity};
+}
+
+Axes meanRawAxesToFloat(int64_t sumX, int64_t sumY, int64_t sumZ,
+                        uint16_t count, float sensitivity) {
+  const float meanScale = sensitivity / static_cast<float>(count);
+  return Axes{static_cast<float>(sumX) * meanScale,
+              static_cast<float>(sumY) * meanScale,
+              static_cast<float>(sumZ) * meanScale};
 }
 
 Axes subtractAxes(const Axes& lhs, const Axes& rhs) {
@@ -738,9 +747,7 @@ Status LSM6DS3TR::startSample(const SampleRequest& request,
     return Status::Error(Err::INVALID_PARAM,
                          "Requested quantity is powered down or sleeping");
   }
-  if (!_verifiedProfile.blockDataUpdate) {
-    return Status::Error(Err::CONFIGURATION_UNKNOWN, "Managed samples require BDU");
-  }
+  // A verified profile has already passed validateProfile(), including BDU.
   const Status status = _start(JobKind::SAMPLE, timing, token);
   if (status.inProgress()) {
     _sampleRequest = request;
@@ -1105,9 +1112,6 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     _mismatchRegister = 0;
     _mismatchExpected = 0;
     _mismatchObserved = 0;
-    _workingResult.configuration.mismatchRegister = 0;
-    _workingResult.configuration.expectedValue = 0;
-    _workingResult.configuration.observedValue = 0;
     _verifiedProfile = _job == JobKind::SELF_TEST ? _selfTestRestoreProfile
                                                    : _desiredProfile;
     _hasVerifiedProfile = true;
@@ -1115,10 +1119,12 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       _configGeneration = saturatingIncrement(_configGeneration);
     }
     uint64_t settleMs = 0U;
-    if (reconcileOnly &&
-        _configurationStateBeforeOperation == ConfigurationState::KNOWN) {
+    const bool priorGateTrusted =
+        _configurationStateBeforeOperation == ConfigurationState::KNOWN ||
+        _configurationStateBeforeOperation == ConfigurationState::SETTLING;
+    if (reconcileOnly && priorGateTrusted) {
       _validAfterUptimeMs = _validAfterBeforeOperationMs;
-      _configurationState = ConfigurationState::KNOWN;
+      _configurationState = _configurationStateBeforeOperation;
     } else {
       const uint64_t settleUs = requiredSettleUs(_verifiedProfile);
       settleMs = settleUs == std::numeric_limits<uint64_t>::max()
@@ -1312,12 +1318,23 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
                                                        : cmd::MASK_SW_RESET));
     const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs);
     if (!status.ok()) return status;
-    _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS);
+    // Arm from a clock sampled after this write. The caller's nowMs may have
+    // been sampled before earlier transactions in the same poll invocation.
+    _waitUntilMs = 0;
     _substep = 7;
     _waiting = true;
     return inProgressStatus();
   }
   if (_substep == 7U) {
+    if (_waitUntilMs == 0U) {
+      // The public examples truncate their clocks to milliseconds. One extra
+      // tick makes the vendor's 15 ms inaccessible interval a true minimum.
+      _waitUntilMs = saturatingAdd(
+          nowMs, static_cast<uint64_t>(cmd::BOOT_TIME_MS) +
+                     CLOCK_QUANTIZATION_MARGIN_MS);
+      _waiting = true;
+      return inProgressStatus();
+    }
     if (nowMs < _waitUntilMs) {
       _waiting = true;
       return inProgressStatus();
@@ -1439,6 +1456,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _substep = 100;
     _step = 0;
+    _waitUntilMs = 0;
     _prepareManagedImage(_selfTestRestoreProfile);
   };
 
@@ -1446,6 +1464,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
       [this, &beginRestore](const Status& status) -> Status {
     if (status.ok() || status.inProgress()) return status;
     if (_primaryStatus.ok()) _primaryStatus = status;
+    _waitUntilMs = 0;
 
     // If stimulus may be active, preserve the vendor's terminal order on the
     // failure path too: power down the tested sensor, then disable self-test.
@@ -1515,6 +1534,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     ++_samplesDone;
     _step = 0;
     _waitUntilMs = saturatingAdd(nowMs, samplePeriodMs);
+    _waiting = true;
     if (_samplesDone >= target) complete = true;
     return inProgressStatus();
   };
@@ -1594,12 +1614,24 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
         _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _step = 0;
-    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
+    _waitUntilMs = 0;
     _substep = 3;
     _waiting = true;
     return inProgressStatus();
   }
   if (_substep == 3U || _substep == 7U || _substep == 13U || _substep == 17U) {
+    if (_waitUntilMs == 0U) {
+      uint64_t settleMs = SELF_TEST_GYRO_STIMULUS_SETTLE_MS;
+      if (_substep == 3U || _substep == 7U) {
+        settleMs = SELF_TEST_ACCEL_SETTLE_MS;
+      } else if (_substep == 13U) {
+        settleMs = SELF_TEST_GYRO_SETTLE_MS;
+      }
+      _waitUntilMs = saturatingAdd(
+          nowMs, settleMs + CLOCK_QUANTIZATION_MARGIN_MS);
+      _waiting = true;
+      return inProgressStatus();
+    }
     if (nowMs < _waitUntilMs) {
       _waiting = true;
       return inProgressStatus();
@@ -1671,12 +1703,14 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     _samplesDone = 0;
     _sumX = _sumY = _sumZ = 0;
     _step = 0;
+    _waitUntilMs = 0;
+    _waiting = false;
     return inProgressStatus();
   }
   if (_substep == 6U) {
     const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_XL, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
-    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
+    _waitUntilMs = 0;
     _substep = 7;
     _waiting = true;
     return inProgressStatus();
@@ -1700,7 +1734,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     const Status status =
         _writeByte(cmd::REG_CTRL2_G, buildCtrl2(testProfile), nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
-    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_SETTLE_MS);
+    _waitUntilMs = 0;
     _substep = 13;
     _waiting = true;
     return inProgressStatus();
@@ -1708,7 +1742,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
   if (_substep == 16U) {
     const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_G, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
-    _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_STIMULUS_SETTLE_MS);
+    _waitUntilMs = 0;
     _substep = 17;
     _waiting = true;
     return inProgressStatus();
@@ -1805,12 +1839,10 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
     const uint64_t periodUs = odrPeriodUs(
         accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
     _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U);
+    _waiting = true;
     return inProgressStatus();
   }
 
-  const RawAxes mean{static_cast<int16_t>(_sumX / _samplesDone),
-                     static_cast<int16_t>(_sumY / _samplesDone),
-                     static_cast<int16_t>(_sumZ / _samplesDone)};
   CalibrationResult& result = _workingResult.calibration;
   result.kind = _calibrationRequest.kind;
   result.samples = _samplesDone;
@@ -1821,7 +1853,8 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
                                      sensitivity);
     if (!sensitivityStatus.ok()) return sensitivityStatus;
     const float scale = static_cast<float>(sensitivity) / 1000000.0f;
-    const Axes measured = rawAxesToFloat(mean, scale);
+    const Axes measured = meanRawAxesToFloat(
+        _sumX, _sumY, _sumZ, _samplesDone, scale);
     result.bias = subtractAxes(measured, _calibrationRequest.expectedAccelerationG);
     result.peakToPeak = Axes{
         static_cast<float>(static_cast<int32_t>(_rawMax.x) - _rawMin.x) * scale,
@@ -1843,7 +1876,8 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
         gyroSensitivityMicroDpsPerLsb(_verifiedProfile.gyroFullScale, sensitivity);
     if (!sensitivityStatus.ok()) return sensitivityStatus;
     const float scale = static_cast<float>(sensitivity) / 1000000.0f;
-    result.bias = rawAxesToFloat(mean, scale);
+    result.bias = meanRawAxesToFloat(
+        _sumX, _sumY, _sumZ, _samplesDone, scale);
     result.peakToPeak = Axes{
         static_cast<float>(static_cast<int32_t>(_rawMax.x) - _rawMin.x) * scale,
         static_cast<float>(static_cast<int32_t>(_rawMax.y) - _rawMin.y) * scale,
@@ -1994,9 +2028,6 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
   _workingResult.configuration.state = configurationState(_pollNowMs);
   _workingResult.configuration.generation = _configGeneration;
   _workingResult.configuration.validAfterUptimeMs = _validAfterUptimeMs;
-  _workingResult.configuration.mismatchRegister = _mismatchRegister;
-  _workingResult.configuration.expectedValue = _mismatchExpected;
-  _workingResult.configuration.observedValue = _mismatchObserved;
   _terminalResult = _workingResult;
   _resultPending = true;
   _clearActive();
@@ -2163,8 +2194,12 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
       safeComputeStep = true;
     } else if (_job == JobKind::SELF_TEST &&
                ((_substep == 3U || _substep == 7U || _substep == 13U ||
-                 _substep == 17U) ||
-                (_substep == 100U && _step >= configurationDone))) {
+                  _substep == 17U) ||
+                 (_substep == 100U && _step >= configurationDone))) {
+      safeComputeStep = true;
+    } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
+                _job == JobKind::RECOVER) &&
+               _substep == 7U && _waitUntilMs == 0U) {
       safeComputeStep = true;
     }
     if (safeComputeStep) {
@@ -2176,7 +2211,8 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
          _job == JobKind::RECOVER) &&
         _substep == 7U) {
       _waiting = nowMs < _waitUntilMs;
-    } else if ((_job == JobKind::SAMPLE || _job == JobKind::CALIBRATION) &&
+    } else if ((_job == JobKind::SAMPLE || _job == JobKind::SELF_TEST ||
+                _job == JobKind::CALIBRATION) &&
                _waitUntilMs != 0U) {
       _waiting = nowMs < _waitUntilMs;
     }

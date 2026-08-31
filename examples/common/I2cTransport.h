@@ -13,6 +13,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <esp32-hal-i2c.h>
 
 #include "LSM6DS3TR/Status.h"
 
@@ -42,6 +43,38 @@ inline void applyTimeout(TwoWire& wire, uint32_t timeoutMs) {
     const uint16_t boundedTimeout =
         timeoutMs > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(timeoutMs);
     wire.setTimeOut(boundedTimeout);
+  }
+}
+
+inline LSM6DS3TR::Status mapEspI2cResult(esp_err_t result,
+                                        const char* context) {
+  switch (result) {
+    case ESP_OK:
+      return LSM6DS3TR::Status::Ok();
+    case ESP_ERR_INVALID_ARG:
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM,
+                                      context, result);
+    case ESP_ERR_NOT_FOUND:
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_ADDR,
+                                      context, result);
+    case ESP_ERR_TIMEOUT:
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_TIMEOUT,
+                                      context, result);
+    case ESP_ERR_INVALID_STATE:
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_BUSY,
+                                      context, result);
+    case ESP_ERR_INVALID_RESPONSE:
+    case ESP_FAIL:
+      // The combined ESP32 HAL transaction does not identify which ACK phase
+      // failed. Preserve the native detail without inventing an address/data
+      // classification.
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
+                                      context, result);
+    default:
+      // Native resource and implementation errors are not proof of an
+      // electrical bus fault. Keep the class generic and retain raw detail.
+      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
+                                      context, result);
   }
 }
 
@@ -122,33 +155,19 @@ inline LSM6DS3TR::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t t
     return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, "I2C read exceeds buffer");
   }
 
-  applyTimeout(*wire, timeoutMs);
-  wire->beginTransmission(addr);
-  size_t written = wire->write(tx, txLen);
-  if (written != txLen) {
-    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "I2C write incomplete",
-                                    static_cast<int32_t>(written));
+  // Wire's repeated-start path discards the native esp_err_t. The ESP32 HAL
+  // provides the same combined transaction, owns its bus lock, and preserves
+  // the error needed by the application's recovery policy.
+  size_t read = 0;
+  const esp_err_t result = i2cWriteReadNonStop(
+      wire->getBusNum(), addr, tx, txLen, rx, rxLen, timeoutMs, &read);
+  if (result != ESP_OK) {
+    return mapEspI2cResult(result, "I2C write-read failed");
   }
-
-  uint8_t result = wire->endTransmission(false);  // Repeated start
-  if (result != 0) {
-    return mapWireResult(result, "I2C write phase failed");
-  }
-
-  size_t read = wire->requestFrom(addr, static_cast<uint8_t>(rxLen));
   if (read != rxLen) {
-    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "I2C read length mismatch",
+    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_BUS, "I2C read length mismatch",
                                     static_cast<int32_t>(read));
   }
-
-  for (size_t i = 0; i < rxLen; ++i) {
-    if (wire->available()) {
-      rx[i] = static_cast<uint8_t>(wire->read());
-    } else {
-      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "I2C data not available");
-    }
-  }
-
   return LSM6DS3TR::Status::Ok();
 }
 

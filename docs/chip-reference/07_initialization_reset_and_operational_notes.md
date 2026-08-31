@@ -25,7 +25,13 @@
 - Before either command, set the gyroscope to Power-Down and the accelerometer to an active High-Performance mode. This includes explicitly giving the accelerometer a nonzero ODR if the saved runtime profile has it powered down. Source: AN5130, p. 49.
 - `BOOT` reloads trimming memory without changing control-register contents; registers are inaccessible for 15 ms. Source: AN5130, p. 49.
 - `SW_RESET` returns control registers to defaults and can take 50 us; wait that interval or poll until `SW_RESET` clears. Source: AN5130, p. 49.
-- The library deliberately uses a conservative bus-silent 15 ms guard for both commands, then bounded command-bit polling and full desired-profile replay/readback. That larger reset guard is library policy, not an ST timing claim. See the [ambiguity ledger](12_source_ambiguities.md).
+- The library deliberately uses a conservative bus-silent guard for both
+  commands, armed from a fresh caller-clock sample after the command write. It
+  waits the 15 ms policy interval plus one millisecond-clock quantization tick,
+  then performs bounded command-bit polling and full desired-profile
+  replay/readback. The larger reset guard and extra tick are library policy,
+  not ST timing claims. See the
+  [ambiguity ledger](12_source_ambiguities.md).
 
 ## Power Sequencing Boundary
 

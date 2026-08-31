@@ -50,6 +50,8 @@ struct HandleReplacement {
 };
 
 I2cContext i2c{};
+Status busInitializationStatus =
+    Status::Error(Err::INVALID_CONFIG, "I2C initialization not attempted");
 LSM6DS3TR::LSM6DS3TR device;
 DeviceProfile stagedProfile{};
 SensorAddress selectedAddress = SensorAddress::SA0_GND;
@@ -883,6 +885,9 @@ void printDiagnostics(uint64_t now) {
              ? (selectedAddress == SensorAddress::SA0_GND ? "0x6A" : "0x6B")
              : "none",
          selectedFrequencyHz, I2C_TIMEOUT_MS);
+  printf("bus_init code=%u detail=%" PRId32 " message=%s\n",
+         static_cast<unsigned>(busInitializationStatus.code),
+         busInitializationStatus.detail, busInitializationStatus.msg);
   printf("bound=%s active=%s result_pending=%s config=%s generation=%" PRIu32
          " valid_after=%" PRIu64 " settle_remaining_ms=%" PRIu64 "\n",
          device.isBound() ? "yes" : "no",
@@ -1476,7 +1481,7 @@ void serviceInput() {
   }
 }
 
-esp_err_t configureI2c() {
+Status configureI2c() {
   i2c_master_bus_config_t busConfig{};
   busConfig.clk_source = I2C_CLK_SRC_DEFAULT;
   busConfig.i2c_port = I2C_NUM_0;
@@ -1485,11 +1490,14 @@ esp_err_t configureI2c() {
   busConfig.glitch_ignore_cnt = 7;
   busConfig.flags.enable_internal_pullup = true;
   esp_err_t error = i2c_new_master_bus(&busConfig, &i2c.bus);
-  if (error != ESP_OK) return error;
+  if (error != ESP_OK) {
+    return mapEspError(error, "I2C bus initialization failed");
+  }
 
   i2c.address = static_cast<uint8_t>(selectedAddress);
   i2c.frequencyHz = selectedFrequencyHz;
-  return addDevice(i2c.address, i2c.frequencyHz, &i2c.device);
+  return mapEspError(addDevice(i2c.address, i2c.frequencyHz, &i2c.device),
+                     "I2C device registration failed");
 }
 
 void cliLoop() {
@@ -1515,18 +1523,17 @@ extern "C" void app_main(void) {
   printf("LSM6DS3TR native ESP-IDF owner-safe example %s\n", VERSION_FULL);
   printHelp();
 
-  const esp_err_t i2cStatus = configureI2c();
-  if (i2cStatus != ESP_OK) {
-    printf("I2C initialization failed: %s\n", esp_err_to_name(i2cStatus));
-    return;
-  }
-  const Status bound = bindDriver();
-  printStatus(bound);
-  if (bound.ok()) {
-    OperationToken token{};
-    configureAfterProbe = true;
-    if (!acceptedStart(device.startProbe(timing(nowMs(), 500), token), token)) {
-      configureAfterProbe = false;
+  busInitializationStatus = configureI2c();
+  printStatus(busInitializationStatus);
+  if (busInitializationStatus.ok()) {
+    const Status bound = bindDriver();
+    printStatus(bound);
+    if (bound.ok()) {
+      OperationToken token{};
+      configureAfterProbe = true;
+      if (!acceptedStart(device.startProbe(timing(nowMs(), 500), token), token)) {
+        configureAfterProbe = false;
+      }
     }
   }
   cliLoop();

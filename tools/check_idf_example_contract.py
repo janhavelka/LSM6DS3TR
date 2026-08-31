@@ -56,6 +56,7 @@ REQUIRED_IDF_TOKENS = (
     "result.state != OperationState::SUCCEEDED",
     "result.hardwareStateMayHaveChanged",
     "last_error present=",
+    "bus_init code=",
     "mismatch present=",
     "job poll token=",
     "scan summary attempted=",
@@ -159,6 +160,14 @@ def main() -> int:
         r"serviceInput\(\);\s*serviceOperation\(nowMs\(\)\);", main_text
     ):
         fail("native owner loop must sample time after command admission")
+    if not re.search(
+        r"busInitializationStatus = configureI2c\(\);\s*"
+        r"printStatus\(busInitializationStatus\);\s*"
+        r"if \(busInitializationStatus\.ok\(\)\) \{.*?\}\s*cliLoop\(\);",
+        main_text,
+        re.DOTALL,
+    ):
+        fail("native CLI must remain available after an I2C initialization failure")
     if not re.search(
         r"bool ownerMutationBlocked\(\).*?session\.kind != SessionKind::NONE.*?"
         r"device\.operationActive\(\).*?device\.resultPending\(\)",

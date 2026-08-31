@@ -27,12 +27,12 @@ enum class Err : uint8_t {
   UNSUPPORTED_PROFILE,       ///< Requested feature is outside the production profile.
   OPERATION_INDETERMINATE,   ///< Hardware effect or restoration cannot be proved.
   TRANSACTION_LIMIT_EXCEEDED, ///< Hard callback ceiling was reached.
-  DEVICE_NOT_FOUND,          ///< Transport completed but no device was present.
+  DEVICE_NOT_FOUND,          ///< Optional transport classification; core does not synthesize it.
   CHIP_ID_MISMATCH,          ///< WHO_AM_I did not identify an LSM6DS3TR-C.
   SELF_TEST_FAIL,            ///< Built-in sensor self-test limits were not met.
   CALIBRATION_UNSTABLE,      ///< Calibration samples exceeded stability limits.
   CALIBRATION_ORIENTATION,   ///< Fixture gravity did not match the requested vector.
-  FIFO_EMPTY,                ///< FIFO contained no unread word.
+  FIFO_EMPTY,                ///< Reserved; bounded FIFO purge reports empty as success.
   FIFO_OVERRUN,              ///< FIFO data loss was observed.
   I2C_ERROR,                 ///< Generic transport error.
   I2C_NACK_ADDR,             ///< Address phase was not acknowledged.

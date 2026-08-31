@@ -240,7 +240,7 @@ writes.
 | Class | APIs | Bounds and intended use |
 | --- | --- | --- |
 | Steady state | `startSample`, `startProbe` | Zero-I2C admission, caller deadline, and per-poll transaction cap. Ready-checked samples may wait and poll status; direct samples are labelled unverified. |
-| Runtime multi-step | `startConfigure`, `startReset`, `startBoot`, `startRecover`, `startReconcile`, `startPowerDown` | Progress, deadline, cancellation, partial-effect reporting, and configuration readback share one operation model. Reset/boot contain a bus-silent 15 ms device-inaccessible gate rather than a delay. |
+| Runtime multi-step | `startConfigure`, `startReset`, `startBoot`, `startRecover`, `startReconcile`, `startPowerDown` | Progress, deadline, cancellation, partial-effect reporting, and configuration readback share one operation model. Reset/boot contain a bus-silent device-inaccessible gate armed from a fresh post-command clock sample for at least 15 ms, rather than a delay. |
 | Maintenance/diagnostic | `startSelfTest`, `startCalibration`, `startFifoPurge` | Explicit deadline and caller budget. Self-test averages 5..100 samples per phase; calibration accepts 1..1000 samples; purge discards at most 1..2048 FIFO words. These are not ordinary measurement-loop calls. |
 | Advanced single transaction | `diagnosticReadRegister`, `diagnosticReadBlock`, `diagnosticWriteRegister` | Serialized application diagnostics only. Maximum block read is 32 bytes. No call is accepted during a job. Writes are restricted and invalidate configuration provenance. |
 
@@ -359,10 +359,12 @@ The self-test sample count applies independently to the baseline and stimulated
 averages for both sensors. Each of those four phases first discards one sample,
 as required by AN5130. The operation uses the vendor's 52 Hz / +/-4 g
 accelerometer setup and 208 Hz / +/-2000 dps gyroscope setup. Four fixed,
-bus-silent settle gates total 400 ms. Every discarded or
-collected sample receives at most three STATUS checks and one data read, with a
-20 ms accelerometer or 5 ms gyroscope zero-I2C gate after a read and between
-readiness checks. Three failed readiness checks produce `DATA_NOT_READY`. If
+bus-silent vendor settle minima total 400 ms; each gate adds one millisecond
+clock-quantization tick and is armed after its controlling write. Every
+discarded or collected sample receives at most three STATUS checks and one data
+read, with a 20 ms accelerometer or 5 ms gyroscope zero-I2C gate after a read
+and between readiness checks. Three failed readiness checks produce
+`DATA_NOT_READY`. If
 stimulus may be active, any primary failure first attempts the same bounded
 sensor-power-down then self-test-disable sequence used by successful self-test
 completion.

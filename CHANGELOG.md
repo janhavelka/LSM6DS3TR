@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserved fractional raw means in accelerometer and gyroscope calibration;
+  the conversion now divides in floating point after accumulating the complete
+  fixed-count sample set instead of truncating through an `int16_t` mean.
+- Kept per-operation mismatch evidence separate from lifetime diagnostics, so
+  a later successful operation no longer inherits an older configuration
+  mismatch while `diagnostics()` still retains that evidence.
+- Made owner-visible timing evidence consistent: self-test and calibration now
+  report post-burst cadence waits for positive and zero callback budgets, and
+  final self-test averages clear the completed gate. Reset/boot/recovery and
+  all four vendor self-test settle intervals are armed from a fresh
+  post-write clock sample with a one-tick millisecond quantization margin.
+- Preserved an unexpired `SETTLING` gate across successful read-only
+  reconciliation instead of recomputing and extending data validity.
+- Replaced the Arduino `Wire` repeated-start read path, which discarded its
+  native result, with the pinned ESP32 HAL combined transaction so timeout,
+  busy, NACK, and bus details remain visible to application policy.
+- Kept the native ESP-IDF CLI available after I2C bus/device initialization
+  failure and retained the typed initialization status in diagnostics.
+- Made owner-soak start rejection terminal instead of spinning in a phase with
+  no accepted token, and replaced invalid full-scale range assertions with
+  exact raw-to-fixed-unit conversion checks while retaining maxima telemetry.
+- Removed the redundant managed-sample BDU guard after verified-profile
+  validation and clarified the retained, append-only optional status codes.
 - Corrected the `DRDY_PULSE_CFG_G` (`0x0B`) diagnostic writable mask from
   `0xC0` to `0x81`. Datasheet Table 43 defines only `DRDY_PULSED` (bit 7) and
   `INT2_WRIST_TILT` (bit 0) as writable; the old mask permitted a reserved
@@ -16,9 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Added `MASK_DRDY_PULSED`/`MASK_INT2_WRIST_TILT` to `CommandTable.h` and
   pinned both directions in the native suite.
 - Resolved the pre-operation configuration snapshot through
-  `configurationState(nowMs)` instead of the raw member, so a read-only
-  reconcile no longer regresses a settled `KNOWN` configuration to `SETTLING`
-  and no longer restarts its settle gate.
+  `configurationState(nowMs)` instead of the raw member, so an expired settle
+  gate is captured as `KNOWN` before an operation begins.
 - Fixed `tools/run_owner_soak.py`, which crashed immediately with a `TypeError`
   because its `watchdog_reset()` call was never updated for the required `chip`
   argument. The runner now takes `--chip` like `run_hil.py` and records it in
@@ -40,8 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- Added [docs/AUDIT_2026-08-27.md](docs/AUDIT_2026-08-27.md): a source-backed
-  audit with concrete proposals for the defects that need a design decision.
+- Completed the repository-only source-backed audit worklist as the
+  `docs/CODE_AUDIT.md` finding-by-finding resolution report, including
+  corrections to three proposed remedies and exact closure evidence.
+- Repaired stale repository-audit and changelog links exposed by the strict
+  Doxygen and package-contract validation passes.
 - Recorded in the ambiguity ledger that `CTRL3_C.BOOT` self-clearing is a
   hardware observation, not a documented ST guarantee. ST attaches the
   automatic-clear statement to `SW_RESET` only.

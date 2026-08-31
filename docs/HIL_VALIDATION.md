@@ -96,7 +96,8 @@ phases:
 6. It samples all, acceleration, angular rate, and temperature in both
    ready-checked and direct modes, checking terminal timestamps/budgets,
    nonzero transactions, validity/freshness/quality, raw and full-scale
-   provenance, monotonic sequence, conversion, and physical ranges.
+   provenance, monotonic sequence, exact raw-to-fixed-unit conversion, and the
+   documented temperature operating range.
 7. It runs exact cooperative `stress` counts in ready and direct modes, an
    eight-operation `stress_mix` rotation with two probes, two reconciliations,
    and four samples, requires successful physical-transaction deltas, then
@@ -139,9 +140,10 @@ The firmware uses a fixed-memory owner loop and grants one transport callback
 per `poll()`. At 100 ms intervals it cycles all eight sample quantity/readiness
 combinations and checks exact token/kind correlation, terminal success,
 transaction bounds, validity/freshness masks, monotonic sequence, stable
-configuration generation, conversion, and physical range. It also performs an
-explicit probe plus configuration reconciliation every five minutes and
-requires zero operation, contract, and transport failures.
+configuration generation, exact raw-to-fixed-unit conversion, and temperature
+range. It also retains observed acceleration/angular-rate maxima as telemetry,
+performs an explicit probe plus configuration reconciliation every five
+minutes, and requires zero operation, contract, and transport failures.
 
 The host monitor rejects missing/non-monotonic progress, an early terminal
 record, insufficient samples, any reported failure, or a non-pass result. For
@@ -155,8 +157,10 @@ this with a monitor that momentarily asserts the boot straps.
 
 Only the campaign that validates the *current* source is retained here. Older
 per-release run logs are not evidence for today's code; their results are
-summarized per version in [CHANGELOG.md](../CHANGELOG.md) and their full text
-remains in Git history. Do not append a new block per run - replace this one.
+summarized per version in
+[CHANGELOG.md](https://github.com/janhavelka/LSM6DS3TR/blob/main/CHANGELOG.md)
+and their full text remains in Git history. Do not append a new block per run -
+replace this one.
 
 ### Current: ESP32-S2 Expanded Campaign
 

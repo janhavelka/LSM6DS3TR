@@ -28,9 +28,10 @@ README, guide, and <a href="../CHANGELOG.md">changelog</a> in the same change.
 
 ## Repository-Only Audit Material
 
-- [Library audit 2026-08-27](AUDIT_2026-08-27.md): source-backed findings that
-  still need a design decision, each with a concrete minimal proposal. Items
-  are removed as they are resolved; it is a worklist, not a retained report.
+- [Code audit resolution report](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/CODE_AUDIT.md):
+  finding-by-finding verification, implementation decisions, deviations from
+  the original proposals, and closure evidence. It is retained in the source
+  repository but excluded from published library packages.
 
 
 - The official [datasheet](https://www.st.com/resource/en/datasheet/lsm6ds3tr-c.pdf)

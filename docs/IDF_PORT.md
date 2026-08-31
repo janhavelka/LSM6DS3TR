@@ -48,9 +48,12 @@ budget.
 The expanded example is an application owner, not an alternate driver layer:
 
 - `status`/`diag` report bus readiness, selected and bound address, frequency,
-  timeout, configuration state/generation/settling, transport totals, complete
-  last-error status and time/age, mismatch evidence, active/pending state,
-  current poll transactions/wait status, and staged/desired/verified profiles.
+  timeout, retained bus-initialization status, configuration
+  state/generation/settling, transport totals, complete last-error status and
+  time/age, mismatch evidence, active/pending state, current poll
+  transactions/wait status, and staged/desired/verified profiles. The CLI
+  remains available when bus creation or device registration fails, so this
+  evidence can be inspected instead of disappearing with an early return.
   `job [current|last]` adds cooperative-session progress and optional cached
   terminal evidence; `result` is its last-result convenience form. These paths
   perform no I2C.

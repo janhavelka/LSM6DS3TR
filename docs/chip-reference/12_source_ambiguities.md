@@ -64,11 +64,14 @@ read. The ready bit, not the predicted cadence, is the final validity proof.
 ## Reset Timing Versus Library Guard
 
 AN5130 specifies about 50 us for `SW_RESET` and 15 ms for boot/reboot. The
-library uses a conservative 15 ms command-inaccessibility guard for both while
-also polling the self-clearing command bit within a fixed ceiling.
+library uses a conservative command-inaccessibility guard for both while also
+polling the self-clearing command bit within a fixed ceiling.
 
 **Resolution:** document 50 us as the chip fact and 15 ms as deliberate library
-policy; never present the larger guard as an ST reset specification.
+policy. Arm that interval from a fresh caller-clock sample after the command
+write and add one millisecond tick so integer clock truncation cannot shorten
+the minimum. Never present the larger reset guard or the quantization margin as
+an ST reset specification.
 
 ## `CTRL3_C.BOOT` Self-Clearing Is Undocumented
 
@@ -80,7 +83,8 @@ modify control-register content, so ST never says whether the `BOOT` bit clears
 itself or persists from the host's own write.
 
 **Resolution:** the library polls `CTRL3_C.BOOT` back to zero as its boot
-completion criterion, after the 15 ms guard and within a fixed poll ceiling.
+completion criterion, after the post-write guard described above and within a
+fixed poll ceiling.
 That is a hardware-observed behavior, not a documented ST guarantee: retained
 HIL campaigns pass the boot operation on real silicon. Record it as an
 observation. Do not restate it as a datasheet fact, and re-validate it on

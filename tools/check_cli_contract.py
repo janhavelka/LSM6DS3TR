@@ -7,7 +7,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ARDUINO_MAIN = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
+OWNER_SOAK = ROOT / "examples" / "02_owner_soak" / "main.cpp"
 PROFILE_HELPER = ROOT / "examples" / "common" / "ProfileCli.h"
+I2C_TRANSPORT = ROOT / "examples" / "common" / "I2cTransport.h"
 
 REQUIRED_COMMON = ["BoardConfig.h", "I2cTransport.h", "ProfileCli.h"]
 
@@ -147,7 +149,9 @@ def main() -> int:
             fail(f"missing example helper: {name}")
 
     text = ARDUINO_MAIN.read_text(encoding="utf-8", errors="replace")
+    soak = OWNER_SOAK.read_text(encoding="utf-8", errors="replace")
     helper = PROFILE_HELPER.read_text(encoding="utf-8", errors="replace")
+    transport = I2C_TRANSPORT.read_text(encoding="utf-8", errors="replace")
     for command in COMMANDS:
         if re.search(rf'"{re.escape(command)}"', text) is None:
             fail(f"owner-safe command '{command}' is missing")
@@ -163,6 +167,34 @@ def main() -> int:
     for token in FORBIDDEN_V1_TOKENS:
         if token in text:
             fail(f"removed v1 API token remains: {token}")
+    for token in (
+        "i2cWriteReadNonStop",
+        "getBusNum()",
+        "mapEspI2cResult",
+        "ESP_ERR_TIMEOUT",
+    ):
+        if token not in transport:
+            fail(f"Arduino transport diagnostic token '{token}' is missing")
+    if "endTransmission(false)" in transport:
+        fail("Arduino write-read path must not discard repeated-start HAL errors")
+    if not re.search(
+        r"bool acceptStart\(.*?if \(.*?\).*?"
+        r"phase = Phase::COMPLETE;\s*return false;\s*\}.*?"
+        r"pendingToken = token;\s*phase = acceptedPhase;\s*return true;",
+        soak,
+        re.DOTALL,
+    ):
+        fail("owner soak must commit phase only after start acceptance")
+    for token in (
+        "convertedAxesMatch",
+        "accelSensitivityMicroGPerLsb",
+        "gyroSensitivityMicroDpsPerLsb",
+    ):
+        if token not in soak:
+            fail(f"owner-soak conversion contract token '{token}' is missing")
+    for stale_limit in ("2100000LL", "251000000LL"):
+        if stale_limit in soak:
+            fail(f"invalid owner-soak full-scale limit remains: {stale_limit}")
 
     if "char input[" not in text or "String " in text:
         fail("Arduino CLI must use a fixed character buffer")

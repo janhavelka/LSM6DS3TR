@@ -58,6 +58,11 @@ setting and 5 ms at the 208 Hz gyroscope setting, each rounded up. Reading the
 high output byte clears the corresponding latched ready flag, so a previously
 observed flag cannot justify the next sample.
 
+The four vendor settle intervals above are minima. The owner-scheduled driver
+arms each one from a fresh caller-clock sample after the controlling register
+write and adds one millisecond tick so truncating a monotonic clock to whole
+milliseconds cannot shorten the required 100, 100, 150, or 50 ms interval.
+
 As a deliberate library extension, the managed X/Y/Z user offsets are cleared
 during the test so their asymmetric add/add/subtract behavior cannot alter the
 vendor thresholds. The exact prior offset registers and all other managed state

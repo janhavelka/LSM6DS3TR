@@ -69,6 +69,13 @@ int64_t absoluteValue(int64_t value) {
   return value < 0 ? -value : value;
 }
 
+bool convertedAxesMatch(const IntegerAxes& converted, const RawAxes& raw,
+                        int32_t sensitivity) {
+  return converted.x == static_cast<int64_t>(raw.x) * sensitivity &&
+         converted.y == static_cast<int64_t>(raw.y) * sensitivity &&
+         converted.z == static_cast<int64_t>(raw.z) * sensitivity;
+}
+
 void noteContractFailure(const char* reason) {
   ++contractFailures;
   Serial.printf("HIL_CONTRACT_FAILURE reason=%s failures=%lu\n", reason,
@@ -76,7 +83,8 @@ void noteContractFailure(const char* reason) {
   Serial.flush();
 }
 
-bool acceptStart(const Status& status, const OperationToken& token) {
+bool acceptStart(const Status& status, const OperationToken& token,
+                 Phase acceptedPhase) {
   if ((!status.ok() && !status.inProgress()) || !token.valid()) {
     ++operationFailures;
     Serial.printf("HIL_START_FAILURE code=%u detail=%ld failures=%lu\n",
@@ -84,28 +92,30 @@ bool acceptStart(const Status& status, const OperationToken& token) {
                   static_cast<long>(status.detail),
                   static_cast<unsigned long>(operationFailures));
     Serial.flush();
+    phase = Phase::COMPLETE;
     return false;
   }
   pendingToken = token;
+  phase = acceptedPhase;
   return true;
 }
 
 bool startProbe(uint64_t now, Phase nextPhase) {
   OperationToken token{};
-  phase = nextPhase;
-  return acceptStart(device.startProbe(timing(now, 1000U), token), token);
+  return acceptStart(device.startProbe(timing(now, 1000U), token), token,
+                     nextPhase);
 }
 
 bool startConfigure(uint64_t now) {
   OperationToken token{};
-  phase = Phase::STARTUP_CONFIGURE;
-  return acceptStart(device.startConfigure(profile, timing(now, 5000U), token), token);
+  return acceptStart(device.startConfigure(profile, timing(now, 5000U), token),
+                     token, Phase::STARTUP_CONFIGURE);
 }
 
 bool startReconcile(uint64_t now) {
   OperationToken token{};
-  phase = Phase::PERIODIC_RECONCILE;
-  return acceptStart(device.startReconcile(timing(now, 3000U), token), token);
+  return acceptStart(device.startReconcile(timing(now, 3000U), token), token,
+                     Phase::PERIODIC_RECONCILE);
 }
 
 bool startSample(uint64_t now) {
@@ -116,8 +126,8 @@ bool startSample(uint64_t now) {
   request.quantityMask = QUANTITIES[pattern >> 1U];
   request.checkDataReady = (pattern & 1U) == 0U;
   OperationToken token{};
-  phase = Phase::SAMPLE;
-  return acceptStart(device.startSample(request, timing(now, 1500U), token), token);
+  return acceptStart(device.startSample(request, timing(now, 1500U), token),
+                     token, Phase::SAMPLE);
 }
 
 void updateRanges(const ConvertedSample& sample) {
@@ -127,7 +137,6 @@ void updateRanges(const ConvertedSample& sample) {
             max(absoluteValue(sample.accelMicroG.y),
                 absoluteValue(sample.accelMicroG.z)));
     if (maximum > maxAbsAccelMicroG) maxAbsAccelMicroG = maximum;
-    if (maximum > 2100000LL) noteContractFailure("accel_range");
   }
   if ((sample.validMask & SAMPLE_ANGULAR_RATE) != 0U) {
     const int64_t maximum =
@@ -135,7 +144,6 @@ void updateRanges(const ConvertedSample& sample) {
             max(absoluteValue(sample.gyroMicroDps.y),
                 absoluteValue(sample.gyroMicroDps.z)));
     if (maximum > maxAbsGyroMicroDps) maxAbsGyroMicroDps = maximum;
-    if (maximum > 251000000LL) noteContractFailure("gyro_range");
   }
   if ((sample.validMask & SAMPLE_TEMPERATURE) != 0U) {
     if (sample.temperatureMilliC < minTemperatureMilliC) {
@@ -171,6 +179,26 @@ void validateSample(const OperationResult& result) {
   if (!convertedStatus.ok()) {
     noteContractFailure("conversion");
   } else {
+    if ((result.sample.validMask & SAMPLE_ACCELERATION) != 0U) {
+      int32_t sensitivity = 0;
+      const Status sensitivityStatus = accelSensitivityMicroGPerLsb(
+          result.sample.accelFullScale, sensitivity);
+      if (!sensitivityStatus.ok() ||
+          !convertedAxesMatch(converted.accelMicroG, result.sample.accel,
+                              sensitivity)) {
+        noteContractFailure("accel_conversion");
+      }
+    }
+    if ((result.sample.validMask & SAMPLE_ANGULAR_RATE) != 0U) {
+      int32_t sensitivity = 0;
+      const Status sensitivityStatus = gyroSensitivityMicroDpsPerLsb(
+          result.sample.gyroFullScale, sensitivity);
+      if (!sensitivityStatus.ok() ||
+          !convertedAxesMatch(converted.gyroMicroDps, result.sample.gyro,
+                              sensitivity)) {
+        noteContractFailure("gyro_conversion");
+      }
+    }
     updateRanges(converted);
   }
   ++samples;
