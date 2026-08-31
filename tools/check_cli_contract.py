@@ -178,9 +178,20 @@ def main() -> int:
     if "endTransmission(false)" in transport:
         fail("Arduino write-read path must not discard repeated-start HAL errors")
     if not re.search(
-        r"bool acceptStart\(.*?if \(.*?\).*?"
-        r"phase = Phase::COMPLETE;\s*return false;\s*\}.*?"
-        r"pendingToken = token;\s*phase = acceptedPhase;\s*return true;",
+        r"Status wireWrite\(.*?return mapEspI2cResult\(\s*"
+        r"i2cWrite\(wire->getBusNum\(\)",
+        transport,
+        re.DOTALL,
+    ):
+        fail("Arduino write path must preserve the native ESP32 HAL result")
+    if re.search(
+        r"case ESP_ERR_INVALID_STATE:.*?Err::I2C_BUSY", transport, re.DOTALL
+    ):
+        fail("ambiguous ESP32 INVALID_STATE must not be classified as bus busy")
+    if not re.search(
+        r"void acceptStart\(.*?if \(.*?\).*?"
+        r"phase = Phase::COMPLETE;\s*return;\s*\}.*?"
+        r"pendingToken = token;\s*phase = acceptedPhase;",
         soak,
         re.DOTALL,
     ):
@@ -189,6 +200,7 @@ def main() -> int:
         "convertedAxesMatch",
         "accelSensitivityMicroGPerLsb",
         "gyroSensitivityMicroDpsPerLsb",
+        "decodeTemperatureMilliC",
     ):
         if token not in soak:
             fail(f"owner-soak conversion contract token '{token}' is missing")

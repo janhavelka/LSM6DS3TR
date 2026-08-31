@@ -160,7 +160,7 @@ class HilParserTests(unittest.TestCase):
             "quality=ready_checked xl_fs_g=2 g_fs_dps=250\n"
             "  raw accel=1,2,3 gyro=4,5,6 temp=7\n"
             "  accel_ug x=61 y=122 z=183\n"
-            "  gyro_udps x=35000 y=70000 z=105000\n"
+            "  gyro_udps x=35000 y=43750 z=52500\n"
             "  temperature_mC=25027\n"
         )
         cli = object.__new__(run_hil.SerialCli)
@@ -264,6 +264,35 @@ class HilParserTests(unittest.TestCase):
         )
         with self.assertRaises(run_hil.HilFailure):
             run_hil.parse_sample(base, 0x01, True)
+
+    def test_sample_parser_rejects_incorrect_fixed_unit_conversion(self) -> None:
+        result = run_hil.JobResult(
+            command="sample all ready", token=1, kind="sample",
+            state="succeeded", transactions=2, transaction_limit=66,
+            changed=False, status_code=0, status_message="OK", started_ms=10,
+            completed_ms=12, output=(
+                "sample sequence=1 generation=1 valid=0x07 fresh=0x07 read_ms=11 "
+                "quality=ready_checked xl_fs_g=2 g_fs_dps=250\n"
+                "  raw accel=1,2,3 gyro=4,5,6 temp=0\n"
+                "  accel_ug x=62 y=122 z=183\n"
+                "  gyro_udps x=35000 y=43750 z=52500\n"
+                "  temperature_mC=25000\n"
+            ),
+        )
+        with self.assertRaises(run_hil.HilFailure):
+            run_hil.parse_sample(result, 0x07, True)
+
+    def test_range_telemetry_accepts_full_raw_domain_conversions(self) -> None:
+        ranges: dict[str, list[int]] = {}
+        run_hil.update_ranges(
+            ranges,
+            "accel_ug x=-1998848 y=1998787 z=0\n"
+            "gyro_udps x=-286720000 y=286711250 z=0\n"
+            "temperature_mC=25000\n",
+        )
+        self.assertEqual(ranges["accel_x_ug"], [-1998848, -1998848])
+        self.assertEqual(ranges["gyro_y_udps"], [286711250, 286711250])
+        self.assertEqual(ranges["temperature_mC"], [25000, 25000])
 
     def test_scan_summary_contract(self) -> None:
         transcript = (

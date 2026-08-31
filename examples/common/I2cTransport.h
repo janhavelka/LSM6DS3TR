@@ -19,7 +19,8 @@
 
 namespace transport {
 
-inline LSM6DS3TR::Status mapWireResult(uint8_t result, const char* context) {
+inline LSM6DS3TR::Status mapWireProbeResult(uint8_t result,
+                                            const char* context) {
   switch (result) {
     case 0:
       return LSM6DS3TR::Status::Ok();
@@ -27,10 +28,6 @@ inline LSM6DS3TR::Status mapWireResult(uint8_t result, const char* context) {
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM, context, result);
     case 2:
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_ADDR, context, result);
-    case 3:
-      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_DATA, context, result);
-    case 4:
-      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_BUS, context, result);
     case 5:
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_TIMEOUT, context, result);
     default:
@@ -54,20 +51,16 @@ inline LSM6DS3TR::Status mapEspI2cResult(esp_err_t result,
     case ESP_ERR_INVALID_ARG:
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::INVALID_PARAM,
                                       context, result);
-    case ESP_ERR_NOT_FOUND:
-      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_NACK_ADDR,
-                                      context, result);
     case ESP_ERR_TIMEOUT:
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_TIMEOUT,
                                       context, result);
     case ESP_ERR_INVALID_STATE:
-      return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_BUSY,
-                                      context, result);
     case ESP_ERR_INVALID_RESPONSE:
+    case ESP_ERR_NOT_FOUND:
     case ESP_FAIL:
-      // The combined ESP32 HAL transaction does not identify which ACK phase
-      // failed. Preserve the native detail without inventing an address/data
-      // classification.
+      // The pinned HAL can use these values for a NACK or an internal/resource
+      // failure, and managed transfers do not identify the ACK phase. Preserve
+      // native detail without inventing a busy/address/data classification.
       return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR,
                                       context, result);
     default:
@@ -89,7 +82,8 @@ inline LSM6DS3TR::Status wireProbe(TwoWire& wire, uint8_t address,
                                    uint32_t timeoutMs) {
   applyTimeout(wire, timeoutMs);
   wire.beginTransmission(address);
-  return mapWireResult(wire.endTransmission(true), "I2C address probe failed");
+  return mapWireProbeResult(wire.endTransmission(true),
+                            "I2C address probe failed");
 }
 
 /**
@@ -123,16 +117,11 @@ inline LSM6DS3TR::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len
                                     static_cast<int32_t>(len));
   }
 
-  applyTimeout(*wire, timeoutMs);
-  wire->beginTransmission(addr);
-  size_t written = wire->write(data, len);
-  if (written != len) {
-    return LSM6DS3TR::Status::Error(LSM6DS3TR::Err::I2C_ERROR, "I2C write incomplete",
-                                    static_cast<int32_t>(written));
-  }
-
-  uint8_t result = wire->endTransmission(true);
-  return mapWireResult(result, "I2C write failed");
+  // Use the same native-result-preserving HAL boundary as write-read. Wire's
+  // endTransmission() compresses several esp_err_t values into "other error".
+  return mapEspI2cResult(
+      i2cWrite(wire->getBusNum(), addr, data, len, timeoutMs),
+      "I2C write failed");
 }
 
 /**

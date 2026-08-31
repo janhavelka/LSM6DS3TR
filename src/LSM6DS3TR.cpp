@@ -1159,6 +1159,15 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
 }
 
 Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
+  if (_step == 2U) {
+    const uint64_t delayMs =
+        sampleReadyPollDelayMs(_verifiedProfile, _sampleRequest);
+    _waitUntilMs = saturatingAdd(
+        nowMs, delayMs + CLOCK_QUANTIZATION_MARGIN_MS);
+    _step = 0;
+    _waiting = true;
+    return inProgressStatus();
+  }
   if (_step == 0U && _sampleRequest.checkDataReady) {
     if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
       _waiting = true;
@@ -1179,8 +1188,10 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
         return Status::Error(Err::DATA_NOT_READY,
                              "Sample data was not ready within 65 checks");
       }
-      _waitUntilMs = saturatingAdd(
-          nowMs, sampleReadyPollDelayMs(_verifiedProfile, _sampleRequest));
+      // Arm from a fresh caller timestamp after the callback has returned;
+      // the callback duration must not consume the bus-silent cadence gate.
+      _step = 2;
+      _waitUntilMs = 0;
       _waiting = true;
       return inProgressStatus();
     }
@@ -1497,6 +1508,13 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     complete = false;
     const uint8_t readyMask = accel ? cmd::MASK_XLDA : cmd::MASK_GDA;
     const uint64_t samplePeriodMs = accel ? 20U : 5U;
+    if (_step == 2U) {
+      _waitUntilMs = saturatingAdd(
+          nowMs, samplePeriodMs + CLOCK_QUANTIZATION_MARGIN_MS);
+      _step = 0;
+      _waiting = true;
+      return inProgressStatus();
+    }
     if (_step == 0U) {
       if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
         _waiting = true;
@@ -1511,7 +1529,10 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
           return Status::Error(Err::DATA_NOT_READY,
                                "Self-test data was not ready within three checks");
         }
-        _waitUntilMs = saturatingAdd(nowMs, samplePeriodMs);
+        // Use a later CPU-only state to start the complete cadence interval
+        // after this readiness callback has returned.
+        _step = 2;
+        _waitUntilMs = 0;
         _waiting = true;
         return inProgressStatus();
       }
@@ -1532,8 +1553,10 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
       _sumZ += raw.z;
     }
     ++_samplesDone;
-    _step = 0;
-    _waitUntilMs = saturatingAdd(nowMs, samplePeriodMs);
+    // The enclosing final-average path clears this pending gate. Discards and
+    // non-final averages arm it from fresh time on the owner's next poll.
+    _step = 2;
+    _waitUntilMs = 0;
     _waiting = true;
     if (_samplesDone >= target) complete = true;
     return inProgressStatus();
@@ -1793,6 +1816,16 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
 Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
   const bool accel =
       _calibrationRequest.kind == CalibrationKind::ACCELEROMETER_BIAS;
+  if (_step == 2U) {
+    const uint64_t periodUs = odrPeriodUs(
+        accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
+    const uint64_t periodMs = (periodUs + 999U) / 1000U;
+    _waitUntilMs = saturatingAdd(
+        nowMs, periodMs + CLOCK_QUANTIZATION_MARGIN_MS);
+    _step = 0;
+    _waiting = true;
+    return inProgressStatus();
+  }
   if (_step == 0U) {
     if (_waitUntilMs != 0U && nowMs < _waitUntilMs) {
       _waiting = true;
@@ -1807,9 +1840,8 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
         return Status::Error(Err::DATA_NOT_READY,
                              "Calibration data was not ready within three checks");
       }
-      const uint64_t periodUs = odrPeriodUs(
-          accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
-      _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U);
+      _step = 2;
+      _waitUntilMs = 0;
       _waiting = true;
       return inProgressStatus();
     }
@@ -1834,14 +1866,13 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
   if (raw.y > _rawMax.y) _rawMax.y = raw.y;
   if (raw.z > _rawMax.z) _rawMax.z = raw.z;
   ++_samplesDone;
-  _step = 0;
   if (_samplesDone < _calibrationRequest.samples) {
-    const uint64_t periodUs = odrPeriodUs(
-        accel ? _verifiedProfile.accelOdr : _verifiedProfile.gyroOdr);
-    _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U);
+    _step = 2;
+    _waitUntilMs = 0;
     _waiting = true;
     return inProgressStatus();
   }
+  _step = 0;
 
   CalibrationResult& result = _workingResult.calibration;
   result.kind = _calibrationRequest.kind;
@@ -2191,6 +2222,15 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
                 _job == JobKind::RECOVER) &&
                _substep >= 8U && _step >= configurationDone) {
+      safeComputeStep = true;
+    } else if ((_job == JobKind::SAMPLE ||
+                _job == JobKind::CALIBRATION) &&
+               _step == 2U) {
+      safeComputeStep = true;
+    } else if (_job == JobKind::SELF_TEST && _step == 2U &&
+               (_substep == 4U || _substep == 5U || _substep == 8U ||
+                _substep == 9U || _substep == 14U || _substep == 15U ||
+                _substep == 18U || _substep == 19U)) {
       safeComputeStep = true;
     } else if (_job == JobKind::SELF_TEST &&
                ((_substep == 3U || _substep == 7U || _substep == 13U ||

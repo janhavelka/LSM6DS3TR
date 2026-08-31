@@ -20,16 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   final self-test averages clear the completed gate. Reset/boot/recovery and
   all four vendor self-test settle intervals are armed from a fresh
   post-write clock sample with a one-tick millisecond quantization margin.
+  Ready-sample retries and self-test/calibration cadence gates now use the same
+  fresh post-callback rule, so synchronous callback time cannot shorten them.
 - Preserved an unexpired `SETTLING` gate across successful read-only
   reconciliation instead of recomputing and extending data validity.
-- Replaced the Arduino `Wire` repeated-start read path, which discarded its
-  native result, with the pinned ESP32 HAL combined transaction so timeout,
-  busy, NACK, and bus details remain visible to application policy.
+- Replaced the Arduino `Wire` write and repeated-start read paths, which
+  compressed or discarded native results, with pinned ESP32 HAL transactions.
+  Timeouts stay typed and context-ambiguous failures retain raw native detail
+  without being mislabeled as busy or as an address/data NACK.
 - Kept the native ESP-IDF CLI available after I2C bus/device initialization
-  failure and retained the typed initialization status in diagnostics.
+  failure and retained the typed initialization status in diagnostics. Error
+  mapping is now context-specific: only address probing classifies
+  `ESP_ERR_NOT_FOUND` as an address NACK, while resource/transfer errors remain
+  generic with raw detail.
 - Made owner-soak start rejection terminal instead of spinning in a phase with
-  no accepted token, and replaced invalid full-scale range assertions with
-  exact raw-to-fixed-unit conversion checks while retaining maxima telemetry.
+  no accepted token, and replaced invalid full-scale range assertions in both
+  HIL paths with exact raw-to-fixed-unit conversion checks while retaining
+  maxima telemetry.
 - Removed the redundant managed-sample BDU guard after verified-profile
   validation and clarified the retained, append-only optional status codes.
 - Corrected the `DRDY_PULSE_CFG_G` (`0x0B`) diagnostic writable mask from
@@ -53,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes that do not exist.
 - Removed a dead store in `_pollOne()`: `poll()` is the sole authority for
   `PollResult::transactionsUsed` because only it knows the caller's budget.
+- Removed unused boolean return values from the owner-soak start helpers; start
+  rejection is already handled internally as a terminal harness failure.
 - Corrected the `gyroSettleSamples` source citation to AN5130 Tables 15/16; the
   previous comment named Table 13, which is the accelerometer table and has no
   FTYPE column. The returned counts were already correct.

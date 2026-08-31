@@ -114,10 +114,6 @@ OperationTiming timing(uint64_t now, uint32_t durationMs) {
 
 Status mapEspError(esp_err_t error, const char* message) {
   if (error == ESP_OK) return Status::Ok();
-  if (error == ESP_ERR_NOT_FOUND) {
-    return Status::Error(Err::I2C_NACK_ADDR, message,
-                         static_cast<int32_t>(error));
-  }
   if (error == ESP_ERR_TIMEOUT) {
     return Status::Error(Err::I2C_TIMEOUT, message,
                          static_cast<int32_t>(error));
@@ -126,12 +122,18 @@ Status mapEspError(esp_err_t error, const char* message) {
     return Status::Error(Err::INVALID_PARAM, message,
                          static_cast<int32_t>(error));
   }
-  if (error == ESP_ERR_INVALID_STATE) {
-    return Status::Error(Err::I2C_BUSY, message,
-                         static_cast<int32_t>(error));
-  }
+  // Other values are context-dependent resource, state, or transfer errors.
+  // Retain the native detail without inventing a NACK or busy classification.
   return Status::Error(Err::I2C_ERROR, message,
                        static_cast<int32_t>(error));
+}
+
+Status mapEspProbeError(esp_err_t error, const char* message) {
+  if (error == ESP_ERR_NOT_FOUND) {
+    return Status::Error(Err::I2C_NACK_ADDR, message,
+                         static_cast<int32_t>(error));
+  }
+  return mapEspError(error, message);
 }
 
 Status i2cWrite(uint8_t address, const uint8_t* data, size_t length,
@@ -235,7 +237,7 @@ Status probeAddress(uint8_t address) {
   if (i2c.bus == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C bus is not initialized");
   }
-  return mapEspError(
+  return mapEspProbeError(
       i2c_master_probe(i2c.bus, address, static_cast<int>(I2C_TIMEOUT_MS)),
       "I2C address probe failed");
 }

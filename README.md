@@ -325,10 +325,13 @@ Between unsuccessful STATUS checks, polling uses a bus-silent gate rounded up
 from the slowest requested quantity's conversion cadence. Motion uses its
 configured ODR. Per AN5130, temperature uses 12.5 Hz only when the gyro is
 powered down and the accelerometer is in low-power/normal mode at 12.5 Hz,
-26 Hz for the equivalent 26 Hz case, and 52 Hz otherwise. A sleeping gyro with
-a non-power-down ODR can still support temperature; sleep excludes angular-rate
-sampling, not temperature sampling. This avoids a fixed busy-poll cadence while
-preserving the 65-check ceiling.
+26 Hz for the equivalent 26 Hz case, and 52 Hz otherwise. Each retry gate is
+armed from a fresh caller-clock sample after the preceding STATUS callback and
+adds one millisecond tick so callback duration and whole-millisecond clock
+truncation cannot shorten it. A sleeping gyro with a non-power-down ODR can
+still support temperature; sleep excludes angular-rate sampling, not
+temperature sampling. This avoids a fixed busy-poll cadence while preserving
+the 65-check ceiling.
 
 Conversion is pure and does not read mutable driver state:
 
@@ -363,8 +366,9 @@ bus-silent vendor settle minima total 400 ms; each gate adds one millisecond
 clock-quantization tick and is armed after its controlling write. Every
 discarded or collected sample receives at most three STATUS checks and one data
 read, with a 20 ms accelerometer or 5 ms gyroscope zero-I2C gate after a read
-and between readiness checks. Three failed readiness checks produce
-`DATA_NOT_READY`. If
+and between readiness checks. Each gate is armed from fresh post-callback time
+with a one-millisecond clock-quantization tick. Three failed readiness checks
+produce `DATA_NOT_READY`. If
 stimulus may be active, any primary failure first attempts the same bounded
 sensor-power-down then self-test-disable sequence used by successful self-test
 completion.
@@ -380,11 +384,12 @@ profile is restored afterward.
 Calibration likewise allows at most three STATUS checks per collected sample.
 It uses a zero-I2C gate equal to the configured sensor ODR period, rounded up
 to milliseconds, after each non-final data read and between readiness checks.
-It finishes after exactly the requested valid sample count and has a ceiling
-of `4 * samples`. Neither maintenance procedure retries a failed transfer
-or writes nonvolatile memory. Gyroscope calibration rejects a sleeping gyro
-before I2C; waking and later restoring it is an explicit self-test procedure,
-not hidden calibration policy.
+Each gate is armed from fresh post-callback time with a one-millisecond
+clock-quantization tick. It finishes after exactly the requested valid sample
+count and has a ceiling of `4 * samples`. Neither maintenance procedure retries
+a failed transfer or writes nonvolatile memory. Gyroscope calibration rejects
+a sleeping gyro before I2C; waking and later restoring it is an explicit
+self-test procedure, not hidden calibration policy.
 
 Accelerometer calibration requires an explicit expected gravity vector in
 sensor-native axes; the driver never assumes Z-up or a product mounting

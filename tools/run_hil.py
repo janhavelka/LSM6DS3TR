@@ -54,6 +54,15 @@ RAW_SAMPLE_RE = re.compile(
     r"raw accel=(-?\d+),(-?\d+),(-?\d+) "
     r"gyro=(-?\d+),(-?\d+),(-?\d+) temp=(-?\d+)"
 )
+ACCEL_CONVERTED_RE = re.compile(
+    r"accel_ug x=(-?\d+) y=(-?\d+) z=(-?\d+)"
+)
+GYRO_CONVERTED_RE = re.compile(
+    r"gyro_udps x=(-?\d+) y=(-?\d+) z=(-?\d+)"
+)
+TEMPERATURE_CONVERTED_RE = re.compile(r"temperature_mC=(-?\d+)")
+DEFAULT_ACCEL_SENSITIVITY_UG = 61
+DEFAULT_GYRO_SENSITIVITY_UDPS = 8750
 STATUS_CODE_RE = re.compile(r"status=(\d+) detail=(-?\d+) message=([^\r\n]+)")
 TRANSPORT_RE = re.compile(r"transport ok=(\d+) fail=(\d+) last_error=(\d+)")
 BUS_RE = re.compile(
@@ -587,17 +596,40 @@ def parse_sample(
             f"wrong sample quality in {result.command}")
     require(sample["xl_fs_g"] == "2" and sample["g_fs_dps"] == "250",
             f"wrong default full-scale provenance in {result.command}")
-    require(RAW_SAMPLE_RE.search(result.output) is not None,
-            f"raw sample evidence missing in {result.command}")
-    converted_records = (
-        (0x01, r"accel_ug x=-?\d+ y=-?\d+ z=-?\d+", "acceleration"),
-        (0x02, r"gyro_udps x=-?\d+ y=-?\d+ z=-?\d+", "angular rate"),
-        (0x04, r"temperature_mC=-?\d+", "temperature"),
-    )
-    for mask, pattern, label in converted_records:
-        if expected_mask & mask:
-            require(re.search(pattern, result.output) is not None,
-                    f"converted {label} evidence missing in {result.command}")
+    raw_match = RAW_SAMPLE_RE.search(result.output)
+    require(raw_match is not None, f"raw sample evidence missing in {result.command}")
+    assert raw_match is not None
+    if expected_mask & 0x01:
+        converted = ACCEL_CONVERTED_RE.search(result.output)
+        require(converted is not None,
+                f"converted acceleration evidence missing in {result.command}")
+        assert converted is not None
+        expected = tuple(int(raw_match.group(index)) * DEFAULT_ACCEL_SENSITIVITY_UG
+                         for index in (1, 2, 3))
+        observed = tuple(int(converted.group(index)) for index in (1, 2, 3))
+        require(observed == expected,
+                f"incorrect acceleration conversion in {result.command}")
+    if expected_mask & 0x02:
+        converted = GYRO_CONVERTED_RE.search(result.output)
+        require(converted is not None,
+                f"converted angular-rate evidence missing in {result.command}")
+        assert converted is not None
+        expected = tuple(int(raw_match.group(index)) * DEFAULT_GYRO_SENSITIVITY_UDPS
+                         for index in (4, 5, 6))
+        observed = tuple(int(converted.group(index)) for index in (1, 2, 3))
+        require(observed == expected,
+                f"incorrect angular-rate conversion in {result.command}")
+    if expected_mask & 0x04:
+        converted = TEMPERATURE_CONVERTED_RE.search(result.output)
+        require(converted is not None,
+                f"converted temperature evidence missing in {result.command}")
+        assert converted is not None
+        raw_temperature = int(raw_match.group(7))
+        temperature_delta = (abs(raw_temperature) * 1000) // 256
+        if raw_temperature < 0:
+            temperature_delta = -temperature_delta
+        require(int(converted.group(1)) == 25_000 + temperature_delta,
+                f"incorrect temperature conversion in {result.command}")
     return sample
 
 
@@ -619,11 +651,7 @@ def update_ranges(ranges: dict[str, list[int]], output: str) -> None:
         bounds = ranges.setdefault(name, [value, value])
         bounds[0] = min(bounds[0], value)
         bounds[1] = max(bounds[1], value)
-        if name.startswith("accel_"):
-            require(abs(value) <= 2_100_000, f"acceleration outside configured full scale: {value}")
-        elif name.startswith("gyro_"):
-            require(abs(value) <= 251_000_000, f"gyro outside configured full scale: {value}")
-        else:
+        if name == "temperature_mC":
             require(-40_000 <= value <= 85_000, f"temperature outside rating: {value}")
 
 

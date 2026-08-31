@@ -1324,6 +1324,22 @@ void test_recover_reprobes_and_reapplies_verified_profile_without_retry_policy()
   bus.commandInaccessibleMs = 15;
   OperationToken token;
   TEST_ASSERT_TRUE(driver.startRecover(timing(bus), token).inProgress());
+  size_t commandIndex = bus.traceCount;
+  for (uint32_t i = 0; i < 20u && commandIndex == bus.traceCount; ++i) {
+    (void)driver.poll(bus.nowMs, 1);
+    commandIndex = findWrite(bus, cmd::REG_CTRL3_C, cmd::MASK_SW_RESET,
+                             cmd::MASK_SW_RESET);
+  }
+  TEST_ASSERT_LESS_THAN(bus.traceCount, commandIndex);
+  const uint64_t armAt = bus.trace[commandIndex].atMs + 50u;
+  const uint32_t transfers = bus.transferCalls;
+  bus.nowMs = armAt;
+  const PollResult waiting = driver.poll(armAt, 0);
+  TEST_ASSERT_TRUE(waiting.waiting);
+  TEST_ASSERT_EQUAL_UINT8(0u, waiting.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(0u, driver.poll(armAt + 15u, 4).transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
+  bus.nowMs = armAt + 16u;
   const PollResult terminal = runToTerminal(driver, bus, 1);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
                           static_cast<uint8_t>(terminal.state));
@@ -1332,6 +1348,9 @@ void test_recover_reprobes_and_reapplies_verified_profile_without_retry_policy()
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_FUNC_CFG_ACCESS, bus.trace[0].startReg);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::WRITE_READ),
                           static_cast<uint8_t>(bus.trace[0].kind));
+  for (size_t i = commandIndex + 1u; i < bus.traceCount; ++i) {
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(armAt + 16u, bus.trace[i].atMs);
+  }
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_WHO_AM_I, bus.trace[1].startReg);
   if (bus.nowMs < result.configuration.validAfterUptimeMs) {
     bus.nowMs = result.configuration.validAfterUptimeMs;
@@ -1547,6 +1566,7 @@ void test_self_test_is_staged_bounded_and_restores_configuration() {
   OperationToken token;
   TEST_ASSERT_TRUE(driver.startSelfTest(request, timing(bus), token).inProgress());
   bool observedZeroI2cWait = false;
+  bool verifiedDelayedCadenceArm = false;
   uint16_t dataBursts = 0;
   PollResult terminal;
   for (uint32_t i = 0; i < 5000; ++i) {
@@ -1568,9 +1588,24 @@ void test_self_test_is_staged_bounded_and_restores_configuration() {
             dataBursts % static_cast<uint16_t>(request.samples + 1u) != 0u;
         TEST_ASSERT_EQUAL(cadencePending, terminal.waiting);
         const uint32_t transfers = bus.transferCalls;
-        const PollResult zeroBudget = driver.poll(bus.nowMs, 0);
+        uint64_t armAt = bus.nowMs;
+        if (cadencePending && !verifiedDelayedCadenceArm) {
+          armAt += 7u;
+          bus.nowMs = armAt;
+        }
+        const PollResult zeroBudget = driver.poll(armAt, 0);
         TEST_ASSERT_EQUAL(cadencePending, zeroBudget.waiting);
         TEST_ASSERT_EQUAL_UINT8(0u, zeroBudget.transactionsUsed);
+        if (cadencePending && !verifiedDelayedCadenceArm) {
+          const uint64_t periodMs =
+              transfer.startReg == cmd::REG_DATA_START_ACCEL ? 20u : 5u;
+          const PollResult beforeDeadline =
+              driver.poll(armAt + periodMs, 1);
+          TEST_ASSERT_TRUE(beforeDeadline.waiting);
+          TEST_ASSERT_EQUAL_UINT8(0u, beforeDeadline.transactionsUsed);
+          bus.nowMs = armAt + periodMs;
+          verifiedDelayedCadenceArm = true;
+        }
         TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
       }
     }
@@ -1580,6 +1615,7 @@ void test_self_test_is_staged_bounded_and_restores_configuration() {
     bus.nowMs++;
   }
   TEST_ASSERT_TRUE(observedZeroI2cWait);
+  TEST_ASSERT_TRUE(verifiedDelayedCadenceArm);
   TEST_ASSERT_EQUAL_UINT16(4u * (request.samples + 1u), dataBursts);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
                           static_cast<uint8_t>(terminal.state));
@@ -1823,6 +1859,16 @@ void test_self_test_cancel_during_settle_is_bus_silent_and_unknown() {
     poll = driver.poll(bus.nowMs, 1);
   } while (!poll.waiting);
   const uint32_t transfers = bus.transferCalls;
+  const uint64_t armAt = bus.nowMs + 7u;
+  bus.nowMs = armAt;
+  const PollResult armed = driver.poll(armAt, 0);
+  TEST_ASSERT_TRUE(armed.waiting);
+  TEST_ASSERT_EQUAL_UINT8(0u, armed.transactionsUsed);
+  const PollResult beforeDeadline = driver.poll(armAt + 100u, 1);
+  TEST_ASSERT_TRUE(beforeDeadline.waiting);
+  TEST_ASSERT_EQUAL_UINT8(0u, beforeDeadline.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
+  bus.nowMs = armAt + 100u;
   TEST_ASSERT_TRUE(driver.cancelActiveJob(bus.nowMs).ok());
   TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
   const OperationResult result = take(driver, token);
@@ -1853,10 +1899,16 @@ void test_self_test_intermittent_not_ready_uses_bounded_bus_silent_cadence() {
         bus.trace[bus.traceCount - 1u].startReg == cmd::REG_STATUS_REG) {
       observedNotReadyWait = true;
       const uint32_t transfers = bus.transferCalls;
-      const PollResult sameTime = driver.poll(bus.nowMs, 0);
-      TEST_ASSERT_TRUE(sameTime.waiting);
-      TEST_ASSERT_EQUAL_UINT8(0u, sameTime.transactionsUsed);
+      const uint64_t armAt = bus.nowMs + 7u;
+      bus.nowMs = armAt;
+      const PollResult armed = driver.poll(armAt, 0);
+      TEST_ASSERT_TRUE(armed.waiting);
+      TEST_ASSERT_EQUAL_UINT8(0u, armed.transactionsUsed);
+      const PollResult beforeDeadline = driver.poll(armAt + 20u, 1);
+      TEST_ASSERT_TRUE(beforeDeadline.waiting);
+      TEST_ASSERT_EQUAL_UINT8(0u, beforeDeadline.transactionsUsed);
       TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
+      bus.nowMs = armAt + 20u;
     }
     bus.nowMs++;
   }
@@ -1989,10 +2041,16 @@ void test_calibration_preserves_fractional_mean_and_reports_post_burst_wait() {
       observedData = true;
       TEST_ASSERT_TRUE(poll.waiting);
       const uint32_t transfers = bus.transferCalls;
-      const PollResult zeroBudget = driver.poll(bus.nowMs, 0);
+      const uint64_t armAt = bus.nowMs + 7u;
+      bus.nowMs = armAt;
+      const PollResult zeroBudget = driver.poll(armAt, 0);
       TEST_ASSERT_TRUE(zeroBudget.waiting);
       TEST_ASSERT_EQUAL_UINT8(0u, zeroBudget.transactionsUsed);
+      const PollResult beforeDeadline = driver.poll(armAt + 10u, 1);
+      TEST_ASSERT_TRUE(beforeDeadline.waiting);
+      TEST_ASSERT_EQUAL_UINT8(0u, beforeDeadline.transactionsUsed);
       TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
+      bus.nowMs = armAt + 10u;
     }
     bus.nowMs++;
   }
@@ -2797,14 +2855,20 @@ void test_sample_readiness_cadence_tracks_slowest_requested_source() {
     TEST_ASSERT_TRUE(first.waiting);
     TEST_ASSERT_EQUAL_UINT8(1u, first.transactionsUsed);
     const uint32_t transfers = bus.transferCalls;
-    TEST_ASSERT_EQUAL_UINT8(
-        0u, driver.poll(firstAt + current.expectedDelayMs - 1u, 8).transactionsUsed);
+    const uint64_t armAt = firstAt + 7u;
+    bus.nowMs = armAt;
+    const PollResult armed = driver.poll(armAt, 0);
+    TEST_ASSERT_TRUE(armed.waiting);
+    TEST_ASSERT_EQUAL_UINT8(0u, armed.transactionsUsed);
+    TEST_ASSERT_EQUAL_UINT8(0u,
+                            driver.poll(armAt + current.expectedDelayMs, 8)
+                                .transactionsUsed);
     TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
-    bus.nowMs = firstAt + current.expectedDelayMs;
+    bus.nowMs = armAt + current.expectedDelayMs + 1u;
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
                             static_cast<uint8_t>(runToTerminal(driver, bus, 2).state));
     (void)take(driver, token);
-    TEST_ASSERT_EQUAL_UINT64(firstAt + current.expectedDelayMs,
+    TEST_ASSERT_EQUAL_UINT64(armAt + current.expectedDelayMs + 1u,
                              bus.trace[1].atMs);
   }
 }

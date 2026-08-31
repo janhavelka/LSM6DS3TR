@@ -168,6 +168,25 @@ def main() -> int:
         re.DOTALL,
     ):
         fail("native CLI must remain available after an I2C initialization failure")
+
+    generic_mapper_start = main_text.find("Status mapEspError")
+    probe_mapper_start = main_text.find("Status mapEspProbeError")
+    write_callback_start = main_text.find("Status i2cWrite", probe_mapper_start)
+    if min(generic_mapper_start, probe_mapper_start, write_callback_start) < 0:
+        fail("native I2C error mapping evidence is incomplete")
+    generic_mapper = main_text[generic_mapper_start:probe_mapper_start]
+    if "I2C_NACK" in generic_mapper or "I2C_BUSY" in generic_mapper:
+        fail("generic native I2C errors must not invent NACK or busy context")
+    probe_mapper = main_text[probe_mapper_start:write_callback_start]
+    if "ESP_ERR_NOT_FOUND" not in probe_mapper or "I2C_NACK_ADDR" not in probe_mapper:
+        fail("only the address-probe mapper may classify NOT_FOUND as NACK")
+    if not re.search(
+        r"Status probeAddress\(.*?return mapEspProbeError\(\s*"
+        r"i2c_master_probe\(",
+        main_text,
+        re.DOTALL,
+    ):
+        fail("native address probing must use its context-specific error mapper")
     if not re.search(
         r"bool ownerMutationBlocked\(\).*?session\.kind != SessionKind::NONE.*?"
         r"device\.operationActive\(\).*?device\.resultPending\(\)",

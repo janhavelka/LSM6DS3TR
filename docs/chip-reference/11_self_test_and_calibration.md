@@ -54,9 +54,12 @@ that only increases averaging after the same required first-sample discard.
 Each needed sample allows at most three status checks before failing visibly.
 Every sample, including the discarded sample, is separately gated by its test
 ODR and checked ready before the XYZ burst: 20 ms at the 52 Hz accelerometer
-setting and 5 ms at the 208 Hz gyroscope setting, each rounded up. Reading the
-high output byte clears the corresponding latched ready flag, so a previously
-observed flag cannot justify the next sample.
+setting and 5 ms at the 208 Hz gyroscope setting, each rounded up. The driver
+arms each gate from a fresh caller-clock sample after the preceding callback
+and adds one millisecond so callback duration and integer-clock truncation
+cannot shorten the interval. Reading the high output byte clears the
+corresponding latched ready flag, so a previously observed flag cannot justify
+the next sample.
 
 The four vendor settle intervals above are minima. The owner-scheduled driver
 arms each one from a fresh caller-clock sample after the controlling register
@@ -93,7 +96,8 @@ fixture assumptions:
 - Accelerometer bias uses a caller-supplied expected gravity vector and rejects
   an invalid or unstable fixture.
 - Sample count is bounded, every sample has bounded ready checks, and cadence
-  is gated by the configured ODR period.
+  is gated by the configured ODR period from fresh post-callback time, with a
+  one-millisecond integer-clock quantization tick.
 - Results are reported; they are not silently written into hardware offsets or
   applied to future samples.
 

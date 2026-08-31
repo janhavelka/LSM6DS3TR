@@ -83,7 +83,7 @@ void noteContractFailure(const char* reason) {
   Serial.flush();
 }
 
-bool acceptStart(const Status& status, const OperationToken& token,
+void acceptStart(const Status& status, const OperationToken& token,
                  Phase acceptedPhase) {
   if ((!status.ok() && !status.inProgress()) || !token.valid()) {
     ++operationFailures;
@@ -93,32 +93,30 @@ bool acceptStart(const Status& status, const OperationToken& token,
                   static_cast<unsigned long>(operationFailures));
     Serial.flush();
     phase = Phase::COMPLETE;
-    return false;
+    return;
   }
   pendingToken = token;
   phase = acceptedPhase;
-  return true;
 }
 
-bool startProbe(uint64_t now, Phase nextPhase) {
+void startProbe(uint64_t now, Phase nextPhase) {
   OperationToken token{};
-  return acceptStart(device.startProbe(timing(now, 1000U), token), token,
-                     nextPhase);
+  acceptStart(device.startProbe(timing(now, 1000U), token), token, nextPhase);
 }
 
-bool startConfigure(uint64_t now) {
+void startConfigure(uint64_t now) {
   OperationToken token{};
-  return acceptStart(device.startConfigure(profile, timing(now, 5000U), token),
-                     token, Phase::STARTUP_CONFIGURE);
+  acceptStart(device.startConfigure(profile, timing(now, 5000U), token), token,
+              Phase::STARTUP_CONFIGURE);
 }
 
-bool startReconcile(uint64_t now) {
+void startReconcile(uint64_t now) {
   OperationToken token{};
-  return acceptStart(device.startReconcile(timing(now, 3000U), token), token,
-                     Phase::PERIODIC_RECONCILE);
+  acceptStart(device.startReconcile(timing(now, 3000U), token), token,
+              Phase::PERIODIC_RECONCILE);
 }
 
-bool startSample(uint64_t now) {
+void startSample(uint64_t now) {
   static constexpr uint8_t QUANTITIES[4] = {
       SAMPLE_ALL, SAMPLE_ACCELERATION, SAMPLE_ANGULAR_RATE, SAMPLE_TEMPERATURE};
   SampleRequest request{};
@@ -126,8 +124,8 @@ bool startSample(uint64_t now) {
   request.quantityMask = QUANTITIES[pattern >> 1U];
   request.checkDataReady = (pattern & 1U) == 0U;
   OperationToken token{};
-  return acceptStart(device.startSample(request, timing(now, 1500U), token),
-                     token, Phase::SAMPLE);
+  acceptStart(device.startSample(request, timing(now, 1500U), token), token,
+              Phase::SAMPLE);
 }
 
 void updateRanges(const ConvertedSample& sample) {
@@ -198,6 +196,11 @@ void validateSample(const OperationResult& result) {
                               sensitivity)) {
         noteContractFailure("gyro_conversion");
       }
+    }
+    if ((result.sample.validMask & SAMPLE_TEMPERATURE) != 0U &&
+        converted.temperatureMilliC !=
+            decodeTemperatureMilliC(result.sample.temperatureRaw)) {
+      noteContractFailure("temperature_conversion");
     }
     updateRanges(converted);
   }
@@ -282,7 +285,7 @@ void handleTerminal(const OperationResult& result, uint64_t now) {
       phase = Phase::COMPLETE;
       return;
     }
-    (void)startConfigure(now);
+    startConfigure(now);
     return;
   }
   if (completedPhase == Phase::STARTUP_CONFIGURE) {
@@ -317,7 +320,7 @@ void handleTerminal(const OperationResult& result, uint64_t now) {
     } else {
       noteContractFailure("periodic_probe_identity");
     }
-    (void)startReconcile(now);
+    startReconcile(now);
     return;
   }
   if (completedPhase == Phase::PERIODIC_RECONCILE) {
@@ -363,10 +366,10 @@ void scheduleWork(uint64_t now) {
     nextProgressMs = now + PROGRESS_PERIOD_MS;
   }
   if (now >= nextMaintenanceMs) {
-    (void)startProbe(now, Phase::PERIODIC_PROBE);
+    startProbe(now, Phase::PERIODIC_PROBE);
     return;
   }
-  if (now >= nextSampleMs) (void)startSample(now);
+  if (now >= nextSampleMs) startSample(now);
 }
 
 }  // namespace
@@ -398,7 +401,7 @@ void setup() {
     phase = Phase::COMPLETE;
     return;
   }
-  (void)startProbe(nowMs(), Phase::STARTUP_PROBE);
+  startProbe(nowMs(), Phase::STARTUP_PROBE);
 }
 
 void loop() {

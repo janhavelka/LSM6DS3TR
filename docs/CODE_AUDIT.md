@@ -11,21 +11,29 @@ changing silicon-facing behavior. For the Arduino transport finding, the
 pinned Arduino-ESP32 3.3.11 `Wire` and ESP32 HAL sources were inspected to
 verify the actual error and locking contracts.
 
+A second, independent review started from clean, synchronized `main` at
+`7d44e39`. Three parallel reviews re-read the original audit from its parent
+commit and inspected the actual implementation and diff: one covered core
+state/provenance, one covered timing/edge cases, and one covered examples,
+transports, HIL, scope, and simplicity. Their claims were then checked again
+against the code, tests, maintained chip references, and the pinned platform
+headers rather than copied into this report.
+
 ## Outcome
 
 | Finding | Verdict | Resolution |
 |---|---|---|
 | 1.1 Calibration averaging precision | Valid | Fixed with one shared floating-point mean-scale helper. |
 | 1.2 Owner-soak start rejection loop | Valid | Fixed with immediate terminal failure; no retry state was needed. |
-| 1.3 Arduino read error collapse | Valid; proposed remedy was incomplete | Replaced the lossy `Wire` staging path with the pinned ESP32 HAL combined transaction. |
-| 1.4 ESP-IDF CLI hidden on bus failure | Valid | Retained typed initialization status and always entered the CLI. |
+| 1.3 Arduino read error collapse | Valid; proposed remedy and first correction were incomplete | Moved managed writes and combined reads to native-result-preserving HAL calls and stopped overclassifying ambiguous errors. |
+| 1.4 ESP-IDF CLI hidden on bus failure | Valid; first correction retained a context-insensitive mapper | Retained initialization status, always entered the CLI, and limited address-NACK classification to probing. |
 | 2.1 Stale mismatch in later results | Valid | Separated operation-local evidence from retained diagnostics. |
 | 2.2 Reconcile restarts a settle gate | Valid | Preserved trusted `KNOWN` and `SETTLING` gates exactly. |
-| 2.3 Self-test zero-budget wait evidence | Valid; adjacent positive-budget defect also existed | Made post-burst wait reporting consistent and cleared completed gates. |
+| 2.3 Self-test zero-budget wait evidence | Valid; adjacent reporting and timing defects also existed | Made wait evidence consistent and armed sampling cadence gates from fresh post-callback time. |
 | 2.4 Reset/boot guard uses pre-write time | Valid; proposed 15 ms re-arm was still short at a clock boundary | Re-armed from fresh time with a one-tick quantization margin; applied the same rule to self-test settles. |
 | 3.1 Unused status values | Partly valid; the report's enum numbers and transport conclusion were wrong | Retained append-only values and corrected their API documentation. |
 | 3.2 Unreachable sample BDU guard | Valid | Removed the redundant branch. |
-| 3.3 Invalid owner-soak range guards | Valid | Replaced them with exact provenance-based conversion checks. |
+| 3.3 Invalid owner-soak range guards | Valid; the targeted host runner retained the same defect | Replaced invalid bounds in both HIL paths with exact conversion checks and telemetry-only motion ranges. |
 
 No breaking public API or enum reorder was introduced. `library.json` remains
 the version source of truth, and the changes are recorded under Unreleased.
@@ -58,7 +66,9 @@ attempts starts while it owns an idle driver, so rejection is already an
 invariant failure. `acceptStart()` now commits the requested phase only after a
 valid accepted token and moves directly to `COMPLETE` after logging one
 `HIL_START_FAILURE`. The host runner already treats that marker as an immediate
-failure.
+failure. The fresh simplicity review also removed the unused boolean return
+values from `acceptStart()` and its four wrappers; every caller already relied
+on the helper's terminal handling and discarded the value.
 
 ### 1.3 Arduino write-read transport errors
 
@@ -69,14 +79,21 @@ the following `requestFrom()` performs the combined transaction and discards
 its native `esp_err_t`. Consequently the old adapter could not distinguish a
 timeout, NACK, busy bus, or generic bus failure.
 
-The adapter now calls `i2cWriteReadNonStop()` using the public
-`TwoWire::getBusNum()`. That HAL call performs the same combined repeated-start
-transaction, owns the bus lock, accepts the bounded timeout, and returns the
-native error. The mapping preserves timeout, busy, address-not-found, and raw
-error detail. Failures whose ACK phase is not identified remain generic
-`I2C_ERROR`; the adapter does not invent an address-versus-data NACK claim.
-Static contract checks now require this path and reject a return to
-`endTransmission(false)` staging.
+The first correction moved combined reads to `i2cWriteReadNonStop()` through
+the public `TwoWire::getBusNum()`, but the fresh audit found two remaining
+problems. Managed writes still used `endTransmission(true)`, which compresses
+native failures, and the native mapper treated `ESP_ERR_INVALID_STATE` as
+`I2C_BUSY` even though that value is context-dependent in the pinned stack and
+can represent a transfer rejection such as NACK.
+
+Managed writes now call `i2cWrite()` directly and combined reads continue to
+use `i2cWriteReadNonStop()`. Both HAL calls own the bus lock, accept the bounded
+callback timeout, and return the native error. Timeout remains typed; ambiguous
+state, response, not-found, and generic failures use `I2C_ERROR` with the raw
+`esp_err_t` detail. The separate address-only `wireProbe()` retains Wire's
+probe-specific address-NACK result. Static contract checks require both native
+managed-transfer paths and forbid reintroducing the false
+`INVALID_STATE`-to-busy mapping.
 
 This remains intentionally specific to the repository's pinned ESP32 Arduino
 integration in `examples/common/`; no platform header entered the framework-
@@ -92,8 +109,16 @@ most useful.
 status retains the exact initialization result. Binding and the startup probe
 only run after successful initialization, but `cliLoop()` is entered in either
 case. `diag` prints a stable `bus_init code=... detail=... message=...` record.
-The native-example checker pins both the diagnostic token and the non-fatal
-control flow.
+
+The fresh audit found that the first correction still sent every ESP-IDF error
+through one mapper. In the pinned IDF header, `ESP_ERR_NOT_FOUND` from
+`i2c_new_master_bus()` means that no free bus exists, not that a device NACKed;
+the generic mapper therefore made retained initialization evidence false.
+`mapEspError()` now types only unambiguous timeout and invalid-argument results
+and otherwise preserves generic native detail. A narrow `mapEspProbeError()`
+alone maps `ESP_ERR_NOT_FOUND` from `i2c_master_probe()` to
+`I2C_NACK_ADDR`. The native-example checker pins the non-fatal CLI flow and this
+context boundary.
 
 ### 2.1 Operation-local versus lifetime mismatch evidence
 
@@ -141,6 +166,21 @@ Regression coverage checks all 24 data bursts of the minimum self-test: the
 discard plus five averaged reads in each of four phases, including that each
 sixth/final burst reports no obsolete cadence wait.
 
+That fixed the reported evidence problem but left the cadence deadline itself
+anchored to the `nowMs` sampled before each synchronous callback. A slow
+callback and whole-millisecond clock truncation could therefore consume part
+of the documented 20 ms, 5 ms, or configured-ODR bus-silent interval. The same
+pattern existed between unsuccessful ready-checked sample STATUS reads.
+
+Sampling, self-test, and calibration now reuse `_step == 2` as a CPU-only
+post-callback arming state. The callback leaves the deadline clear; the next
+poll samples fresh time and arms the rounded cadence plus one millisecond, with
+no I2C and no new member or callback. Final averages still skip an unnecessary
+gate. Zero-budget polling may execute only these explicitly safe arming states.
+Regressions deliberately delay the arming poll and prove that no later callback
+occurs through `armTime + roundedPeriod`; the first allowed instant is the next
+millisecond. Callback ceilings remain unchanged.
+
 ### 2.4 Post-command and self-test settle timing
 
 The finding was correct: reset/boot/recovery previously based their 15 ms guard
@@ -158,9 +198,9 @@ pre-write anchoring pattern existed in all four vendor self-test settles
 vendor or library minimums were not falsified, transaction ceilings did not
 change, and absolute operation deadlines still take precedence.
 
-The existing ready check following each self-test sample-cadence gate remains
-the final proof of new data; adding extra substeps there would not improve the
-hardware evidence.
+Fresh-time self-test-settle arming is now exercised with zero callback budget,
+and recovery has a direct post-command guard regression in addition to the
+shared reset/boot coverage.
 
 ### 3.1 `DEVICE_NOT_FOUND` and `FIFO_EMPTY`
 
@@ -200,15 +240,27 @@ signed count multiplied by the sensitivity selected by that sample's immutable
 full-scale provenance. Temperature retains the documented -40..85 °C
 operating-range check. The HIL guide now describes these checks accurately.
 
+The fresh review found the same two nominal motion bounds still present in
+`tools/run_hil.py`. That targeted runner only required converted lines to be
+present, so its guide claimed an exact conversion check that it did not
+perform. It now compares every reported acceleration, angular-rate, and
+temperature value with the raw evidence and stamped default provenance. Motion
+ranges are telemetry only; temperature retains the silicon rating check. Host
+tests reject an incorrect conversion and accept both signed-int16 endpoint
+products, including the valid 286,720,000 micro-dps gyroscope endpoint that the
+old bound rejected.
+
 ## Additional contract guards
 
-- The Arduino CLI checker requires the error-preserving HAL combined read and
-  rejects the old lossy repeated-start sequence.
+- The Arduino CLI checker requires error-preserving HAL writes and combined
+  reads, rejects the old lossy repeated-start sequence, and forbids false busy
+  classification of an ambiguous native state error.
 - The same checker pins owner-soak phase commit after accepted starts, terminal
   rejection handling, exact conversion checks, and removal of the stale range
   literals.
-- The ESP-IDF checker requires retained `bus_init` diagnostics and proves the
-  owner CLI remains after conditional initialization/binding.
+- The ESP-IDF checker requires retained `bus_init` diagnostics, proves the
+  owner CLI remains after conditional initialization/binding, and pins the
+  probe-only address-NACK mapping boundary.
 - Chip timing and maintained-document coverage checks continue to pass.
 - Timing documentation now distinguishes vendor minima from the library's
   one-tick integer-clock margin.
@@ -230,11 +282,11 @@ The following completed locally on the synchronized source:
 - `python tools/check_chip_docs_coverage.py`: passed, covering 14 maintained
   topics and 50 exact register facts.
 - `python -m py_compile ...` and `python tools/test_run_hil.py`: passed,
-  including all 16 HIL-runner host tests.
+  including all 18 HIL-runner host tests.
 - `python tools/build_docs.py`: warning-free Doxygen build passed.
-- `pio pkg pack` plus `python tools/check_package_contract.py`: passed with 37
-  files and 20 linked Markdown documents, using an isolated temporary archive
-  so an older ignored local archive was not overwritten.
+- `.\scripts\pio.cmd pkg pack` plus `python tools/check_package_contract.py`:
+  passed with 37 files and 20 linked Markdown documents, using an isolated
+  temporary archive so an older ignored local archive was not overwritten.
 - `python scripts/generate_version.py check`: all generated version artifacts
   were current.
 
