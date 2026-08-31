@@ -51,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-margin-seconds", type=float, default=120.0)
     parser.add_argument("--raw-log", type=pathlib.Path)
     parser.add_argument("--summary", type=pathlib.Path)
+    parser.add_argument("--chip", choices=("esp32s2", "esp32s3"), default="esp32s3")
     args = parser.parse_args()
     if args.expected_seconds <= 0 or args.timeout_margin_seconds <= 0:
         parser.error("duration and timeout margin must be positive")
@@ -68,6 +69,7 @@ def main() -> int:
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "port": args.port,
         "baud": args.baud,
+        "chip": args.chip,
         "expected_seconds": args.expected_seconds,
         "raw_log": str(raw_path.resolve()),
         "result": "running",
@@ -76,7 +78,7 @@ def main() -> int:
     endpoint: serial.Serial | None = None
     raw = None
     try:
-        watchdog_reset(args.port, raw_path)
+        watchdog_reset(args.port, raw_path, args.chip)
         raw = raw_path.open("a", encoding="utf-8", newline="\n")
         endpoint = open_safe(args.port, args.baud)
         deadline = time.monotonic() + args.expected_seconds + args.timeout_margin_seconds

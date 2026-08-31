@@ -441,9 +441,9 @@ same owner queue. The application request identity and the library's
 terminal result is published. One `poll(nowMs, 1)` per owner turn gives the
 normal one-backend-transfer scheduling bound.
 
-The reviewed TunnelMonitor-node fit, callback capacities, and remaining
-product decisions are retained in the
-[HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md#tunnelmonitor-node-compatibility-boundary).
+The callback capacities, ownership rules, and product decisions a host firmware
+must settle before embedding this driver are listed in the
+[HIL validation guide](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md#host-firmware-integration-boundary).
 This repository does not invent those decisions or add a second bus owner.
 
 ## Examples

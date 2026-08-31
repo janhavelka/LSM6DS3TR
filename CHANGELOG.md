@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrected the `DRDY_PULSE_CFG_G` (`0x0B`) diagnostic writable mask from
+  `0xC0` to `0x81`. Datasheet Table 43 defines only `DRDY_PULSED` (bit 7) and
+  `INT2_WRIST_TILT` (bit 0) as writable; the old mask permitted a reserved
+  must-be-zero bit and rejected the one bit AN5130's wrist-tilt recipe writes.
+  Added `MASK_DRDY_PULSED`/`MASK_INT2_WRIST_TILT` to `CommandTable.h` and
+  pinned both directions in the native suite.
+- Resolved the pre-operation configuration snapshot through
+  `configurationState(nowMs)` instead of the raw member, so a read-only
+  reconcile no longer regresses a settled `KNOWN` configuration to `SETTLING`
+  and no longer restarts its settle gate.
+- Fixed `tools/run_owner_soak.py`, which crashed immediately with a `TypeError`
+  because its `watchdog_reset()` call was never updated for the required `chip`
+  argument. The runner now takes `--chip` like `run_hil.py` and records it in
+  the summary.
+
+### Changed
+
+- Removed the vestigial `mayChangeConfiguration` parameter from `_writeByte()`;
+  all call sites passed `true`, so the flag suggested configuration-neutral
+  writes that do not exist.
+- Removed a dead store in `_pollOne()`: `poll()` is the sole authority for
+  `PollResult::transactionsUsed` because only it knows the caller's budget.
+- Corrected the `gyroSettleSamples` source citation to AN5130 Tables 15/16; the
+  previous comment named Table 13, which is the accelerometer table and has no
+  FTYPE column. The returned counts were already correct.
+- Documented that `getDesiredProfile()`/`getVerifiedProfile()` can return
+  `NOT_BOUND`, and restated `ConfigurationState::APPLYING` as "writing or
+  verifying" to match the read-only reconcile that publishes it.
+
+### Documentation
+
+- Added [docs/AUDIT_2026-08-27.md](docs/AUDIT_2026-08-27.md): a source-backed
+  audit with concrete proposals for the defects that need a design decision.
+- Recorded in the ambiguity ledger that `CTRL3_C.BOOT` self-clearing is a
+  hardware observation, not a documented ST guarantee. ST attaches the
+  automatic-clear statement to `SW_RESET` only.
+- Replaced the accumulating per-release HIL evidence log with the single
+  campaign that validates the current source, and generalized the
+  third-party-specific integration section into a portable host-firmware
+  integration boundary.
+- Corrected seven off-by-one/two datasheet page citations in the chip-reference
+  register map, added the missing ESP32-S2 build/upload step to the HIL guide,
+  brought the `AGENTS.md` repository tree and target statement up to date, and
+  refreshed the `SECURITY.md` supported-version table.
+
 ## [2.1.0] - 2026-08-05
 
 ### Added

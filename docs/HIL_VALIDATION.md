@@ -43,12 +43,13 @@ assert DTR so CDC traffic is delivered and state the hardware expectation
 explicitly:
 
 ```powershell
+.\scripts\pio.cmd run -e esp32s2dev -t upload --upload-port COMx
 python tools/run_hil.py --port COMx --chip esp32s2 --assert-dtr --expected-psram-bytes 0
 ```
 
-These options change only host endpoint handling and metadata assertions; they
-do not weaken any driver, transaction, diagnostic, setter, or maintenance
-check in the targeted campaign.
+The runner options above change only host endpoint handling and metadata
+assertions; they do not weaken any driver, transaction, diagnostic, setter, or
+maintenance check in the targeted campaign.
 
 Accelerometer calibration additionally requires a stationary fixture with a
 validated `+Z` gravity orientation. When that mechanical reference is not
@@ -152,17 +153,21 @@ this with a monitor that momentarily asserts the boot straps.
 
 ## Retained Physical Evidence
 
-### ESP32-S2 Expanded Campaign
+Only the campaign that validates the *current* source is retained here. Older
+per-release run logs are not evidence for today's code; their results are
+summarized per version in [CHANGELOG.md](../CHANGELOG.md) and their full text
+remains in Git history. Do not append a new block per run - replace this one.
 
-The expanded targeted campaign passed on 2026-08-05 from 14:15:27 to 14:17:16
-UTC on the ESP32-S2 native-TinyUSB fixture at `COM10`. The fixture used 4 MB
-embedded flash, no PSRAM, address `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C,
-and a 50 ms callback timeout. Runtime metadata proved Arduino-ESP32 3.3.11 and
-bundled ESP-IDF 5.5.5.
+### Current: ESP32-S2 Expanded Campaign
 
-The firmware banner recorded `40ba050` with a dirty tree because the validated
-candidate was committed immediately after the run; those tested source changes
-are commit [`1419ea2`](https://github.com/janhavelka/LSM6DS3TR/commit/1419ea2a50b56e04875cf4a7268661ffc8f01165).
+| Item | Value |
+| --- | --- |
+| Date | 2026-08-05, 14:15:27-14:17:16 UTC |
+| Fixture | ESP32-S2 native-TinyUSB, 4 MB flash, no PSRAM |
+| Sensor | address `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz, 50 ms callback timeout |
+| Runtime | Arduino-ESP32 3.3.11, bundled ESP-IDF 5.5.5 |
+| Tested source | [`1419ea2`](https://github.com/janhavelka/LSM6DS3TR/commit/1419ea2a50b56e04875cf4a7268661ffc8f01165) |
+
 The campaign completed every profile, sampling, stress, cancellation,
 diagnostic, invalidation, reconciliation, FIFO-purge, power-down, reset, boot,
 recovery, and strict invalid-input phase. Both sensor self-tests and both
@@ -170,125 +175,45 @@ gyroscope calibration forms passed. Transport counters moved from 70 to 1,634
 successful callbacks with zero final failures; all 94 invalid-input checks
 passed.
 
-Both accelerometer calibration forms were explicitly skipped because no
-validated `+Z` gravity fixture was available. This result proves the mechanical
-driver, transport, self-test, and lifecycle contracts but makes no physical
-accelerometer-calibration or mounting-transform claim. No one-hour S2 soak was
-run.
+Coverage limits of this run, stated explicitly:
 
-### ESP32-S3 Historical Evidence
+- Both accelerometer calibration forms were skipped because no validated `+Z`
+  gravity fixture was available. This run makes no physical
+  accelerometer-calibration or mounting-transform claim.
+- No one-hour owner soak was run on the ESP32-S2 fixture. The most recent
+  passing soak is the ESP32-S3 run recorded in the 2.1.0 changelog entry.
+- Contradictory-FIFO and injected self-test-failure branches remain native
+  fault-injection checks; a fixture cannot safely force those internal faults.
 
-The ESP32-S3 table and results below predate the expanded staged-profile,
-scan/address/frequency, job-inspection, and cooperative-stress campaign. They
-remain evidence for the driver operation families, calibrated fixture, and
-long owner soak; the expanded operator campaign is evidenced by the S2 result
-above.
+## Host Firmware Integration Boundary
 
-All retained campaigns used the ESP32-S3 revision 0.1 fixture with the LSM6DS3TR-C at
-address `0x6A`, WHO_AM_I `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz I2C, and a
-50 ms callback timeout.
+The library is a device driver, not an application. A host firmware that embeds
+it must supply the bus owner, and the compile-time contract below is what that
+owner has to satisfy. These are the numbers to check against any candidate
+host, not a claim about one particular project:
 
-| Campaign | Tested source | pioarduino | Arduino-ESP32 | Bundled ESP-IDF | PlatformIO Core |
-| --- | --- | --- | --- | --- | --- |
-| 2026-08-03 v2.0.1 release candidate | [`v2.0.1`](https://github.com/janhavelka/LSM6DS3TR/tree/v2.0.1) | 55.03.311 | 3.3.11 | 5.5.5 | 6.1.19 |
-| 2026-07-31 platform upgrade | [`94126c8`](https://github.com/janhavelka/LSM6DS3TR/commit/94126c8f6247b68d96e85044b5b7e9fd5493938f) | 55.03.311 | 3.3.11 | 5.5.5 | 6.1.19 |
-| 2026-07-22 version 2.0.0 baseline | [`v2.0.0`](https://github.com/janhavelka/LSM6DS3TR/tree/v2.0.0) | 54.03.20 | 3.2.0 | 5.4.1 | 6.1.18 |
+- transport callbacks receive at most 33 write bytes (including the register
+  prefix) and at most 32 read bytes, so the owner's I2C payload capacity must
+  meet those two bounds;
+- an all-quantity IMU sample yields seven scalar readings, which must fit the
+  host's per-device result capacity;
+- the driver advances on one callback per owner turn and owns no task, lock,
+  retry, health policy, or bus recovery, so it drops into a single-owner
+  transport task without inverting control;
+- driver and result objects are fixed-size, so a host that forbids steady-state
+  allocation can size them statically.
 
-### pioarduino 55.03.311 Upgrade
+For an integration where the host already has a generic retry/recovery layer,
+disable same-operation retry for these callbacks. The owner may recover the bus
+only after it has taken the driver's terminal result, then start an explicit
+new operation chosen from the reported effect and configuration evidence. This
+prevents a bus-level retry from replaying a library state-machine step after an
+ambiguous write.
 
-The fixture was supplied on `COM30`. After the new firmware selected its
-hardware USB Serial/JTAG identity, Windows assigned `COM26`; esptool reported
-the same `64:e8:33:73:a1:54` device. The fixture has 4 MB embedded flash and
-2 MB QSPI PSRAM. Runtime metadata proved Arduino-ESP32 3.3.11, ESP-IDF 5.5.5,
-and both configured memory sizes before functional testing began.
-
-- Targeted CLI: passed all eight quantity/readiness combinations, 40 strict
-  invalid-input cases, and every lifecycle, maintenance, diagnostic,
-  cancellation, destructive, and recovery stage. Accelerometer and gyroscope
-  self-test passed, both 16-sample calibrations succeeded, and transport
-  counters moved from 70 to 1,178 successes with zero failures.
-- Post-datasheet-re-audit targeted check: passed from 15:01:57 to 15:02:47 UTC
-  on 2026-07-31 on the same USB identity after the self-test cadence/shutdown,
-  reset/boot/recovery prerequisite, and FIFO-empty-proof corrections. The
-  campaign covered the complete lifecycle and maintenance surface, both
-  self-tests and 16-sample calibrations succeeded, all 40 invalid-input checks
-  passed, and transport counters moved from 70 to 825 successes with zero
-  failures. The requested focused check intentionally did not repeat the
-  one-hour soak.
-- Post-hardening targeted check: passed from 06:02:36 to 06:03:26 UTC on
-  2026-08-01 after flashing the then-final driver logic to the same fixture. This
-  rechecked reset, boot, recovery, self-test, calibration, sampling,
-  cancellation, diagnostics, and the strict invalid-input matrix after adding
-  active-stimulus failure cleanup and bidirectional FIFO count/`FIFO_EMPTY`
-  validation. Both self-tests and both 16-sample calibrations succeeded, all
-  40 invalid-input checks passed, and transport counters again moved from 70
-  to 825 successes with zero failures. The contradictory FIFO and injected
-  self-test-failure branches remain native fault-injection checks because the
-  fixture cannot safely force those internal status/transport faults. No soak
-  was run.
-- v2.0.1 release-candidate targeted check: passed from 12:31:55 to 12:32:45 UTC
-  on 2026-08-03 after the release audit, malformed-provenance rejection,
-  calibration-helper cleanup, and version synchronization. Runtime metadata
-  reported library 2.0.1, Arduino-ESP32 3.3.11, ESP-IDF 5.5.5, 4 MB flash, and
-  2 MB PSRAM. Every public operation family, both self-tests, both 16-sample
-  calibrations, and all 40 invalid-input checks passed; transport counters
-  moved from 70 to 825 successes with zero failures. No soak was run.
-- One-hour owner soak on `94126c8`, before the later datasheet-driven driver
-  corrections: passed from 09:52:52 to 10:52:54 UTC. At the exact
-  3,600,000 ms terminal record the device reported 35,989 samples with matching
-  sequence, configuration generation 1, 54,461 successful transport callbacks,
-  11 paired probe/reconcile maintenance cycles, and zero operation, contract,
-  or transport failures. Observed temperature was 30.136-31.000 degrees
-  Celsius; peak absolute acceleration and angular rate were 1,078,785 micro-g
-  and 126,078,750 micro-dps, respectively.
-
-### Version 2.0.0 Baseline
-
-- Targeted CLI: passed 40 strict invalid-input cases and all lifecycle,
-  sampling, maintenance, diagnostic, cancellation, and recovery stages. The
-  driver transport counters moved from 70 to 1,178 successes with zero
-  failures. Accelerometer and gyroscope self-test passed and both 16-sample
-  calibrations completed successfully.
-- One-hour owner soak: passed from 14:44:45 to 15:44:48 UTC. At the exact
-  3,600,000 ms terminal record the device reported 35,988 samples with matching
-  sequence, configuration generation 1, 54,459 successful transport callbacks,
-  11 paired probe/reconcile maintenance cycles, and zero operation, contract,
-  or transport failures. Observed temperature was 29.566-30.082 degrees
-  Celsius; peak absolute acceleration and angular rate were 971,791 micro-g
-  and 2,030,000 micro-dps, respectively.
-
-## TunnelMonitor-node Compatibility Boundary
-
-The local integration review compiles the public library header together with
-TunnelMonitor-node's authoritative capacity contracts and verifies:
-
-- 33-byte maximum library write and 32-byte maximum read callbacks fit the
-  128-byte I2C payload capacity;
-- fixed driver and result types fit the reviewed owner/module boundaries;
-- all-quantity IMU output needs seven scalar readings, below the 48-reading
-  device-result capacity;
-- the driver can be advanced with one callback per owner turn and does not own
-  tasks, locks, retries, health policy, or bus recovery.
-
-For a future TunnelMonitor-node module, each callback is one physical backend
-attempt with its generic same-operation retry and recovery disabled. The owner
-may recover the bus only after it has taken the driver's terminal result, then
-starts an explicit new operation selected from the reported effect and
-configuration evidence. This prevents a bus retry from replaying a library
-state-machine step after an ambiguous write.
-
-No TunnelMonitor-node production source is changed by this validation. Its
-current contracts do not yet define the IMU device kind/instance, mounting,
-cadence, calibration persistence, health role, or sample schema. Those are
-product decisions and must precede a concrete owner-private module.
-
-The 2026-07-22 compatibility check used TunnelMonitor-node revision
-`292ba6912ce96a93f7ec2d4d0578b8a2f5cc6db2`. The reviewed I2C and device
-contract paths were clean; unrelated storage work was present elsewhere in its
-working tree and was preserved. The cross-repository compile reported a
-1,024-byte driver, 304-byte library operation result, and 264-byte application
-device result. TunnelMonitor-node's complete native suite then passed
-1,100/1,100 tests without any library-specific application change.
+Product-side decisions - device kind/instance, mounting transform, cadence,
+calibration persistence, health role, and sample schema - are deliberately out
+of scope here. A host must decide them before writing its own driver-owning
+module; this repository does not invent them.
 
 ## Intentional Physical Limits
 
@@ -300,5 +225,5 @@ Deterministic software fault behavior,
 partial/ambiguous effects, deadlines, cancellation, clock boundaries, and
 every transfer-stage failure are covered by the native fault-injection suite.
 Electrical fault recovery, alternate-address hardware, mounting/axis signs,
-and a real multi-device TunnelMonitor load remain separate fixture/product
-validation gates.
+and a real multi-device host load remain separate fixture/product validation
+gates.

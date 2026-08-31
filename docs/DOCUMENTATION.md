@@ -28,6 +28,11 @@ README, guide, and <a href="../CHANGELOG.md">changelog</a> in the same change.
 
 ## Repository-Only Audit Material
 
+- [Library audit 2026-08-27](AUDIT_2026-08-27.md): source-backed findings that
+  still need a design decision, each with a concrete minimal proposal. Items
+  are removed as they are resolved; it is a worklist, not a retained report.
+
+
 - The official [datasheet](https://www.st.com/resource/en/datasheet/lsm6ds3tr-c.pdf)
   and [AN5130](https://www.st.com/resource/en/application_note/dm00472670-lsm6ds3trc-alwayson-3d-accelerometer-and-3d-gyroscope-stmicroelectronics.pdf)
   PDFs, their mechanically extracted text, and local hashes are retained in the

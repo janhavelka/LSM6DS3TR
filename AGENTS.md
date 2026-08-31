@@ -14,7 +14,8 @@ if the wrapper cannot find the selected installation, stop and report it.
 ## Role and Target
 You are a professional embedded software engineer building a production-grade LSM6DS3TR-C IMU library.
 
-- Target: ESP32-S2 / ESP32-S3, Arduino framework, PlatformIO.
+- Target: ESP32-S2 / ESP32-S3. The core is framework-neutral; Arduino/PlatformIO
+  and native ESP-IDF are both supported example/integration paths.
 - Goals: deterministic behavior, long-term stability, clean API contracts, portability, no surprises in the field.
 - These rules are binding.
 
@@ -31,8 +32,11 @@ include/LSM6DS3TR/       - Public API headers only (Doxygen)
   Version.h              - Auto-generated (do not edit)
 src/                     - Implementation (.cpp)
 examples/
-  01_*/
-  common/                - Example-only helpers (BoardConfig.h, I2cTransport.h)
+  01_basic_bringup_cli/  - Arduino owner-safe bring-up CLI
+  02_owner_soak/         - Repository-only physical soak harness
+  common/                - Example-only helpers (BoardConfig.h, I2cTransport.h,
+                           ProfileCli.h)
+  idf/basic/             - Native ESP-IDF example (no Arduino facades)
 docs/chip-reference/     - Maintained vendor-audited silicon behavior reference
 platformio.ini
 library.json

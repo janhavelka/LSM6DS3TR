@@ -134,8 +134,9 @@ bool validSampleQuality(SampleQuality quality) {
 }
 
 uint16_t gyroSettleSamples(const DeviceProfile& profile) {
-  // DeviceProfile supports the LPF1 FTYPE=00 path only. These LPF1 counts are
-  // therefore the AN5130 Table 13 FTYPE=00 values, not a generic LPF1 bound.
+  // buildCtrl6() never sets CTRL6_C.FTYPE, so this device runs FTYPE=00 only.
+  // LPF1 off -> AN5130 Table 15; LPF1 on -> the FTYPE=00 column of AN5130
+  // Table 16. Not a generic LPF1 bound: FTYPE 01/10 raise 208/416/833 Hz.
   switch (profile.gyroOdr) {
     case Odr::HZ_12_5: return 2;
     case Odr::HZ_26: return 3;
@@ -194,7 +195,11 @@ bool diagnosticWritableMask(uint8_t reg, uint8_t& mask) {
     case cmd::REG_FIFO_CTRL3: mask = 0x3F; return true;
     case cmd::REG_FIFO_CTRL4: mask = 0xFF; return true;
     case cmd::REG_FIFO_CTRL5: mask = 0x7F; return true;
-    case cmd::REG_DRDY_PULSE_CFG_G: mask = 0xC0; return true;
+    case cmd::REG_DRDY_PULSE_CFG_G:
+      // Datasheet Table 43: only DRDY_PULSED (bit 7) and INT2_WRIST_TILT
+      // (bit 0) are writable; bits 6:1 must stay zero.
+      mask = static_cast<uint8_t>(cmd::MASK_DRDY_PULSED | cmd::MASK_INT2_WRIST_TILT);
+      return true;
     case cmd::REG_INT1_CTRL:
     case cmd::REG_INT2_CTRL:
     case cmd::REG_CTRL1_XL:
@@ -665,7 +670,9 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   _pollBoundary = false;
   _hardwareStateMayHaveChanged = false;
   _configurationMayBeUnknown = false;
-  _configurationStateBeforeOperation = _configurationState;
+  // Resolve SETTLING->KNOWN once, at capture time, so the snapshot always
+  // agrees with what configurationState() reports to the caller.
+  _configurationStateBeforeOperation = configurationState(timing.nowMs);
   _validAfterBeforeOperationMs = _validAfterUptimeMs;
   _workingResult = {};
   _workingResult.token = _token;
@@ -950,18 +957,17 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
   return status;
 }
 
-Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
-                            bool mayChangeConfiguration) {
+Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs) {
   if (_operationTransactionLimit != 0U &&
       _operationTransactions >= _operationTransactionLimit) {
     return Status::Error(Err::TRANSACTION_LIMIT_EXCEEDED,
                          "Operation transaction limit exceeded");
   }
   const uint8_t payload[2] = {reg, value};
-  if (mayChangeConfiguration) {
-    _hardwareStateMayHaveChanged = true;
-    _configurationMayBeUnknown = true;
-  }
+  // Every managed write can change hardware state; the flags must be raised
+  // only after the transaction-limit guard above has let the write through.
+  _hardwareStateMayHaveChanged = true;
+  _configurationMayBeUnknown = true;
   _transactionUsed = true;
   _operationTransactions = saturatingIncrement(_operationTransactions);
   Status status = normalizeTransport(_driverConfig.i2cWrite(
@@ -1073,7 +1079,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
   if (!reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
     const uint8_t index = static_cast<uint8_t>(_step);
     const Status status =
-        _writeByte(_managedRegisters[index], _managedValues[index], nowMs, true);
+        _writeByte(_managedRegisters[index], _managedValues[index], nowMs);
     if (!status.ok()) return status;
     ++_step;
     return inProgressStatus();
@@ -1224,7 +1230,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
       _substep = 1;
     } else {
       const Status status =
-          _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+          _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs);
       if (!status.ok()) return status;
       _substep = 1;
     }
@@ -1273,7 +1279,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
   if (_substep == 3U) {
     const uint8_t gyroOff = static_cast<uint8_t>(buildCtrl2(_desiredProfile) &
                                                  ~cmd::MASK_ODR_G);
-    const Status status = _writeByte(cmd::REG_CTRL2_G, gyroOff, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL2_G, gyroOff, nowMs);
     if (!status.ok()) return status;
     _substep = 4;
     return inProgressStatus();
@@ -1282,7 +1288,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
     const uint8_t accelHighPerformance =
         static_cast<uint8_t>(buildCtrl6(_desiredProfile) & ~cmd::MASK_XL_HM_MODE);
     const Status status =
-        _writeByte(cmd::REG_CTRL6_C, accelHighPerformance, nowMs, true);
+        _writeByte(cmd::REG_CTRL6_C, accelHighPerformance, nowMs);
     if (!status.ok()) return status;
     _substep = 5;
     return inProgressStatus();
@@ -1295,7 +1301,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
       activeAccel.accelOdr = Odr::HZ_12_5;
     }
     const Status status =
-        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(activeAccel), nowMs, true);
+        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(activeAccel), nowMs);
     if (!status.ok()) return status;
     _substep = 6;
     return inProgressStatus();
@@ -1304,7 +1310,7 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
     const uint8_t command = static_cast<uint8_t>(buildCtrl3(_desiredProfile) |
                                                  (boot ? cmd::MASK_BOOT
                                                        : cmd::MASK_SW_RESET));
-    const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL3_C, command, nowMs);
     if (!status.ok()) return status;
     _waitUntilMs = saturatingAdd(nowMs, cmd::BOOT_TIME_MS);
     _substep = 7;
@@ -1354,7 +1360,7 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
   }
   if (_step == 1U) {
     const Status status =
-        _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs, true);
+        _writeByte(cmd::REG_FUNC_CFG_ACCESS, 0, nowMs);
     if (!status.ok()) return status;
     _step = 2;
     return inProgressStatus();
@@ -1387,13 +1393,13 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_step == 4U) {
-    const Status status = _writeByte(cmd::REG_CTRL1_XL, ctrl1, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, ctrl1, nowMs);
     if (!status.ok()) return status;
     ++_step;
     return inProgressStatus();
   }
   if (_step == 5U) {
-    const Status status = _writeByte(cmd::REG_CTRL2_G, ctrl2, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL2_G, ctrl2, nowMs);
     if (!status.ok()) return status;
     ++_step;
     return inProgressStatus();
@@ -1517,26 +1523,26 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return _stepConfigure(nowMs, false);
   }
   if (_substep == 0U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     ++_substep;
     return inProgressStatus();
   }
   if (_substep == 1U) {
-    const Status status = _writeByte(cmd::REG_CTRL8_XL, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL8_XL, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     ++_substep;
     return inProgressStatus();
   }
   if (_substep == 2U) {
     if (_step == 0U) {
-      const Status status = _writeByte(cmd::REG_CTRL6_C, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL6_C, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     if (_step == 1U) {
-      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
@@ -1544,31 +1550,31 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     if (_step == 2U) {
       const uint8_t ctrl3 = static_cast<uint8_t>(cmd::MASK_BDU |
                                                  cmd::MASK_IF_INC);
-      const Status status = _writeByte(cmd::REG_CTRL3_C, ctrl3, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL3_C, ctrl3, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     if (_step == 3U) {
-      const Status status = _writeByte(cmd::REG_CTRL4_C, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL4_C, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     if (_step == 4U) {
-      const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL7_G, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     if (_step == 5U) {
-      const Status status = _writeByte(cmd::REG_CTRL9_XL, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL9_XL, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
     }
     if (_step == 6U) {
-      const Status status = _writeByte(cmd::REG_CTRL10_C, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL10_C, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
@@ -1576,7 +1582,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     if (_step >= 7U && _step <= 9U) {
       const uint8_t reg = static_cast<uint8_t>(
           cmd::REG_X_OFS_USR + static_cast<uint8_t>(_step - 7U));
-      const Status status = _writeByte(reg, 0, nowMs, true);
+      const Status status = _writeByte(reg, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       ++_step;
       return inProgressStatus();
@@ -1585,7 +1591,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     testProfile.accelOdr = Odr::HZ_52;
     testProfile.accelFullScale = AccelFs::G_4;
     const Status status =
-        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs, true);
+        _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _step = 0;
     _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
@@ -1668,8 +1674,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 6U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_XL,
-                                     nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_XL, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_ACCEL_SETTLE_MS);
     _substep = 7;
@@ -1677,13 +1682,13 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 10U) {
-    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     ++_substep;
     return inProgressStatus();
   }
   if (_substep == 11U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     ++_substep;
     return inProgressStatus();
@@ -1693,7 +1698,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     testProfile.gyroOdr = Odr::HZ_208;
     testProfile.gyroFullScale = GyroFs::DPS_2000;
     const Status status =
-        _writeByte(cmd::REG_CTRL2_G, buildCtrl2(testProfile), nowMs, true);
+        _writeByte(cmd::REG_CTRL2_G, buildCtrl2(testProfile), nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_SETTLE_MS);
     _substep = 13;
@@ -1701,8 +1706,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_substep == 16U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_G,
-                                     nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 1U << cmd::BIT_ST_G, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _waitUntilMs = saturatingAdd(nowMs, SELF_TEST_GYRO_STIMULUS_SETTLE_MS);
     _substep = 17;
@@ -1711,38 +1715,38 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
   }
   if (_substep == 20U) {
     if (_step == 0U) {
-      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+      const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs);
       if (!status.ok()) return routeFailureToRestore(status);
       _step = 1;
       return inProgressStatus();
     }
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     beginRestore();
     if (!_primaryStatus.ok()) _pollBoundary = true;
     return inProgressStatus();
   }
   if (_substep == 90U) {
-    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL1_XL, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _substep = 91;
     return inProgressStatus();
   }
   if (_substep == 91U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     beginRestore();
     _pollBoundary = true;
     return inProgressStatus();
   }
   if (_substep == 92U) {
-    const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL2_G, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     _substep = 93;
     return inProgressStatus();
   }
   if (_substep == 93U) {
-    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs, true);
+    const Status status = _writeByte(cmd::REG_CTRL5_C, 0, nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
     beginRestore();
     _pollBoundary = true;
@@ -2072,7 +2076,6 @@ PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
     result.transactions = static_cast<uint16_t>(_operationTransactions);
     result.transactionLimit = static_cast<uint16_t>(_operationTransactionLimit);
   }
-  result.transactionsUsed = _transactionUsed ? 1U : 0U;
   result.waiting = _waiting;
   return result;
 }
@@ -2422,7 +2425,7 @@ Status LSM6DS3TR::diagnosticWriteRegister(uint8_t reg, uint8_t value,
   _hardwareStateMayHaveChanged = true;
   _configurationMayBeUnknown = true;
   _invalidateConfiguration();
-  return _writeByte(reg, value, nowMs, true);
+  return _writeByte(reg, value, nowMs);
 }
 
 }  // namespace LSM6DS3TR

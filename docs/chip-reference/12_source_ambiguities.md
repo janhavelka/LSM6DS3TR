@@ -70,6 +70,22 @@ also polling the self-clearing command bit within a fixed ceiling.
 **Resolution:** document 50 us as the chip fact and 15 ms as deliberate library
 policy; never present the larger guard as an ST reset specification.
 
+## `CTRL3_C.BOOT` Self-Clearing Is Undocumented
+
+Datasheet p. 63 attaches "This bit is automatically cleared" to `SW_RESET`
+only. AN5130 p. 49 offers a bit-poll alternative solely in the reset flow; its
+reboot flow ends at "Wait 15 ms", and the boot status signal it names is the
+`INT1_BOOT` pad, not a register bit. The same page states that `BOOT` does not
+modify control-register content, so ST never says whether the `BOOT` bit clears
+itself or persists from the host's own write.
+
+**Resolution:** the library polls `CTRL3_C.BOOT` back to zero as its boot
+completion criterion, after the 15 ms guard and within a fixed poll ceiling.
+That is a hardware-observed behavior, not a documented ST guarantee: retained
+HIL campaigns pass the boot operation on real silicon. Record it as an
+observation. Do not restate it as a datasheet fact, and re-validate it on
+hardware before relying on it for a different part or revision.
+
 ## Local Datasheet Page Count
 
 ST's current PDF contains 115 pages. The repository's PDFium-normalized copy

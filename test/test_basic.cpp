@@ -2122,6 +2122,7 @@ void test_diagnostic_bounds_and_raw_write_invalidation_are_explicit() {
       {cmd::REG_SENSOR_SYNC_RES_RATIO, 0x04u},
       {cmd::REG_FIFO_CTRL2, 0x30u},
       {cmd::REG_FIFO_CTRL5, 0x02u},
+      {cmd::REG_DRDY_PULSE_CFG_G, 0x40u},
       {cmd::REG_CTRL1_XL, 0xC0u},
       {cmd::REG_CTRL2_G,
        static_cast<uint8_t>(cmd::MASK_FS_125 | cmd::MASK_FS_G)},
@@ -2187,7 +2188,9 @@ void test_diagnostic_sync_writes_invalidate_and_reconcile_exact_addresses() {
       cmd::REG_SENSOR_SYNC_RES_RATIO, 0x02U, bus.nowMs).ok());
   TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
       cmd::REG_DRDY_PULSE_CFG_G, 0x80U, bus.nowMs).ok());
-  TEST_ASSERT_EQUAL_UINT32(3U, bus.transferCalls);
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
+      cmd::REG_DRDY_PULSE_CFG_G, cmd::MASK_INT2_WRIST_TILT, bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT32(4U, bus.transferCalls);
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_TIME_FRAME,
                          bus.trace[0].startReg);
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_RES_RATIO,

@@ -87,7 +87,7 @@ enum class OperationState : uint8_t {
 /// @brief Confidence state of the managed device register image.
 enum class ConfigurationState : uint8_t {
   UNCONFIGURED,  ///< No complete verified managed image is available.
-  APPLYING,      ///< A procedure may be changing the managed image.
+  APPLYING,      ///< A procedure is writing or verifying the managed image.
   KNOWN,         ///< Managed image is verified and output is valid.
   UNKNOWN,       ///< Desired state exists but hardware provenance is unverified.
   SETTLING       ///< Managed image is verified; sensor output is not yet valid.
@@ -550,13 +550,13 @@ public:
 
   /// @brief Copy the most recently accepted desired profile.
   /// @param out Receives the profile on success.
-  /// @return OK or CONFIGURATION_UNKNOWN if no desired profile exists.
+  /// @return OK, NOT_BOUND, or CONFIGURATION_UNKNOWN if no desired profile exists.
   Status getDesiredProfile(DeviceProfile& out) const;
 
   /// @brief Copy the currently verified and settled profile.
   /// @param out Receives the profile on success.
   /// @param nowMs Current caller-owned monotonic time.
-  /// @return OK, SETTLING, or CONFIGURATION_UNKNOWN.
+  /// @return OK, NOT_BOUND, SETTLING, or CONFIGURATION_UNKNOWN.
   Status getVerifiedProfile(DeviceProfile& out, uint64_t nowMs) const;
 
   /// @param nowMs Current caller-owned monotonic time.
@@ -616,8 +616,7 @@ private:
   void _prepareManagedImage(const DeviceProfile& profile);
   void _recordMismatch(uint8_t reg, uint8_t expected, uint8_t observed);
   Status _read(uint8_t reg, uint8_t* data, size_t length, uint64_t nowMs);
-  Status _writeByte(uint8_t reg, uint8_t value, uint64_t nowMs,
-                    bool mayChangeConfiguration = true);
+  Status _writeByte(uint8_t reg, uint8_t value, uint64_t nowMs);
   Status _checkStart(const OperationTiming& timing) const;
   Status _checkReadyForKnownConfiguration(uint64_t nowMs) const;
   static bool _validDiagnosticRange(uint8_t startReg, size_t length);

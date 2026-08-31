@@ -121,6 +121,12 @@ static constexpr uint8_t REG_X_OFS_USR = 0x73;
 static constexpr uint8_t REG_Y_OFS_USR = 0x74;
 static constexpr uint8_t REG_Z_OFS_USR = 0x75;
 
+// DRDY_PULSE_CFG_G
+static constexpr uint8_t BIT_DRDY_PULSED = 7;
+static constexpr uint8_t MASK_DRDY_PULSED = 0x80;
+static constexpr uint8_t BIT_INT2_WRIST_TILT = 0;
+static constexpr uint8_t MASK_INT2_WRIST_TILT = 0x01;
+
 // CTRL1_XL
 static constexpr uint8_t BIT_ODR_XL = 4;
 static constexpr uint8_t MASK_ODR_XL = 0xF0;
