@@ -71,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Re-verified all 11 original code-audit findings against synchronized `main`
+  on 2026-09-05. Refreshed `docs/CODE_AUDIT.md` with current code evidence,
+  simpler-solution decisions, independent edge-case checks, and explicit
+  validation limits; all findings were already resolved in the reviewed source.
 - Completed the repository-only source-backed audit worklist as the
   `docs/CODE_AUDIT.md` finding-by-finding resolution report, including
   corrections to three proposed remedies and exact closure evidence.
