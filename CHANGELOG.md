@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Armed new configuration settling gates from a fresh owner timestamp after
+  the final managed-register readback, with one millisecond of quantization
+  margin for nonzero intervals. Changing transaction budgets and time spent
+  in callbacks can no longer cause early data validity. The shared fix also
+  covers reset/boot/recovery replay, self-test restoration, and reconciliation
+  from untrusted state; trusted reconciliation retains its original gate.
 - Preserved fractional raw means in accelerometer and gyroscope calibration;
   the conversion now divides in floating point after accumulating the complete
   fixed-count sample set instead of truncating through an `int16_t` mean.
@@ -71,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Rechecked all 11 original audit findings on 2026-09-08 and documented the
+  remaining configuration-settling defect found while reviewing finding 2.4,
+  its minimal fix, regression evidence, and fresh validation results in
+  `docs/CODE_AUDIT.md`.
 - Re-verified all 11 original code-audit findings against synchronized `main`
   on 2026-09-05. Refreshed `docs/CODE_AUDIT.md` with current code evidence,
   simpler-solution decisions, independent edge-case checks, and explicit

@@ -15,6 +15,16 @@ This library converts the tables below into one conservative `validAfter` gate.
 The owner supplies monotonic time; the core performs no sleeps and does no I2C
 while the gate is active. Ready bits are checked only after the gate.
 
+As library scheduling policy, a newly established gate is armed from a fresh
+caller-clock sample after the final managed-register readback. The driver
+rounds the interval up to milliseconds and adds one clock-quantization tick
+when the interval is nonzero. This keeps time spent in synchronous transport
+callbacks from shortening the gate, including when the owner changes its
+per-poll transaction budget. Configure, reset/boot/recovery replay, self-test
+restoration, and reconciliation from untrusted state share this rule.
+Read-only reconciliation of a previously `KNOWN` or `SETTLING` profile retains
+its original validity timestamp without adding another tick or restarting it.
+
 ## Accelerometer Filter Chain
 
 - The analog anti-alias filter is active only in high-performance mode. Its

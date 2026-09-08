@@ -272,6 +272,13 @@ Configuration state is explicit:
 - `UNKNOWN`: a partial/ambiguous write or mismatch invalidated provenance.
 - `SETTLING`: configuration is verified but sensor output is not yet valid.
 
+New settling gates start from a fresh caller-clock sample after the final
+managed-register readback, including reset/boot/recovery and self-test profile
+restoration. Each nonzero interval is rounded up to milliseconds and includes
+one clock-quantization tick. The owner can supply this fresh time with a
+zero-transaction-budget poll. Read-only reconciliation preserves an existing
+trusted validity timestamp; untrusted state requires a new conservative gate.
+
 `configGeneration` increments after a fully verified profile application or a
 verified power-down transition, never after a partial or ambiguous effect.
 Samples capture the generation and exact accelerometer/gyro full scales from

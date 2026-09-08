@@ -1,33 +1,35 @@
-# Code Audit Verification Report — 2026-09-05
+# Code Audit Verification And Remediation Report — 2026-09-08
 
-All 11 findings have been checked against the synchronized codebase. Ten were
-valid historical defects and one (3.1) was partly correct. **All are already
-resolved in the reviewed baseline; no additional production-code change is
-justified.** Several original remedies were incomplete or unnecessarily
-complicated. The existing implementation incorporates the simpler proper
-solutions described below.
+All 11 findings have been independently checked against the synchronized
+codebase. Ten were valid historical defects and one (3.1) was partly correct.
+Their original defects were already addressed, but the deeper review of **2.4
+found a remaining timing defect in shared configuration settling**, fixed in
+this change. The other existing remedies remain the simplest appropriate
+solutions. This report distinguishes those retained fixes from the new work.
 
 ## Scope and source history
 
 The review fetched all remotes with pruning, verified a clean working tree,
 compared local and remote branch tips, and ran the upstream fast-forward check.
-`main` was the newest branch, and both `HEAD` and `origin/main` were
-`f82071420e87301900711c7d103cd714106d9e74`.
+`main` was the newest branch, and both baseline `HEAD` and `origin/main` were
+`9874e81c134c231d501bc46b54f69cc9c642a96e`. The fast-forward check required no
+update.
 
 At that commit this file was already a resolution report, not an outstanding
 worklist. To avoid treating previous conclusions as proof, this review read
 both the [original 2026-08-27 audit at 0183f63](https://github.com/janhavelka/LSM6DS3TR/blob/0183f63/docs/CODE_AUDIT.md)
 and the [2026-08-31 resolution at f820714](https://github.com/janhavelka/LSM6DS3TR/blob/f820714/docs/CODE_AUDIT.md),
-then inspected the actual code, regression tests, and relevant history.
+then inspected actual code, regression tests, and fixes in `7d44e39` and
+`f820714`. The previous report's conclusions were not treated as proof.
 
-Three parallel reviews covered core math/provenance, operation timing, and
-examples/transports/HIL. Their conclusions were checked against source and
-validation evidence. The maintained chip-reference index and applicable
-conversion, protocol, initialization, settling, self-test, and ambiguity topics
-were consulted. Arduino transport semantics were checked against installed
-Arduino-ESP32 3.3.11 `Wire.h`, `Wire.cpp`, and `esp32-hal-i2c-ng.c`, plus the
-bundled ESP-IDF I2C headers in the existing `%USERPROFILE%\.platformio\packages`
-cache. PlatformIO commands used the separately selected `C:\pio` installation.
+Three independent parallel reviews covered core math/provenance, operation
+timing, and examples/transports/HIL. The primary review checked their source
+evidence and the resulting patch. The maintained chip-reference index and
+applicable conversion, protocol, initialization, settling, self-test, and
+ambiguity topics were consulted. Arduino transport semantics were checked
+against installed Arduino-ESP32 3.3.11 `Wire.h`, `Wire.cpp`, and
+`esp32-hal-i2c-ng.c`, plus the bundled ESP-IDF I2C headers in `C:\pio\packages`.
+PlatformIO commands used that existing selected `C:\pio` installation.
 
 ## Finding-by-finding verdicts
 
@@ -40,7 +42,7 @@ cache. PlatformIO commands used the separately selected `C:\pio` installation.
 | 2.1 Lifetime mismatch leaking into later results | Valid | Operation-local evidence and lifetime diagnostics are separated. |
 | 2.2 Reconcile extending a trusted settle gate | Valid | Existing trusted state, timestamp, and generation are preserved. |
 | 2.3 Self-test wait evidence with zero budget | Valid | Cadence arming and wait evidence work with zero and positive budgets. |
-| 2.4 Guard anchored before command completion | Valid; proposed interval was incomplete | Fresh post-callback time plus one clock tick enforces the minimum. |
+| 2.4 Guard anchored before command completion | Valid; prior fix missed shared profile settling | Retain corrected command/self-test guards; fix new configuration gates to use fresh post-readback time plus one clock tick. |
 | 3.1 Unused status values | Partly valid | Accurate comments retain the append-only public values. |
 | 3.2 Redundant BDU admission guard | Valid | Validation remains the single source of this invariant. |
 | 3.3 Incorrect HIL motion-range assertions | Valid | Both HIL paths check conversion; motion maxima are telemetry. |
@@ -60,9 +62,9 @@ remain wide enough for the full signed raw domain. Self-test averaging remains
 unchanged, as the original audit explicitly required.
 
 The retained fractional-mean regression passes. An independent temporary C++
-harness also passed 112 calibration cases: both sensors, every full scale,
-counts 1/2/3/1000, positive and negative fractional means, and signed gyro
-endpoints. Expected means were calculated independently in double precision.
+harness also passed 100 calibration cases: both sensors, every full scale,
+counts 1/2/3/999/1000, positive and negative means, and signed gyro endpoints at
+count 1000. Expected means were calculated independently in double precision.
 
 ### 1.2 Owner-soak start rejection
 
@@ -75,6 +77,10 @@ The original proposal described stopping but then added a consecutive-failure
 counter and repeated attempts. That state is unnecessary: this harness starts
 work only when its owner expects admission, so rejection already fails the
 campaign. The current void helpers express that terminal policy directly.
+
+An independent temporary harness called each of the four actual start helpers
+against an unbound driver, then called `scheduleWork()` 10,000 times per helper.
+Each case produced exactly one rejection log and no retry.
 
 ### 1.3 Arduino transport error fidelity
 
@@ -104,6 +110,7 @@ promise of bounded execution under arbitrary concurrent SDK bus use.
 `app_main()` retains it, conditions binding and startup probing on success,
 and enters `cliLoop()` after either initialization outcome. `diag` reports the
 retained `bus_init` code, detail, and message.
+This does not promise CLI availability if console initialization itself fails.
 
 The current separation of `mapEspError()` and `mapEspProbeError()` is needed:
 `ESP_ERR_NOT_FOUND` means no free bus during bus creation, but address NACK for
@@ -119,9 +126,11 @@ clears the lifetime diagnostics without erasing this operation's evidence.
 
 The existing failed-configure/successful-power-down regression proves a clean
 successful result while diagnostics retain the earlier mismatch, and then
-checks that successful configuration clears those diagnostics. No special
-self-test status policy is necessary: primary self-test measurement failure
-must not be inferred from an unrelated lifetime register mismatch.
+checks that successful configuration clears those diagnostics. Independent
+checks extended the sequence through successful probe and empty FIFO purge,
+with the same correct separation. No special self-test status policy is
+necessary: primary self-test measurement failure must not be inferred from an
+unrelated lifetime register mismatch.
 
 ### 2.2 Reconcile and existing settling provenance
 
@@ -151,7 +160,7 @@ contract. Current code keeps that distinction without another state member.
 The retained tests cover all 24 minimum self-test bursts, delayed arming,
 calibration waits, unsuccessful readiness checks, cancellation, and cleanup.
 
-### 2.4 Reset/boot/recovery and self-test minimum guards
+### 2.4 Post-callback timing and the remaining configuration defect
 
 After a controlling command write, the wait timestamp is deliberately left
 unarmed and the poll returns. A subsequent compute-only step sets the guard
@@ -165,11 +174,63 @@ clock callback/member. The 15 ms reset guard is documented library policy;
 AN5130's approximately 50 us reset duration remains a separate silicon fact.
 No transport retry or extra physical transaction was introduced.
 
-An independent temporary C++ timing harness passed 48 cases covering 280
-gates: six operation types, callback budgets 1/2/8/255, and zero/positive-budget
-arming. Callbacks advanced simulated time by 7 ms and arming was delayed another
-23 ms. Every checked gate remained bus-silent through `armTime + minimum`, and
-all operations completed within their callback ceilings.
+However, shared `_stepConfigure()` finalization still computed a new
+`_validAfterUptimeMs` using the timestamp supplied before a poll's callbacks.
+A poll could execute profile writes and final readback before this compute
+stage. Completing readback did not prove that the supplied timestamp was after
+those writes. The previous fixed-budget timing experiments missed this case.
+
+An independent reproduction used a 12.5 Hz accelerometer with gyro off,
+successful 7 ms writes within a 10 ms callback timeout, and transaction budgets
+of 12 followed by 255. The second poll began at 1070 ms; accelerometer activation
+completed at 1084 ms and the filter write at 1133 ms. These are simulated-clock
+values, not hardware measurements.
+
+| Evidence | Baseline | Fixed |
+|---|---:|---:|
+| Final profile write completed | 1231 ms | 1231 ms |
+| Configuration declared valid | 2190 ms | 2352 ms |
+| Elapsed since accelerometer activation | 1106 ms | 1268 ms |
+| Required nominal settling interval | 1120 ms | 1120 ms |
+| Physical callbacks | 68 | 68 |
+
+The baseline declared `KNOWN` 14 ms before even the activation-based minimum.
+The fix adds nine production lines in [`_stepConfigure()`](../src/LSM6DS3TR.cpp):
+both final managed-readback paths set the existing `_pollBoundary`, so the
+existing compute stage receives fresh time from a later poll. Newly computed
+positive intervals receive a saturating one-millisecond quantization margin.
+At a fresh arming time of 1231 ms, the reproduction now retains all 1121 ms.
+
+The shared fix covers configure, reset/boot/recovery replay, self-test
+restoration, and reconciliation from untrusted state. No new state, clock
+callback, retry, or physical transaction is added. Absolute deadlines still
+take precedence. Trusted reconciliation preserves its exact timestamp and
+generation; zero-settle profiles add no timed delay and can finish in a
+zero-budget compute poll without advancing time. Separate per-operation fixes
+or estimates derived from callback timeout ceilings would be more complex.
+
+Two retained [native regressions](../test/test_basic.cpp) cover the new behavior:
+
+- `test_configuration_settle_arms_after_readback_with_changing_budgets` covers
+  configure and untrusted reconcile, 7 ms callbacks, budgets 12 then 255,
+  another 23 ms before zero/positive-budget arming, exact gate boundaries,
+  generation, and callback counts.
+- `test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance`
+  covers `UINT64_MAX` saturation, deadline precedence, and powered-down profiles
+  with no settle interval.
+
+An isolated build of these retained tests against baseline `9874e81` failed
+the changing-budget assertion (expected `validAfter=2620`, observed `2204`);
+both tests pass against the fixed core. That test advances both read and write
+callbacks and delays arming, so its timestamps intentionally differ from the
+write-only-latency reproduction table. The saturation/zero-settle test passes
+on both versions, confirming preservation of those boundaries.
+
+The original trusted-settle reconcile test now explicitly performs the fresh
+compute poll after readback. An independent reviewer additionally exercised
+12 reconcile boundary cases: prior `KNOWN`/`SETTLING`/`UNKNOWN`, before/after
+publication, and cancellation/deadline. Trusted timestamps and generation were
+preserved; interruption added no I2C and retained conservative state.
 
 ### 3.1 Retained status values
 
@@ -203,10 +264,9 @@ operating-range check remains separate from conversion verification.
 
 The negative gyro endpoint at the default scale is legitimately
 -286,720,000 micro-dps; the old 251 dps limit was invalid. Existing host tests
-accept signed endpoints and reject wrong conversions. A further temporary
-matrix passed 114 checks across all seven nonempty quantity masks, ready/direct
-modes, signed motion endpoints, fractional temperature values of both signs,
-and deliberately incorrect conversions.
+accept signed endpoints and reject wrong conversions. Independent tests also
+exercised 40 signed-endpoint/full-scale combinations in the actual owner-soak
+code, retaining valid telemetry and detecting deliberately wrong conversions.
 
 ## Deliberate nonchanges rechecked
 
@@ -224,22 +284,39 @@ and deliberately incorrect conversions.
 
 ## Work performed and verification
 
-This change refreshes this report and records the re-verification under
-Unreleased in `CHANGELOG.md`. Production sources, tests, public API, version
-metadata, and supported behavior needed no additional change. Prior fixes
-remain attributed to their existing commits; this review does not claim to
-have implemented them again.
+This change fixes shared configuration-gate anchoring in
+[`src/LSM6DS3TR.cpp`](../src/LSM6DS3TR.cpp), adds two focused native regressions,
+and adjusts the existing trusted-reconcile test to perform explicit post-readback
+finalization. It updates the public timing Doxygen, README,
+[maintained settling reference](chip-reference/09_filters_and_settling.md),
+changelog, and this report. The other fixes remain attributed to their existing
+commits; this review does not claim to have implemented them again.
+
+There is no new state, API, transaction, allocation, transport retry, or renewed
+deadline. Version metadata remains unchanged and the correction is recorded
+under Unreleased; this is not a tagged release.
 
 Fresh local checks on the reviewed source:
 
-- `.\scripts\pio.cmd test -e native`: **103/103 passed** using the selected
+- `.\scripts\pio.cmd test -e native`: **105/105 passed** using the selected
   PlatformIO Core 6.1.19 (`PLATFORMIO_CORE_DIR=C:\pio`).
 - CLI, native-IDF, core-timing, and chip-documentation contract checkers: passed;
   chip coverage includes 14 maintained topics and 50 exact register facts.
 - Python compilation of the HIL runners and `python tools/test_run_hil.py`:
   passed, including **18/18 host tests**.
-- Temporary independent calibration, timing, and HIL parsing matrices: passed as
-  detailed above. These were review experiments, not added production paths.
+- Independent compiled core checks: **100 calibration cases**, transport-code
+  preservation, mismatch ownership, empty purge, and **12 reconcile interruption
+  cases** passed, including rechecking against the settling fix.
+- A temporary C++ harness compiled the actual owner-soak code, transport header,
+  and baseline core against isolated SDK stubs with
+  `g++ -std=c++17 -Wall -Wextra -Werror`: **63 cases passed**. These cover 16
+  native write/read result mappings with bus 1 and exact timeout forwarding,
+  three invalid/short-read boundaries, four rejected-start helpers followed by
+  10,000 scheduler calls each, and 40 signed-endpoint/full-scale checks. These
+  unchanged integration paths also compiled in the baseline Arduino builds.
+- The independent changing-budget reproduction failed on the baseline and
+  passed after the fix with the timing/callback evidence in section 2.4.
+  Temporary experiments were not added to production paths.
 - `python tools/build_docs.py`: strict, warning-free Doxygen build passed.
 - `.\scripts\pio.cmd pkg pack --output <temporary archive>` followed by
   `python tools/check_package_contract.py <temporary archive>`: passed,
@@ -247,19 +324,22 @@ Fresh local checks on the reviewed source:
   preserved.
 - `python scripts/generate_version.py check`: all generated artifacts current.
 
-The local Arduino build command
-`.\scripts\pio.cmd run -e esp32s3dev -e esp32s3hil -e esp32s2dev` could not
-provide firmware evidence. The selected existing `C:\pio` installation failed
-to resolve toolchain files and esptool package metadata; compilation then failed
-because `xtensa-esp32s3-elf-g++` was unavailable. Remaining environment attempts
-were stopped after that failure. No replacement PlatformIO Core
-was installed or toolchain configuration changed manually. Native `idf.py`
-was also unavailable in this shell. These are local environment limitations,
-not passing compile results or demonstrated source defects.
+The baseline's three Arduino environments built successfully using the selected
+existing installation. The post-change command
+`.\scripts\pio.cmd run -e esp32s3dev -e esp32s3hil -e esp32s2dev` then failed
+during package/toolchain setup: `idf_tools.py` reported an unexpected archive
+layout, package copying reported missing files, and the compiler executables
+`xtensa-esp32s3-elf-g++`/`xtensa-esp32s2-elf-g++` were unavailable. All three
+post-change environments therefore failed locally. This is not a passing
+firmware build or a demonstrated source failure. No replacement Core was
+installed and no toolchain paths were manually repaired.
 
 For traceability, the reviewed baseline also has a
-[successful seven-job CI run](https://github.com/janhavelka/LSM6DS3TR/actions/runs/33442779481),
+[successful seven-job CI run](https://github.com/janhavelka/LSM6DS3TR/actions/runs/33987135742),
 including all three Arduino environments and native ESP-IDF 5.4.4 builds for
-ESP32-S2 and ESP32-S3. That is existing evidence from 2026-08-31, not a newly
-performed local build. No physical HIL campaign or one-hour soak was run for
-this review.
+ESP32-S2 and ESP32-S3. That validates the baseline, not the new core change.
+Native `idf.py` is unavailable in this shell. Target-build validation of the
+new core change is pending the remediation commit's configured CI checks,
+with its result reported separately after pushing. No physical HIL campaign or
+one-hour soak was run, and stub-backed integration checks do not establish
+hardware timing.

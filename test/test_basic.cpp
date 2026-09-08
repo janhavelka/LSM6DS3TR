@@ -574,6 +574,122 @@ void test_complete_profile_clears_all_disabled_subsystems() {
                         findWrite(bus, cmd::REG_DRDY_PULSE_CFG_G));
 }
 
+void test_configuration_settle_arms_after_readback_with_changing_budgets() {
+  const uint8_t armBudgets[] = {0u, 255u};
+  const bool reconcileModes[] = {false, true};
+  for (bool reconcile : reconcileModes) {
+    for (uint8_t armBudget : armBudgets) {
+      FakeBus bus;
+      LSM6DS3TR::LSM6DS3TR driver;
+      DriverConfig config = makeDriverConfig(bus);
+      config.i2cWrite = [](uint8_t address, const uint8_t* data, size_t length,
+                           uint32_t timeoutMs, void* user) {
+        FakeBus& callbackBus = *static_cast<FakeBus*>(user);
+        callbackBus.nowMs += 7u;
+        return fakeWrite(address, data, length, timeoutMs, user);
+      };
+      config.i2cWriteRead = [](uint8_t address, const uint8_t* txData,
+                               size_t txLength, uint8_t* rxData, size_t rxLength,
+                               uint32_t timeoutMs, void* user) {
+        FakeBus& callbackBus = *static_cast<FakeBus*>(user);
+        callbackBus.nowMs += 7u;
+        return fakeWriteRead(address, txData, txLength, rxData, rxLength,
+                              timeoutMs, user);
+      };
+      TEST_ASSERT_TRUE(driver.bind(config).ok());
+      DeviceProfile profile = makeProfile();
+      profile.accelOdr = Odr::HZ_12_5;
+      profile.gyroOdr = Odr::POWER_DOWN;
+      if (reconcile) {
+        (void)configure(driver, bus, profile);
+        TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
+            cmd::REG_CTRL1_XL, bus.regs[cmd::REG_CTRL1_XL], bus.nowMs).ok());
+        bus.clearTrace();
+      }
+      OperationToken token;
+      const Status start = reconcile
+                               ? driver.startReconcile(timing(bus), token)
+                               : driver.startConfigure(profile, timing(bus), token);
+      TEST_ASSERT_TRUE(start.inProgress());
+      const uint32_t generation = driver.configGeneration();
+      TEST_ASSERT_EQUAL_UINT8(12u, driver.poll(bus.nowMs, 12).transactionsUsed);
+      (void)driver.poll(bus.nowMs, 255);
+      const uint32_t transfers = bus.transferCalls;
+      TEST_ASSERT_EQUAL_UINT32(reconcile ? MAX_RECONCILE_TRANSACTIONS
+                                         : MAX_CONFIGURE_TRANSACTIONS,
+                               transfers);
+
+      // The nominal 14 / 12.5 Hz = 1120 ms interval starts only after a
+      // subsequent clock sample; callback time and quantization cannot eat it.
+      bus.nowMs += 23u;
+      const uint64_t armAt = bus.nowMs;
+      const PollResult armed = driver.poll(armAt, armBudget);
+      TEST_ASSERT_TRUE(armed.waiting);
+      TEST_ASSERT_EQUAL_UINT8(0u, armed.transactionsUsed);
+      TEST_ASSERT_EQUAL_UINT64(armAt + 1121u, driver.validAfterUptimeMs());
+      TEST_ASSERT_EQUAL_UINT32(generation + (reconcile ? 0u : 1u),
+                               driver.configGeneration());
+
+      bus.nowMs = armAt + 1120u;
+      const PollResult waiting = driver.poll(bus.nowMs, 255);
+      TEST_ASSERT_TRUE(waiting.waiting);
+      TEST_ASSERT_EQUAL_UINT8(0u, waiting.transactionsUsed);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::SETTLING),
+                              static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
+      bus.nowMs = armAt + 1121u;
+      const PollResult terminal = driver.poll(bus.nowMs, 0);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
+                              static_cast<uint8_t>(terminal.state));
+      TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
+      const OperationResult result = take(driver, token);
+      TEST_ASSERT_EQUAL_UINT64(armAt + 1121u, result.completedUptimeMs);
+      TEST_ASSERT_EQUAL_UINT32(transfers, result.transactions);
+    }
+  }
+}
+
+void test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance() {
+  const bool poweredDownModes[] = {false, true};
+  for (bool poweredDown : poweredDownModes) {
+    FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    DeviceProfile profile = makeProfile();
+    if (poweredDown) {
+      profile.accelOdr = Odr::POWER_DOWN;
+      profile.gyroOdr = Odr::POWER_DOWN;
+    }
+    bus.nowMs = std::numeric_limits<uint64_t>::max() - 1u;
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startConfigure(
+        profile, OperationTiming{bus.nowMs, std::numeric_limits<uint64_t>::max()},
+        token).inProgress());
+    TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
+    TEST_ASSERT_EQUAL_UINT8(4u, driver.poll(bus.nowMs, 255).transactionsUsed);
+    const PollResult finalized = driver.poll(bus.nowMs, 0);
+    TEST_ASSERT_EQUAL_UINT8(0u, finalized.transactionsUsed);
+    if (poweredDown) {
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::SUCCEEDED),
+                              static_cast<uint8_t>(finalized.state));
+      TEST_ASSERT_FALSE(finalized.waiting);
+      TEST_ASSERT_EQUAL_UINT64(bus.nowMs, driver.validAfterUptimeMs());
+      TEST_ASSERT_TRUE(take(driver, token).status.ok());
+    } else {
+      TEST_ASSERT_TRUE(finalized.waiting);
+      TEST_ASSERT_EQUAL_UINT64(std::numeric_limits<uint64_t>::max(),
+                               driver.validAfterUptimeMs());
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::SETTLING),
+                              static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
+      bus.nowMs = std::numeric_limits<uint64_t>::max();
+      const PollResult terminal = driver.poll(bus.nowMs, 0);
+      const OperationResult result = take(driver, token);
+      assertTerminalFailure(terminal, result, Err::DEADLINE_EXPIRED,
+                            OperationState::TIMED_OUT);
+    }
+    TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, bus.transferCalls);
+  }
+}
+
 void test_configure_failure_at_every_transport_stage_has_precise_effect_state() {
   FakeBus referenceBus;
   LSM6DS3TR::LSM6DS3TR referenceDriver;
@@ -2757,9 +2873,11 @@ void test_reconcile_preserves_an_existing_unexpired_settle_gate() {
           .inProgress());
 
   TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
-  const PollResult settling = driver.poll(bus.nowMs, 255);
+  const PollResult readback = driver.poll(bus.nowMs, 255);
+  TEST_ASSERT_EQUAL_UINT8(4u, readback.transactionsUsed);
+  const PollResult settling = driver.poll(bus.nowMs, 0);
   TEST_ASSERT_TRUE(settling.waiting);
-  TEST_ASSERT_EQUAL_UINT8(4u, settling.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(0u, settling.transactionsUsed);
   const uint64_t originalValidAfter = driver.validAfterUptimeMs();
   TEST_ASSERT_GREATER_THAN_UINT64(configureTime + 1u, originalValidAfter);
 
@@ -2775,10 +2893,12 @@ void test_reconcile_preserves_an_existing_unexpired_settle_gate() {
 
   bus.clearTrace();
   TEST_ASSERT_TRUE(driver.startReconcile(timing(bus), token).inProgress());
-  const PollResult reconciledWaiting = driver.poll(bus.nowMs, 255);
-  TEST_ASSERT_TRUE(reconciledWaiting.waiting);
+  const PollResult reconciled = driver.poll(bus.nowMs, 255);
   TEST_ASSERT_EQUAL_UINT8(MAX_RECONCILE_TRANSACTIONS,
-                          reconciledWaiting.transactionsUsed);
+                          reconciled.transactionsUsed);
+  const PollResult reconciledWaiting = driver.poll(bus.nowMs, 0);
+  TEST_ASSERT_TRUE(reconciledWaiting.waiting);
+  TEST_ASSERT_EQUAL_UINT8(0u, reconciledWaiting.transactionsUsed);
   TEST_ASSERT_EQUAL_UINT64(originalValidAfter, driver.validAfterUptimeMs());
   TEST_ASSERT_EQUAL_UINT32(generation, driver.configGeneration());
   for (size_t i = 0; i < bus.traceCount; ++i) {
@@ -3777,6 +3897,8 @@ int main() {
   RUN_TEST(test_probe_deadline_and_uint64_boundary_are_safe);
   RUN_TEST(test_configure_enforces_budget_and_verifies_before_generation_increment);
   RUN_TEST(test_complete_profile_clears_all_disabled_subsystems);
+  RUN_TEST(test_configuration_settle_arms_after_readback_with_changing_budgets);
+  RUN_TEST(test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance);
   RUN_TEST(test_configure_failure_at_every_transport_stage_has_precise_effect_state);
   RUN_TEST(test_ambiguous_write_effect_is_observable_and_never_retried);
   RUN_TEST(test_configuration_readback_mismatch_reports_exact_register_values);

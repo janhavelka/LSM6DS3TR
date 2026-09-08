@@ -330,6 +330,8 @@ uint64_t odrPeriodUs(Odr odr);
 /// @brief Calculate the conservative post-configuration settling interval.
 /// @param profile Valid production profile.
 /// @return Settling interval in microseconds, saturating at UINT64_MAX.
+/// @note The operation engine rounds a nonzero interval up to milliseconds and
+/// adds one clock-quantization tick when arming it after full profile readback.
 uint64_t requiredSettleUs(const DeviceProfile& profile);
 
 /// @brief Calculate the hard callback ceiling for self-test.

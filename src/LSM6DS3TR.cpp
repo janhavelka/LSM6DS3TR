@@ -1079,6 +1079,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     ++_step;
     if (_step == MANAGED_REGISTER_COUNT) {
       _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+      _pollBoundary = true;
     }
     return inProgressStatus();
   }
@@ -1105,6 +1106,11 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
                            _managedRegisters[index]);
     }
     ++_step;
+    if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT)) {
+      // Finalize from a fresh caller clock after the complete readback. A
+      // changing poll budget can put earlier profile writes in this same poll.
+      _pollBoundary = true;
+    }
     return inProgressStatus();
   }
 
@@ -1130,6 +1136,9 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       settleMs = settleUs == std::numeric_limits<uint64_t>::max()
                      ? settleUs
                      : (settleUs + 999U) / 1000U;
+      if (settleMs != 0U) {
+        settleMs = saturatingAdd(settleMs, CLOCK_QUANTIZATION_MARGIN_MS);
+      }
       _validAfterUptimeMs = saturatingAdd(nowMs, settleMs);
       _configurationState = settleMs == 0U ? ConfigurationState::KNOWN
                                            : ConfigurationState::SETTLING;
