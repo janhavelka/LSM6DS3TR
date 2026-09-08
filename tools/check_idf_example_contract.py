@@ -101,6 +101,24 @@ def handled_commands(text: str) -> set[str]:
     return set(re.findall(r'strcmp\(command,\s*"([^"]+)"\)', text))
 
 
+def function_body(text: str, signature: str, label: str) -> str:
+    """Extract a balanced definition body, ignoring forward declarations."""
+    match = re.search(rf"\b{re.escape(signature)}\s*\([^)]*\)\s*\{{", text)
+    if match is None:
+        fail(f"{label} definition not found")
+    start = match.end() - 1
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    fail(f"{label} definition is unbalanced")
+    return ""
+
+
 def main() -> int:
     main_text = read(IDF_MAIN_DIR / "main.cpp", "native ESP-IDF main")
     cmake_text = read(IDF_MAIN_DIR / "CMakeLists.txt", "ESP-IDF main CMake")
@@ -169,15 +187,14 @@ def main() -> int:
     ):
         fail("native CLI must remain available after an I2C initialization failure")
 
-    generic_mapper_start = main_text.find("Status mapEspError")
-    probe_mapper_start = main_text.find("Status mapEspProbeError")
-    write_callback_start = main_text.find("Status i2cWrite", probe_mapper_start)
-    if min(generic_mapper_start, probe_mapper_start, write_callback_start) < 0:
-        fail("native I2C error mapping evidence is incomplete")
-    generic_mapper = main_text[generic_mapper_start:probe_mapper_start]
+    generic_mapper = function_body(
+        main_text, "Status mapEspError", "generic native I2C error mapper"
+    )
     if "I2C_NACK" in generic_mapper or "I2C_BUSY" in generic_mapper:
         fail("generic native I2C errors must not invent NACK or busy context")
-    probe_mapper = main_text[probe_mapper_start:write_callback_start]
+    probe_mapper = function_body(
+        main_text, "Status mapEspProbeError", "native address-probe error mapper"
+    )
     if "ESP_ERR_NOT_FOUND" not in probe_mapper or "I2C_NACK_ADDR" not in probe_mapper:
         fail("only the address-probe mapper may classify NOT_FOUND as NACK")
     if not re.search(

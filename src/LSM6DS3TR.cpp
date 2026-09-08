@@ -1347,8 +1347,9 @@ Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
   }
   if (_substep == 7U) {
     if (_waitUntilMs == 0U) {
-      // The public examples truncate their clocks to milliseconds. One extra
-      // tick makes the vendor's 15 ms inaccessible interval a true minimum.
+      // BOOT_TIME_MS is AN5130's 15 ms BOOT register-inaccessible interval.
+      // For SW_RESET (~50 us in AN5130), this guard is library policy.
+      // One extra tick accounts for the examples' millisecond clock truncation.
       _waitUntilMs = saturatingAdd(
           nowMs, static_cast<uint64_t>(cmd::BOOT_TIME_MS) +
                      CLOCK_QUANTIZATION_MARGIN_MS);

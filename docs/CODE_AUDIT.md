@@ -115,7 +115,9 @@ This does not promise CLI availability if console initialization itself fails.
 The current separation of `mapEspError()` and `mapEspProbeError()` is needed:
 `ESP_ERR_NOT_FOUND` means no free bus during bus creation, but address NACK for
 `i2c_master_probe()`. A single generic NACK mapper would falsify diagnostics.
-The existing static checker covers CLI reachability and this context boundary.
+The static checker covers CLI reachability and this context boundary by
+inspecting each mapper's definition body independently of source order and
+forward declarations.
 
 ### 2.1 Mismatch evidence ownership
 
@@ -124,13 +126,17 @@ its mismatch triple and the separate lifetime triple. `_finish()` no longer
 copies lifetime evidence into an unrelated result. Full profile verification
 clears the lifetime diagnostics without erasing this operation's evidence.
 
-The existing failed-configure/successful-power-down regression proves a clean
-successful result while diagnostics retain the earlier mismatch, and then
-checks that successful configuration clears those diagnostics. Independent
-checks extended the sequence through successful probe and empty FIFO purge,
-with the same correct separation. No special self-test status policy is
-necessary: primary self-test measurement failure must not be inferred from an
-unrelated lifetime register mismatch.
+Two [native regressions](../test/test_basic.cpp) split this evidence.
+`test_lifetime_mismatch_diagnostics_do_not_leak_into_later_results` runs a
+failed configure followed by a successful power-down and proves that the new
+result has a zero mismatch triple while lifetime diagnostics retain the
+earlier mismatch. `test_configuration_readback_mismatch_reports_exact_register_values`
+then separately proves that successful full-profile **reconciliation** produces
+a clean result and clears the lifetime diagnostic triple. It does not perform
+another configure. Independent temporary checks extended the sequence through
+successful probe and empty FIFO purge, with the same correct separation. No
+special self-test status policy is necessary: primary self-test measurement
+failure must not be inferred from an unrelated lifetime register mismatch.
 
 ### 2.2 Reconcile and existing settling provenance
 
@@ -338,8 +344,53 @@ For traceability, the reviewed baseline also has a
 [successful seven-job CI run](https://github.com/janhavelka/LSM6DS3TR/actions/runs/33987135742),
 including all three Arduino environments and native ESP-IDF 5.4.4 builds for
 ESP32-S2 and ESP32-S3. That validates the baseline, not the new core change.
-Native `idf.py` is unavailable in this shell. Target-build validation of the
-new core change is pending the remediation commit's configured CI checks,
-with its result reported separately after pushing. No physical HIL campaign or
-one-hour soak was run, and stub-backed integration checks do not establish
-hardware timing.
+Native `idf.py` is unavailable in this shell. The remediation commit `7710af3`
+subsequently passed [all seven CI jobs](https://github.com/janhavelka/LSM6DS3TR/actions/runs/34210810511),
+including all three Arduino environments and both native-IDF targets. No
+physical HIL campaign or one-hour soak was run, and stub-backed integration
+checks do not establish hardware timing.
+
+## Independent follow-up: three residual issues
+
+An independent audit of `7710af3` identified three valid low-severity issues.
+These corrections leave the driver runtime behavior and the original 11 fixes
+unchanged:
+
+1. The IDF checker sliced mapper source between `find()` offsets, so a reordered
+   generic mapper could yield an empty body and pass silently. A forward
+   declaration also defeated a simple source-order check. The checker now
+   matches definitions followed by an opening brace and extracts balanced
+   bodies independently of declaration/definition order. A missing definition
+   fails explicitly. The unused callback-boundary search was removed.
+2. The shared reset/boot guard comment incorrectly called the interval a vendor
+   minimum for both operations. The comment now distinguishes AN5130's 15 ms
+   BOOT interval from the conservative SW_RESET policy (vendor figure about
+   50 us). Constants, timing, and the already-correct section 2.4 explanation
+   are unchanged.
+3. Section 2.1 attributed clearing diagnostics to the failed-configure/then-
+   power-down regression. That test only proves result isolation and retained
+   lifetime evidence. The separate readback-mismatch regression proves clearing
+   through successful **reconciliation**. The report now names both tests and
+   the correct operation without relying on stale line numbers.
+
+The new `tools/test_check_idf_example_contract.py` runs three mutation tests
+with 11 scenarios: valid mappers in both orders and with a forward declaration;
+invalid generic NACK and busy classifications in all three layouts; and
+declarations without definitions for each mapper. The reordered bad mappings
+reproduced the original silent pass before the fix and are now rejected. The
+tests exercise the complete checker against in-memory mutations of the actual
+IDF source and run in the existing CI validation job.
+
+Follow-up local verification passed:
+
+- `.\scripts\pio.cmd test -e native`: **105/105**.
+- `python tools/test_check_idf_example_contract.py`: **3/3 tests**, covering
+  the 11 mutation scenarios above.
+- CLI, native-IDF, core-timing, and chip-documentation contract checkers.
+- HIL host tests: **18/18**; Python compilation of the changed checker/tests.
+- Generated-version check and strict Doxygen build.
+- Fresh package check: **37 files and 20 linked Markdown documents**.
+
+CI was green at the follow-up baseline `7710af3`; no existing CI failure needed
+repair. The validation job now includes the mapper mutation regressions, and
+the follow-up commit's CI result is reported separately after pushing.

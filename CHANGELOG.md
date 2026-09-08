@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Made the native-IDF mapper-boundary checker inspect balanced definition
+  bodies, so function reordering or forward declarations cannot bypass error
+  classification checks. Added mutation regressions to CI.
 - Armed new configuration settling gates from a fresh owner timestamp after
   the final managed-register readback, with one millisecond of quantization
   margin for nonzero intervals. Changing transaction budgets and time spent
@@ -77,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Corrected the reset/boot guard comment to distinguish the vendor's 15 ms
+  BOOT interval from the conservative SW_RESET policy, and corrected the
+  audit report's attribution of mismatch-clearing evidence to reconciliation.
 - Rechecked all 11 original audit findings on 2026-09-08 and documented the
   remaining configuration-settling defect found while reviewing finding 2.4,
   its minimal fix, regression evidence, and fresh validation results in

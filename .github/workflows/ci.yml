@@ -98,7 +98,9 @@ jobs:
         run: python tools/check_cli_contract.py
 
       - name: Enforce IDF example contract
-        run: python tools/check_idf_example_contract.py
+        run: |
+          python tools/check_idf_example_contract.py
+          python tools/test_check_idf_example_contract.py
 
       - name: Enforce chip documentation coverage
         run: python tools/check_chip_docs_coverage.py
