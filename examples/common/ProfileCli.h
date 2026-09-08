@@ -1,6 +1,6 @@
 /**
  * @file ProfileCli.h
- * @brief Framework-neutral typed DeviceProfile parsing for the CLI examples.
+ * @brief Framework-neutral typed profile helpers for the CLI examples.
  *
  * This example-only helper keeps the Arduino and native ESP-IDF command
  * surfaces identical. It performs no I2C and commits a draft change only when
@@ -27,6 +27,13 @@
 namespace profile_cli {
 
 using namespace LSM6DS3TR;
+
+/// Add in-operation profile settling to the bus-work/scheduling allowance.
+inline uint32_t settleBudgetMs(const DeviceProfile& profile, uint32_t fixedMs) {
+  const uint64_t settleMs = (requiredSettleUs(profile) + 999U) / 1000U;
+  const uint64_t totalMs = settleMs + fixedMs;
+  return totalMs > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(totalMs);
+}
 
 inline const char* boolName(bool value) { return value ? "on" : "off"; }
 

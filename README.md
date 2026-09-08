@@ -529,6 +529,12 @@ may require a safe order. For example, stage 208 Hz before selecting LP, then
 stage 1.6 Hz. `profile defaults` is the deterministic escape from an unwanted
 draft; it does not touch hardware until `profile apply`.
 
+Both CLIs include the profile's settling interval in configure, lifecycle
+replay, reconcile, and self-test restoration deadlines. For example, 1.6 Hz
+LP with LPF2 needs over 25 seconds of settling alone. Replay uses the driver's
+desired profile, and self-test restores its verified profile; an unapplied
+staged draft does not change those budgets.
+
 ## Building And Validation
 
 ```sh
@@ -536,6 +542,7 @@ python scripts/generate_version.py check
 python tools/check_core_timing_guard.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
+python tools/test_check_idf_example_contract.py
 python tools/check_chip_docs_coverage.py
 python -m py_compile tools/run_hil.py tools/run_owner_soak.py tools/test_run_hil.py
 python tools/test_run_hil.py

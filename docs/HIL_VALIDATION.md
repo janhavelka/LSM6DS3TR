@@ -155,14 +155,15 @@ this with a monitor that momentarily asserts the boot straps.
 
 ## Retained Physical Evidence
 
-Only the campaign that validates the *current* source is retained here. Older
+Only the most recent campaign is retained here, and the `Tested source` row
+below is the exact revision it validates. Older
 per-release run logs are not evidence for today's code; their results are
 summarized per version in
 [CHANGELOG.md](https://github.com/janhavelka/LSM6DS3TR/blob/main/CHANGELOG.md)
 and their full text remains in Git history. Do not append a new block per run -
 replace this one.
 
-### Current: ESP32-S2 Expanded Campaign
+### Retained: ESP32-S2 expanded campaign at `1419ea2`
 
 | Item | Value |
 | --- | --- |
@@ -171,6 +172,12 @@ replace this one.
 | Sensor | address `0x6A`, SDA GPIO 8, SCL GPIO 9, 400 kHz, 50 ms callback timeout |
 | Runtime | Arduino-ESP32 3.3.11, bundled ESP-IDF 5.5.5 |
 | Tested source | [`1419ea2`](https://github.com/janhavelka/LSM6DS3TR/commit/1419ea2a50b56e04875cf4a7268661ffc8f01165) |
+
+`1419ea2` precedes the v2.1.0 release tag (`08ae295`); it is not the release
+commit. The driver core and example ESP32 HAL transport have changed since
+this campaign (see `[Unreleased]` in
+[CHANGELOG.md](https://github.com/janhavelka/LSM6DS3TR/blob/main/CHANGELOG.md)).
+No physical campaign has been run against the current `main`.
 
 The campaign completed every profile, sampling, stress, cancellation,
 diagnostic, invalidation, reconciliation, FIFO-purge, power-down, reset, boot,

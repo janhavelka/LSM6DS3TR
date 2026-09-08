@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Included profile settling in both CLI examples' configure, reset/boot/
+  recovery, reconcile, and self-test restoration deadlines, so supported slow
+  profiles no longer time out solely because their settling exceeds a fixed
+  command budget. Shared the bounded budget helper through `ProfileCli.h`.
 - Made the native-IDF mapper-boundary checker inspect balanced definition
   bodies, so function reordering or forward declarations cannot bypass error
   classification checks. Added mutation regressions to CI.
@@ -64,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added native behavioral coverage for parameterized transaction ceilings,
+  their read/write enforcement, settling-state admission, FIFO high bits,
+  gyro readiness, low-power temperature cadence, and diagnostic guards. The
+  fake FIFO encoder now uses independent wire masks; the shipped decode was
+  already correct.
 - Removed the vestigial `mayChangeConfiguration` parameter from `_writeByte()`;
   all call sites passed `true`, so the flag suggested configuration-neutral
   writes that do not exist.
@@ -80,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Scoped retained HIL evidence to its actual tested revision, not current
+  `main`, and added the IDF checker mutation tests to both guard command lists.
 - Corrected the reset/boot guard comment to distinguish the vendor's 15 ms
   BOOT interval from the conservative SW_RESET policy, and corrected the
   audit report's attribution of mismatch-clearing evidence to reconciliation.

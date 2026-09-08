@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "../examples/common/ProfileCli.h"
+#include "support/FakeBus.h"
 
 using namespace LSM6DS3TR;
 
@@ -44,6 +45,23 @@ void assertValid(const DeviceProfile& profile) {
 void assertDifferent(const DeviceProfile& lhs, const DeviceProfile& rhs) {
   TEST_ASSERT_FALSE(profile_cli::equal(lhs, rhs));
   TEST_ASSERT_FALSE(profile_cli::equal(rhs, lhs));
+}
+
+OperationResult finishOperation(LSM6DS3TR::LSM6DS3TR& driver,
+                                LSM6DS3TRTest::FakeBus& bus,
+                                OperationToken token) {
+  for (uint32_t polls = 0; polls < 60000U && driver.operationActive(); ++polls) {
+    const uint32_t before = bus.transferCalls;
+    const PollResult poll = driver.poll(bus.nowMs, 1);
+    TEST_ASSERT_EQUAL_UINT32(bus.transferCalls - before, poll.transactionsUsed);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(1, poll.transactionsUsed);
+    ++bus.nowMs;
+  }
+  TEST_ASSERT_FALSE_MESSAGE(driver.operationActive(),
+                            "profile CLI operation exceeded its test bound");
+  OperationResult result{};
+  TEST_ASSERT_TRUE(driver.takeResult(token, result).ok());
+  return result;
 }
 
 void test_profile_cli_names_cover_every_enum_value() {
@@ -791,6 +809,120 @@ void test_profile_cli_set_field_enforces_all_cross_field_rules_atomically() {
   }
 }
 
+void test_profile_cli_settle_budget_rounds_adds_and_saturates() {
+  DeviceProfile profile{};
+  TEST_ASSERT_EQUAL_UINT32(5135, profile_cli::settleBudgetMs(profile, 5000));
+
+  profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
+  profile.accelOdr = Odr::HZ_1_6;
+  assertValid(profile);
+  TEST_ASSERT_EQUAL_UINT32(13750, profile_cli::settleBudgetMs(profile, 5000));
+  profile.accelFilter.lpf2Enabled = true;
+  assertValid(profile);
+  TEST_ASSERT_EQUAL_UINT32(30000, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(
+      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 25000U));
+  TEST_ASSERT_EQUAL_UINT32(
+      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 24999U));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
+                          profile_cli::settleBudgetMs(profile, UINT32_MAX));
+
+  profile.accelOdr = Odr::HZ_12_5;
+  assertValid(profile);
+  TEST_ASSERT_EQUAL_UINT32(6200, profile_cli::settleBudgetMs(profile, 3000));
+  profile.accelOdr = Odr::POWER_DOWN;
+  profile.gyroOdr = Odr::POWER_DOWN;
+  assertValid(profile);
+  TEST_ASSERT_EQUAL_UINT32(3000, profile_cli::settleBudgetMs(profile, 3000));
+}
+
+void test_profile_cli_derived_deadline_configures_slow_profiles() {
+  for (uint8_t lpf2 = 0; lpf2 < 2U; ++lpf2) {
+    for (uint8_t derived = 0; derived < 2U; ++derived) {
+      LSM6DS3TRTest::FakeBus bus;
+      LSM6DS3TR::LSM6DS3TR driver;
+      TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+      DeviceProfile profile{};
+      TEST_ASSERT_TRUE(setOne(profile, "xl_power", "lp").ok());
+      TEST_ASSERT_TRUE(setOne(profile, "xl_odr", "1.6").ok());
+      TEST_ASSERT_TRUE(setOne(profile, "xl_lpf2", lpf2 != 0U ? "on" : "off").ok());
+      const uint32_t durationMs =
+          derived != 0U ? profile_cli::settleBudgetMs(profile, 5000) : 5000U;
+      OperationToken token{};
+      TEST_ASSERT_TRUE(driver.startConfigure(
+          profile, OperationTiming{bus.nowMs, bus.nowMs + durationMs}, token)
+                           .inProgress());
+      const OperationResult result = finishOperation(driver, bus, token);
+      assertEnumEqual(derived != 0U ? OperationState::SUCCEEDED
+                                   : OperationState::TIMED_OUT,
+                      result.state);
+      assertStatusCode(derived != 0U ? Err::OK : Err::DEADLINE_EXPIRED,
+                       result.status);
+      if (derived != 0U) {
+        DeviceProfile verified{};
+        TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+        TEST_ASSERT_TRUE(profile_cli::equal(profile, verified));
+      }
+    }
+  }
+}
+
+void test_profile_cli_selftest_deadline_covers_verified_profile_restoration() {
+  for (uint8_t derived = 0; derived < 2U; ++derived) {
+    LSM6DS3TRTest::FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+    DeviceProfile slow{};
+    slow.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
+    slow.accelOdr = Odr::HZ_1_6;
+    slow.accelFilter.lpf2Enabled = true;
+    OperationToken token{};
+    const uint32_t configureMs = profile_cli::settleBudgetMs(slow, 5000);
+    TEST_ASSERT_TRUE(driver.startConfigure(
+        slow, OperationTiming{bus.nowMs, bus.nowMs + configureMs}, token)
+                         .inProgress());
+    TEST_ASSERT_TRUE(finishOperation(driver, bus, token).status.ok());
+
+    // A cancelled, bus-silent configure changes desired but retains verified.
+    const DeviceProfile fast{};
+    TEST_ASSERT_TRUE(driver.startConfigure(
+        fast, OperationTiming{bus.nowMs, bus.nowMs + 5000U}, token)
+                         .inProgress());
+    TEST_ASSERT_TRUE(driver.cancelActiveJob(bus.nowMs).ok());
+    OperationResult cancelled{};
+    TEST_ASSERT_TRUE(driver.takeResult(token, cancelled).ok());
+    DeviceProfile desired{};
+    DeviceProfile verified{};
+    TEST_ASSERT_TRUE(driver.getDesiredProfile(desired).ok());
+    TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+    TEST_ASSERT_TRUE(profile_cli::equal(fast, desired));
+    TEST_ASSERT_TRUE(profile_cli::equal(slow, verified));
+
+    const uint32_t selfTestMs =
+        derived != 0U ? profile_cli::settleBudgetMs(verified, 20000) : 20000U;
+    TEST_ASSERT_TRUE(driver.startSelfTest(
+        SelfTestRequest{5}, OperationTiming{bus.nowMs, bus.nowMs + selfTestMs},
+        token).inProgress());
+    const OperationResult result = finishOperation(driver, bus, token);
+    TEST_ASSERT_TRUE(result.selfTest.accelPass);
+    TEST_ASSERT_TRUE(result.selfTest.gyroPass);
+    assertStatusCode(derived != 0U ? Err::OK : Err::DEADLINE_EXPIRED,
+                     result.selfTest.primaryStatus);
+    assertStatusCode(derived != 0U ? Err::OK : Err::SETTLING,
+                     result.selfTest.restorationStatus);
+    assertEnumEqual(derived != 0U ? OperationState::SUCCEEDED
+                                 : OperationState::TIMED_OUT,
+                    result.state);
+    assertStatusCode(derived != 0U ? Err::OK : Err::DEADLINE_EXPIRED,
+                     result.status);
+    if (derived != 0U) {
+      TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
+      TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+      TEST_ASSERT_TRUE(profile_cli::equal(slow, verified));
+    }
+  }
+}
+
 }  // namespace
 
 void runProfileCliTests() {
@@ -805,4 +937,7 @@ void runProfileCliTests() {
   RUN_TEST(test_profile_cli_set_field_rejects_every_bad_token_atomically);
   RUN_TEST(test_profile_cli_set_field_rejects_all_production_invariants_atomically);
   RUN_TEST(test_profile_cli_set_field_enforces_all_cross_field_rules_atomically);
+  RUN_TEST(test_profile_cli_settle_budget_rounds_adds_and_saturates);
+  RUN_TEST(test_profile_cli_derived_deadline_configures_slow_profiles);
+  RUN_TEST(test_profile_cli_selftest_deadline_covers_verified_profile_restoration);
 }

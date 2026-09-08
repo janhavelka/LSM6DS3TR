@@ -599,6 +599,10 @@ public:
   ///@}
 
 private:
+  // Native fault-injection tests lower the callback ceiling without changing
+  // production admission limits or exposing a runtime test hook.
+  friend struct TransactionCeilingTestAccess;
+
   static constexpr uint8_t MANAGED_REGISTER_COUNT = 33;
 
   Status _start(JobKind kind, const OperationTiming& timing, OperationToken& token);

@@ -97,6 +97,7 @@ Run the repository guards after changing the example:
 
 ```sh
 python tools/check_idf_example_contract.py
+python tools/test_check_idf_example_contract.py
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python tools/build_docs.py

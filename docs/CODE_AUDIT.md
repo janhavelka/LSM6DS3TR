@@ -7,6 +7,10 @@ found a remaining timing defect in shared configuration settling**, fixed in
 this change. The other existing remedies remain the simplest appropriate
 solutions. This report distinguishes those retained fixes from the new work.
 
+The dated review below is followed by two independent follow-up reviews. The
+latest, against `9210593`, records the CLI deadline correction and expanded
+behavioral coverage at the end of this report.
+
 ## Scope and source history
 
 The review fetched all remotes with pruning, verified a clean working tree,
@@ -394,3 +398,91 @@ Follow-up local verification passed:
 CI was green at the follow-up baseline `7710af3`; no existing CI failure needed
 repair. The validation job now includes the mapper mutation regressions, and
 the follow-up commit's CI result is reported separately after pushing.
+
+## Independent follow-up at `9210593`: deadlines and coverage
+
+The new independent report was checked against clean `main` at
+`9210593b3ef739feb51e883a1504eac87ba8fa16` after fetching all remotes and
+fast-forward checking its upstream. No update was needed. Three parallel
+reviews covered CLI timing, callback ceilings, and the remaining native
+coverage; the primary review checked the edits, settling admission, and docs.
+The maintained register, status, settling, FIFO, self-test, and ambiguity
+references agree with the unchanged driver behavior covered by these tests.
+
+### Findings and corrections
+
+| Finding | Verification and work performed |
+| --- | --- |
+| P1: fixed CLI deadlines omit settling | **Valid functional defect.** Both CLIs now add `ceil(requiredSettleUs(profile) / 1000)` to their existing fixed allowance through one example-only `profile_cli::settleBudgetMs()` helper. Configure uses the staged profile; reset, boot, recovery, and reconciliation (including mixed stress sessions) use the driver's desired profile. |
+| P2a: parameterized ceilings and hard guards lack behavioral coverage | **Valid coverage gap.** A separate repeating fake readiness pattern requires all three permitted status checks per sample. Tests drive self-test at 5/20/100 samples and both calibration kinds at 1/50/1000, checking exact callback totals, result accounting, and provenance. Separate tests exercise the actual read and write ceiling rejection paths. |
+| P2b: settling admission test only covers unknown state | **Valid coverage gap.** The existing test now first cancels after readback finalization while the verified profile is still settling. Sample, calibration, self-test, and verified-profile queries return `SETTLING` without I2C; rejected starts return no token. At gate expiry the profile is available, and the original diagnostic-write/`UNKNOWN` half remains. |
+| P3a: FIFO high bits untested | **Valid coverage gap, not a decode defect.** A 1500-word purge with pattern 1023 checks both decoded high fields, exact discard count, empty final state, no truncation, and the full 1505-callback ceiling. The fake count encoder uses the independent datasheet mask `0x07`, not the driver's constant. |
+| P3b: gyro-ready requirement untested | **Valid coverage gap.** A mixed sample with fast accel and slow gyro remains active when XLDA/TDA are set but GDA is clear; only setting GDA permits the burst and successful fresh result. Existing fake register storage is sufficient; no override was added. |
+| P3c: gyro and low-power temperature cadence branches untested | **Valid coverage gap.** The cadence table now has nine cases, including gyro-only and mixed slow-gyro requests, LP 12.5 Hz and 26 Hz temperature gates, and controls for active gyro/high-performance accel. The existing 1.6 Hz temperature ambiguity resolution remains unchanged. |
+| P3d: diagnostic guards partly untested | **Valid coverage gap.** Tests cover the last readable address and the first rejected ranges, literal `0xAA` timestamp reset and invalid neighboring values, and the missing reserved/unsafe write encodings. The successful boundary read is followed by clearing the trace before zero-I2C rejection assertions. |
+| P4a: retained HIL record claims current-source validation | **Valid documentation issue, with a correction to the proposed wording.** The record now names only tested commit `1419ea2` and explicitly disclaims current-main physical validation. That revision still had version metadata 2.0.1 and precedes release tag v2.1.0 at `08ae295`, so it is not labeled the release commit. |
+| P4b: checker test absent from documented guard lists | **Valid documentation issue.** README and the IDF port guide now include `python tools/test_check_idf_example_contract.py` immediately after its checker, matching the already-correct CI job. No workflow edit was needed. |
+
+P1's root cause also affects an operation the new audit did not list:
+**self-test restores the verified profile through the same settling engine**.
+Its fixed 20-second budget cannot cover a 25-second restoration gate. Both
+CLIs now add the verified profile's settling allowance there too. This must
+not use the desired profile: cancelling an untouched configure can leave a
+fast desired profile alongside a slow, still-verified one. The regression
+constructs exactly that state, proves both BIST phases passed, reproduces the
+old restoration timeout, and succeeds with the derived deadline.
+
+The shared helper is simpler than duplicating arithmetic beside each CLI's
+calibration helper. Current supported profile settling is bounded at
+25,000,000 us, so a 64-bit overflow branch is unnecessary; the 32-bit return
+is clamped. Existing fixed allowances cover bus work, owner scheduling, and
+the driver's extra one-millisecond quantization tick. Tests pin rounding,
+zero settling, and exact/overflow saturation boundaries. Separate slow-profile
+cases reproduce the old 5-second configure timeout both with and without
+LPF2, then succeed using the same helper as the CLIs.
+
+The self-test ceiling tests go beyond `transactions <= limit`: normal
+worst-case readiness consumes `16 * (samples + 1) + 86` callbacks. Injecting a
+failure at the final gyro shutdown forces bounded cleanup and complete profile
+restoration at exactly `16 * (samples + 1) + 87`. Both calibration kinds consume
+exactly `4 * samples`. These are executed operations, not helper arithmetic
+assertions alone.
+
+A valid operation cannot naturally overrun an adequate ceiling. To exercise
+the defensive guards without manufacturing a transport error or changing
+production admission, a private friend declaration permits a native-only
+fixture to lower just the test instance's callback limit. Public `poll()` then
+rejects the second probe read or first configure write at the lowered limit.
+Tests prove no extra callback, transport counter increment, or write effect
+occurs. The fixture is defined only in the test translation unit; there is no
+runtime hook, new object state, public method, or access-control macro.
+
+No driver implementation, silicon constant, production ceiling, cancellation
+contract, or fractional-mean behavior changed. The fixed-default owner-soak
+harness did not need a deadline change. Version metadata remains unchanged;
+the changes are recorded under Unreleased, not a new release.
+
+### Verification
+
+- `.\scripts\pio.cmd test -e native`: **115/115 passed**, up from 105.
+- A temporary compiler harness linked the final native test objects against
+  the unchanged core and then 14 independent in-memory core mutations. The
+  baseline passed and **all 14 mutations were rejected**: read/write ceiling
+  removal; FIFO count high shift, removal, and mask narrowing; FIFO pattern
+  high removal; GDA removal; gyro cadence removal; both LP temperature cadence
+  changes; timestamp reset value; diagnostic upper address; and both settling
+  error branches. No tracked source was edited for these experiments.
+- CLI, native-IDF, core-timing, and chip-documentation checkers passed.
+- IDF checker mutation tests: **3/3**, covering the existing 11 scenarios.
+- HIL host tests: **18/18**; Python compilation of the documented host tools
+  passed.
+- Generated version metadata check and strict Doxygen build passed.
+- Fresh package validation passed: **37 files and 20 linked Markdown
+  documents**. The archive was written to a unique temporary directory,
+  preserving existing local packages.
+
+The baseline `9210593` already passed
+[all seven CI jobs](https://github.com/janhavelka/LSM6DS3TR/actions/runs/34222776611),
+so there was no pre-existing CI failure to repair. CI for this follow-up is
+checked after pushing and reported with the final commit. No physical HIL
+campaign, board upload, or owner soak was performed during this follow-up.

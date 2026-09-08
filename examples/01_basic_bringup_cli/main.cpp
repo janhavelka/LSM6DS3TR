@@ -297,7 +297,11 @@ void printSample(const RawSampleResult& raw) {
 
 bool startDefaultConfigure(uint64_t now) {
   OperationToken token{};
-  return acceptedStart(device.startConfigure(stagedProfile, timing(now, 5000), token), token);
+  return acceptedStart(
+      device.startConfigure(
+          stagedProfile,
+          timing(now, profile_cli::settleBudgetMs(stagedProfile, 5000)), token),
+      token);
 }
 
 void printAxes(const char* label, const Axes& axes) {
@@ -458,10 +462,14 @@ void startNextSessionOperation(uint64_t now) {
         expected = JobKind::PROBE;
         status = device.startProbe(timing(now, 500), token);
         break;
-      case 1:
+      case 1: {
+        DeviceProfile desired{};
+        if (!device.getDesiredProfile(desired).ok()) desired = stagedProfile;
         expected = JobKind::RECONCILE;
-        status = device.startReconcile(timing(now, 3000), token);
+        status = device.startReconcile(
+            timing(now, profile_cli::settleBudgetMs(desired, 3000)), token);
         break;
+      }
       case 2:
       case 3:
         expected = JobKind::SAMPLE;
@@ -1027,11 +1035,21 @@ void handleCommand(char* line) {
     if (count != 1U) { Serial.printf("expected %s\n", command); return; }
     if (!requireOwnerIdle(command)) return;
     OperationToken token{};
+    DeviceProfile desired{};
+    if (!device.getDesiredProfile(desired).ok()) desired = stagedProfile;
     Status status = Status::Error(Err::INVALID_PARAM, "unknown operation");
-    if (strcmp(command, "reset") == 0) status = device.startReset(timing(now, 5000), token);
-    if (strcmp(command, "boot") == 0) status = device.startBoot(timing(now, 5000), token);
-    if (strcmp(command, "recover") == 0) status = device.startRecover(timing(now, 5000), token);
-    if (strcmp(command, "reconcile") == 0) status = device.startReconcile(timing(now, 3000), token);
+    if (strcmp(command, "reset") == 0)
+      status = device.startReset(
+          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+    if (strcmp(command, "boot") == 0)
+      status = device.startBoot(
+          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+    if (strcmp(command, "recover") == 0)
+      status = device.startRecover(
+          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+    if (strcmp(command, "reconcile") == 0)
+      status = device.startReconcile(
+          timing(now, profile_cli::settleBudgetMs(desired, 3000)), token);
     if (strcmp(command, "powerdown") == 0) status = device.startPowerDown(timing(now, 1000), token);
     (void)acceptedStart(status, token);
   } else if (strcmp(command, "selftest") == 0) {
@@ -1042,10 +1060,17 @@ void handleCommand(char* line) {
       return;
     }
     if (!requireOwnerIdle("selftest")) return;
+    DeviceProfile verified{};
+    const Status verifiedStatus = device.getVerifiedProfile(verified, now);
+    if (!verifiedStatus.ok()) { printStatus(verifiedStatus); return; }
     Serial.println("selftest requires a stationary fixture; both sensor BIST paths will run");
     SelfTestRequest request{static_cast<uint16_t>(samples)};
     OperationToken token{};
-    (void)acceptedStart(device.startSelfTest(request, timing(now, 20000), token), token);
+    (void)acceptedStart(
+        device.startSelfTest(
+            request, timing(now, profile_cli::settleBudgetMs(verified, 20000)),
+            token),
+        token);
   } else if (strcmp(command, "calxl") == 0 || strcmp(command, "calg") == 0) {
     uint32_t samples = 32;
     CalibrationRequest request{};

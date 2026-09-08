@@ -59,6 +59,8 @@ struct FakeBus {
   uint8_t regs[256] = {};
   uint32_t notReadyStatusReads = 0;
   uint32_t selfTestNotReadyStatusReads = 0;
+  uint32_t notReadyPeriod = 0;
+  uint32_t statusReadIndex = 0;
   uint8_t corruptReadRegister = 0;
   uint8_t corruptReadValue = 0;
   uint32_t corruptReadRemaining = 0;
@@ -182,7 +184,7 @@ struct FakeBus {
         fifoOverrun && fifoUnreadWords == 2048U ? 0U : fifoUnreadWords;
     regs[cmd::REG_FIFO_STATUS1] = static_cast<uint8_t>(reportedUnread & 0xFFu);
     regs[cmd::REG_FIFO_STATUS2] =
-        static_cast<uint8_t>((reportedUnread >> 8) & cmd::MASK_DIFF_FIFO_HI);
+        static_cast<uint8_t>((reportedUnread >> 8) & 0x07u);
     if ((fifoUnreadWords == 0u && !forceFifoEmptyClear) || forceFifoEmptySet ||
         (forceFifoEmptySetAfterDataRead && fifoDataReads > 0u)) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_EMPTY;
@@ -310,7 +312,10 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
 
   const bool selfTestActive =
       (bus.regs[cmd::REG_CTRL5_C] & (cmd::MASK_ST_XL | cmd::MASK_ST_G)) != 0u;
-  if (startReg == cmd::REG_STATUS_REG && bus.notReadyStatusReads > 0u) {
+  if (startReg == cmd::REG_STATUS_REG && bus.notReadyPeriod > 1u &&
+      bus.statusReadIndex++ % bus.notReadyPeriod != bus.notReadyPeriod - 1u) {
+    std::memset(rxData, 0, rxLength);
+  } else if (startReg == cmd::REG_STATUS_REG && bus.notReadyStatusReads > 0u) {
     bus.notReadyStatusReads--;
     std::memset(rxData, 0, rxLength);
   } else if (startReg == cmd::REG_STATUS_REG && selfTestActive &&
