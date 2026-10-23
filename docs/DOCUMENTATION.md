@@ -28,6 +28,9 @@ README, guide, and <a href="../CHANGELOG.md">changelog</a> in the same change.
 
 ## Repository-Only Audit Material
 
+- [Retained branch review](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/RETAINED_BRANCH_AUDIT.md):
+  historical audit/port dispositions, current capability limits, remaining
+  physical qualification, and the retain/retire workflow.
 - [Code audit resolution report](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/CODE_AUDIT.md):
   finding-by-finding verification, implementation decisions, deviations from
   the original proposals, and closure evidence. It is retained in the source

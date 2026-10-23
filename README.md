@@ -590,6 +590,10 @@ from the generated reference because it is a low-level register-fact catalog,
 not a typed production feature contract. Use it only with the controlled
 diagnostic APIs and the cited vendor documentation.
 
+The [retained branch review](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/RETAINED_BRANCH_AUDIT.md)
+records historical audit/port dispositions, remaining qualification work,
+and the retain/retire workflow.
+
 ## Migrating From 1.x
 
 Version 2 is intentionally breaking. Every removed version 1 feature has an
