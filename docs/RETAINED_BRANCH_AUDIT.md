@@ -101,6 +101,13 @@ close this item. No hardware was accessed in this review.
 
 ### R2 - Conditional capability work: FIFO, interrupts, and filtered modes
 
+The [implementation prompt sequence](prompts/README.md), prepared on 2026-10-25,
+turns this item into four ordered software tasks covering motion FIFO,
+fourth-dataset/counter interpretation, supported interrupt routes and filters.
+It records source mechanisms, selected scope, regression acceptance and CI
+requirements. All four are **NOT IMPLEMENTED**; creating prompts changes no
+support claim or physical-validation status.
+
 Owner: a concrete consuming application plus driver maintainer. If polling
 snapshots satisfy that application, keep the current unsupported-profile
 fences and retire the old plan. If it needs loss-managed FIFO acquisition or

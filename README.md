@@ -593,6 +593,9 @@ diagnostic APIs and the cited vendor documentation.
 The [retained branch review](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/RETAINED_BRANCH_AUDIT.md)
 records historical audit/port dispositions, remaining qualification work,
 and the retain/retire workflow.
+The [optional feature implementation prompts](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/prompts/README.md)
+define the ordered FIFO, fourth-dataset, interrupt and filter work from audit R2;
+the prompts themselves do not implement those features.
 
 ## Migrating From 1.x
 

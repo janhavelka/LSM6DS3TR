@@ -28,6 +28,10 @@ README, guide, and <a href="../CHANGELOG.md">changelog</a> in the same change.
 
 ## Repository-Only Audit Material
 
+- [Optional feature implementation prompts](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/prompts/README.md):
+  ordered instructions for audit R2 FIFO, fourth-dataset, interrupt and filter
+  work, with source evidence, regression criteria and CI closeout. These are
+  repository-only instructions; the features remain unimplemented.
 - [Retained branch review](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/RETAINED_BRANCH_AUDIT.md):
   historical audit/port dispositions, current capability limits, remaining
   physical qualification, and the retain/retire workflow.
