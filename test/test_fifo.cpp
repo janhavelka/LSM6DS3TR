@@ -207,7 +207,7 @@ void test_fifo_wire_image_and_activation_follow_verified_settling() {
   TEST_ASSERT_TRUE(activation > lastProfileRead);
   TEST_ASSERT_TRUE(activation >= lastProfileRead +
       (requiredSettleUs(profile) + 999U) / 1000U + 1U);
-  TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(72U, result.transactions);
 }
 
 OperationResult fifoRead(LSM6DS3TR::LSM6DS3TR& driver, FakeBus& bus,
@@ -538,7 +538,7 @@ void test_fifo_buffer_lifetime_tokens_backpressure_unbind_and_rebind() {
 void test_fifo_configure_faults_and_cancellation_cover_activation_stages() {
   const Err errors[] = {Err::I2C_NACK_ADDR, Err::I2C_ERROR, Err::I2C_TIMEOUT};
   for (Err error : errors) {
-    for (uint32_t stage = 1; stage <= MAX_CONFIGURE_TRANSACTIONS; ++stage) {
+    for (uint32_t stage = 1; stage <= 72U; ++stage) {
       FakeBus bus;
       LSM6DS3TR::LSM6DS3TR driver;
       TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -550,14 +550,14 @@ void test_fifo_configure_faults_and_cancellation_cover_activation_stages() {
       TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(error), static_cast<uint8_t>(result.status.code));
       TEST_ASSERT_EQUAL_UINT32(stage, result.transactions);
       TEST_ASSERT_EQUAL_UINT32(stage, bus.transferCalls);
-      TEST_ASSERT_EQUAL(stage > 3U, result.hardwareStateMayHaveChanged);
+      TEST_ASSERT_EQUAL(stage > 4U, result.hardwareStateMayHaveChanged);
       TEST_ASSERT_EQUAL_UINT32(0, driver.configGeneration());
-      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(stage > 3U ? ConfigurationState::UNKNOWN :
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(stage > 4U ? ConfigurationState::UNKNOWN :
                                                              ConfigurationState::UNCONFIGURED),
                             static_cast<uint8_t>(result.configuration.state));
     }
   }
-  for (uint32_t stop = 0; stop <= MAX_CONFIGURE_TRANSACTIONS; ++stop) {
+  for (uint32_t stop = 0; stop <= 72U; ++stop) {
     FakeBus bus;
     LSM6DS3TR::LSM6DS3TR driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -572,7 +572,7 @@ void test_fifo_configure_faults_and_cancellation_cover_activation_stages() {
     const OperationResult result = fifoTake(driver, token);
     TEST_ASSERT_EQUAL_UINT32(stop, bus.transferCalls);
     TEST_ASSERT_EQUAL_UINT32(0, driver.configGeneration());
-    TEST_ASSERT_EQUAL(stop > 3U, result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_EQUAL(stop > 4U, result.hardwareStateMayHaveChanged);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CANCELLED),
                             static_cast<uint8_t>(result.status.code));
   }
@@ -1055,9 +1055,9 @@ void test_fifo_reset_boot_recover_restore_active_profile_at_exact_ceiling() {
     TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
     const uint32_t ceiling = operation == 2U ? MAX_RECOVER_TRANSACTIONS :
                                                MAX_RESET_TRANSACTIONS;
-    TEST_ASSERT_EQUAL_UINT32(ceiling, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(operation == 2U ? 92U : 93U, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(ceiling, result.transactionLimit);
-    TEST_ASSERT_EQUAL_UINT32(ceiling, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT32(operation == 2U ? 92U : 93U, bus.transferCalls);
     TEST_ASSERT_EQUAL_UINT32(generation + 1U, driver.configGeneration());
     TEST_ASSERT_EQUAL_HEX8(0x26, bus.regs[0x0A]);
     TEST_ASSERT_EQUAL_HEX8(0x48, bus.regs[0x10]);

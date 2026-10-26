@@ -3,7 +3,9 @@
 > Source confidence: vendor fact from the datasheet and AN5130. Library status:
 > typed internal-motion FIFO acquisition and bounded destructive purge are
 > supported in software; physical qualification is NOT RUN for the new path.
-> Fourth datasets, external datasets, and interrupt routes remain unsupported.
+> Temperature and timestamp/step fourth datasets are supported in software.
+> External datasets and interrupt routes remain unsupported. Physical
+> fourth-dataset, trigger and counter qualification is NOT RUN.
 
 ## FIFO Data Model
 
@@ -66,13 +68,15 @@ printed pp. 74-92. The source extracts and PDFs remain unchanged. Execution
 started from fetched `main` commit
 `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26.
 
-`FifoProfile` admits only Bypass, FIFO stop-on-full, and Continuous with the
-normal internal trigger and complete 16-bit internal gyro/accel datasets.
+`FifoProfile` admits only Bypass, FIFO stop-on-full, and Continuous with
+complete 16-bit internal gyro/accel datasets and an optional fourth dataset.
 All eight decimator encodings above are represented. Reserved and triggered
-modes, high-byte packing, stop-on-threshold, external/special datasets and
+modes, high-byte packing, stop-on-threshold, external datasets and
 interrupt routes remain unavailable through the production profile.
 
-The FIFO ODR is 12.5..6660 Hz. Enabled datasets require an active sensor.
+For internal triggering the FIFO ODR is 12.5..6660 Hz. Enabled motion datasets
+require their active sensor; a fourth-only schema still requires its documented
+source dependency. Step-event collection does not claim a regular FIFO ODR.
 Gyroscope sleep is rejected for every enabled FIFO profile, even with gyro
 batching off, because its contribution to the shared trigger is unproven.
 Accelerometer 1.6 Hz is also not admitted for FIFO. The
@@ -89,8 +93,10 @@ collecting data.
 
 Pattern generation is bounded by the least common multiple of enabled
 factors: at most 96 trigger ticks for factors 3 and 32. At each tick, gyro XYZ
-precedes accel XYZ when both are due. The largest pattern has 105 words
-(35 complete vectors); a single enabled dataset has a three-word pattern.
+precedes accel XYZ, followed by the selected six-byte fourth dataset, when due.
+The largest pattern has 393 words (131 complete records), for factors 1, 3
+and 32. The motion-only largest pattern has 105 words; a single enabled
+dataset has a three-word pattern.
 AN5130 example 1 is `Gx Gy Gz Ax Ay Az`, example 2 is
 `Gx Gy Gz Ax Ay Az Gx Gy Gz`. Example 3's motion subset is
 `Gx Gy Gz Ax Ay Az Ax Ay Az`; its magnetometer dataset remains unsupported.
@@ -132,7 +138,8 @@ from an unknown generation.
 
 `startFifoRead()` returns only complete `FifoMotionRecord` values into a
 caller-owned bounded buffer. Each carries its operation token, configuration
-generation, immutable full scales and host read uptime. Records are usable
+generation, kind, immutable interpretation and host read uptime. Motion values
+retain full scales; fourth values retain source/counter evidence. Records are usable
 only after taking the matching successful result. Admission clears the buffer;
 failure/cancellation publishes no successful batch and clears scratch records.
 The terminal result retains pre/post status and pattern, confirmed/possible
@@ -143,8 +150,9 @@ or freshness by spacing records at the configured ODR.
 
 Continuous acquisition does not assume OVER_RUN is sticky across data reads.
 Under the sole-consumer contract, a possible overflow followed by an `N`-word
-burst leaves at least `2042 - N` unread words: 2048 capacity minus a conservative
-six-word motion trigger group, minus this burst. A post-status count at or above
+burst leaves at least `2048 - groupWords - N` unread words, where `groupWords`
+reserves three words per enabled dataset. This is `2042 - N` for two motion
+datasets and `2039 - N` for both motion datasets plus dataset four. A post-status count at or above
 that floor fails `OPERATION_INDETERMINATE`, clears the batch, and marks
 `continuityLost` even if OVER_RUN cleared and the pattern matches. This
 engineering inference deliberately rejects nearly full Continuous batches that
@@ -175,6 +183,82 @@ active for free-fall, wake-up, 6D/4D, tap, and activity/inactivity. Source:
 AN5130 sections 5 and 6, pp. 32-57.
 
 ## Pedometer And Timestamp Dependencies
+
+### Supported fourth-dataset contract
+
+The source audit for prompt 02 uses AN5130 Rev 1 sections 6.1/6.5, 8.3/8.5
+and 8.8/8.9, printed pp. 50-57, 87-90 and 94-95, plus datasheet Rev 3
+FIFO_CTRL2/4, CTRL10_C, WAKE_UP_DUR and bank-A parameter definitions. The
+actual PDF Tables 73 and 74 were visually inspected; their byte positions are
+not reconstructed from damaged text extraction.
+
+| Fourth source | Byte 1 | Byte 2 | Byte 3 | Byte 4 | Byte 5 | Byte 6 |
+|---|---|---|---|---|---|---|
+| Timestamp plus steps, Table 73 p. 94 | timestamp[15:8] | timestamp[23:16] | unused | timestamp[7:0] | steps[7:0] | steps[15:8] |
+| Temperature, Table 74 p. 95 | unused | unused | temperature[7:0] | temperature[15:8] | unused | unused |
+
+Each fourth record occupies three FIFO words regardless of the number of
+meaningful bytes. Temperature is signed 16-bit; unused bytes are ignored.
+Timestamp is unsigned 24-bit and steps unsigned 16-bit. `FIFO_PATTERN` remains
+a position in one replayed schema, never a record tag. Partial records are
+discarded rather than published under the wrong kind.
+
+The typed selector permits exactly one of off, temperature, or timestamp plus
+step count. Temperature requires `FIFO_TEMP_EN=1`, `TIMER_PEDO_FIFO_EN=0`, a
+nonzero fourth decimator and an active internal sensor. Timestamp/step uses
+the fourth decimator with `TIMER_PEDO_FIFO_EN=1` and `FIFO_TEMP_EN=0`; its
+joint pedometer dependency requires accelerometer ODR at least 26 Hz.
+`MASTER_CONFIG.DATA_VALID_SEL_FIFO` remains zero; sensor-hub triggers are not
+supported.
+
+Temperature uses the internal trigger. Timestamp/step supports either that
+trigger or step events. `TIMER_PEDO_FIFO_DRDY=1` changes the trigger for all
+enabled datasets to `STEP_DETECTED`, including accompanying motion records;
+decimators count those events, and no regular ODR or fresh motion conversion
+per event is implied. AN5130 p. 94 does not require a FIFO ODR in step-event
+mode. No motion dataset needs to be enabled merely to store the fourth source.
+
+Configuration establishes the fixed bank-A pedometer policy with both sensors
+proved powered down: `CONFIG_PEDO_THS_MIN=0x10` (2 g internal pedometer range,
+minimum threshold 16), `PEDO_DEB_REG=0x6E` (six debounce steps and 1040 ms
+debounce time), and `STEP_COUNT_DELTA=0`. The source requires power-down for
+embedded-bank modifications (datasheet p. 97); bounded selection, readback and
+main-bank restoration are part of the same configure engine. Partial bank
+selection/restoration does not establish known main-bank state.
+
+Timer resolution is established before enabling `TIMER_EN`; changing it
+requires the effectful `0xAA` timestamp reset. Every configure/replay first
+reads actual hardware resolution, including when the target disables the
+counter profile: a 25 us to default/off transition still requires that reset.
+Ordinary reads, reconcile and same-resolution configuration do not reset counters. Explicit
+`startCounterReset` resets timestamp, steps or both in a known timestamp/step
+Bypass profile; `PEDO_RST_STEP` is explicitly cleared by software. Reset bits
+and advancing counters are not immutable equality-readback values.
+Read-only reconcile can retain bank-A policy evidence from a prior verified
+profile, but rejects unverified timestamp/step state: main-bank equality alone
+cannot establish the fixed embedded-bank parameters without a bank write.
+
+Records retain raw ticks, configured 25 us or 6.4 ms resolution, raw steps,
+profile generation and counter epoch. Epoch and continuity evidence separate
+source/reconfiguration/reset/loss boundaries; they do not expand wraps into a
+monotonic clock. No total steps, missed-wrap count, sensor-to-host clock map,
+or simultaneous accel/gyro sampling is inferred. Host admission, read and
+terminal uptime remain separate observations. An ordinary raw wrap is not
+proof of a reset or the number of elapsed wraps.
+
+Temperature records describe buffered converted-register values, not proof of
+a new temperature conversion per FIFO trigger. AN5130 p. 96 caps conversions
+at 52 Hz (12.5/26 Hz for the stated low-power accelerometer cases with gyro
+off). Neither matching the conversion cadence nor repeated/different values
+establishes snapshot `TDA` freshness for an individual buffered record.
+
+Source changes, bind/unbind, maintenance, raw writes, destructive raw-read
+attempts, ambiguous consumption and cancellation invalidate affected continuity.
+Unknown-bank diagnostics permit only access-register reads and a main-bank
+zero write until main-bank selection is proved; a failed bank restore never
+turns an aliased register read into normal evidence. Confirmed consumption and possible reset/bank
+effects survive failure; unpublished caller records are cleared. Physical
+cadence, pedometer policy, counter wrap and step-event behavior are **NOT RUN**.
 
 - Embedded functions run from a 26 Hz accelerometer-derived engine and require
   an active accelerometer at least at 26 Hz.

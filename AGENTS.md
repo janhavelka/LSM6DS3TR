@@ -215,8 +215,11 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   exact zero CTRL1_XL/CTRL2_G values, and proves no other register state.
 - Internal motion FIFO acquisition uses typed `FifoProfile`, bounded
   `startFifoRead`, caller-owned records, and immutable interpretation provenance.
-  Fourth/external datasets, triggered modes, packing, stop-on-threshold and
-  interrupt routing remain unsupported. The bounded FIFO purge is explicitly
+  Typed temperature or timestamp/step fourth datasets and internal/step-event
+  collection triggers share this owner. External datasets, trigger-switched
+  modes, packing, stop-on-threshold and interrupt routing remain unsupported.
+  Counter reads preserve raw widths, resolution, epoch and loss evidence;
+  explicit counter reset is bounded and effectful. The bounded FIFO purge is explicitly
   destructive; stopping collection reports possible residual loss.
 - Interpretation-changing operations require hardware FIFO Bypass before
   writes. Use explicit bounded purge with `stopCollection=true` before replay;
@@ -237,9 +240,9 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   bus recovery remain application responsibilities.
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
-  and reserve the complete 68-callback profile reapply/readback/activation budget.
-  Configure uses at most 71 callbacks (69 without active FIFO), reset/boot 92,
-  recovery 91, power-down 9, and FIFO purge `maxWords + 5` (two additional
+  and reserve the complete 87-callback profile reapply/readback/activation budget.
+  Configure uses at most 90 callbacks (72 for active motion-only FIFO), reset/boot 111,
+  recovery 110, power-down 9, explicit counter reset 7, and FIFO purge `maxWords + 5` (two additional
   callbacks when explicitly stopping collection). FIFO acquisition reserves
   `2 * maxWords + 3` callbacks; all validate identity before their first destructive device
   action after bank selection is proved.
@@ -247,7 +250,7 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   sample. Self-test gates by its active sensor ODR period rounded up to
   milliseconds (20 ms accelerometer, 5 ms gyroscope); calibration gates by the
   configured ODR period rounded up to milliseconds. Self-test reserves
-  `16 * (samples + 1) + 87` callbacks, including bounded failure cleanup and
+  `16 * (samples + 1) + 106` callbacks, including bounded failure cleanup and
   full profile restoration.
 
 ---

@@ -133,6 +133,41 @@ inline const char* fifoDecimationName(FifoDecimation value) {
   }
 }
 
+inline const char* fifoFourthDatasetName(FifoFourthDataset value) {
+  switch (value) {
+    case FifoFourthDataset::OFF: return "off";
+    case FifoFourthDataset::TEMPERATURE: return "temperature";
+    case FifoFourthDataset::TIMESTAMP_STEP: return "timestamp_step";
+    default: return "invalid";
+  }
+}
+
+inline const char* fifoTriggerName(FifoTrigger value) {
+  switch (value) {
+    case FifoTrigger::INTERNAL: return "internal";
+    case FifoTrigger::STEP_EVENT: return "step";
+    default: return "invalid";
+  }
+}
+
+inline const char* timestampResolutionName(TimestampResolution value) {
+  switch (value) {
+    case TimestampResolution::MS_6_4: return "6.4ms";
+    case TimestampResolution::US_25: return "25us";
+    default: return "invalid";
+  }
+}
+
+inline const char* fifoRecordKindName(FifoRecordKind value) {
+  switch (value) {
+    case FifoRecordKind::ANGULAR_RATE: return "gyro";
+    case FifoRecordKind::ACCELERATION: return "accel";
+    case FifoRecordKind::TEMPERATURE: return "temperature";
+    case FifoRecordKind::TIMESTAMP_STEP: return "timestamp_step";
+    default: return "invalid";
+  }
+}
+
 inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
   return lhs.accelOdr == rhs.accelOdr &&
          lhs.accelFullScale == rhs.accelFullScale &&
@@ -157,6 +192,10 @@ inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
          lhs.fifo.odr == rhs.fifo.odr &&
          lhs.fifo.gyroDecimation == rhs.fifo.gyroDecimation &&
          lhs.fifo.accelDecimation == rhs.fifo.accelDecimation &&
+         lhs.fifo.fourthDataset == rhs.fifo.fourthDataset &&
+         lhs.fifo.fourthDecimation == rhs.fifo.fourthDecimation &&
+         lhs.fifo.trigger == rhs.fifo.trigger &&
+         lhs.fifo.timestampResolution == rhs.fifo.timestampResolution &&
          lhs.fifo.watermarkWords == rhs.fifo.watermarkWords &&
          lhs.interrupts.enabled == rhs.interrupts.enabled;
 }
@@ -292,6 +331,31 @@ inline bool parseFifoDecimation(const char* text, FifoDecimation& value) {
   return false;
 }
 
+inline bool parseFifoFourthDataset(const char* text, FifoFourthDataset& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "off") == 0) value = FifoFourthDataset::OFF;
+  else if (std::strcmp(text, "temperature") == 0) value = FifoFourthDataset::TEMPERATURE;
+  else if (std::strcmp(text, "timestamp_step") == 0) value = FifoFourthDataset::TIMESTAMP_STEP;
+  else return false;
+  return true;
+}
+
+inline bool parseFifoTrigger(const char* text, FifoTrigger& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "internal") == 0) value = FifoTrigger::INTERNAL;
+  else if (std::strcmp(text, "step") == 0) value = FifoTrigger::STEP_EVENT;
+  else return false;
+  return true;
+}
+
+inline bool parseTimestampResolution(const char* text, TimestampResolution& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "6.4ms") == 0) value = TimestampResolution::MS_6_4;
+  else if (std::strcmp(text, "25us") == 0) value = TimestampResolution::US_25;
+  else return false;
+  return true;
+}
+
 /**
  * @brief Apply one typed field update atomically to a valid profile draft.
  * @param profile Current valid draft; unchanged on any error.
@@ -400,6 +464,28 @@ inline Status setField(DeviceProfile& profile, const char* field,
   } else if (std::strcmp(field, "fifo_xl_dec") == 0) {
     if (valueCount != 1U || !parseFifoDecimation(values[0], candidate.fifo.accelDecimation))
       return invalidValue("fifo_xl_dec expects off|1|2|3|4|8|16|32");
+  } else if (std::strcmp(field, "fifo_fourth") == 0) {
+    if (valueCount == 1U && std::strcmp(values[0], "off") == 0) {
+      candidate.fifo.fourthDataset = FifoFourthDataset::OFF;
+      candidate.fifo.fourthDecimation = FifoDecimation::OFF;
+      candidate.fifo.trigger = FifoTrigger::INTERNAL;
+      candidate.fifo.timestampResolution = TimestampResolution::MS_6_4;
+    } else if (valueCount != 4U ||
+        !parseFifoFourthDataset(values[0], candidate.fifo.fourthDataset) ||
+        !parseFifoDecimation(values[1], candidate.fifo.fourthDecimation) ||
+        !parseFifoTrigger(values[2], candidate.fifo.trigger) ||
+        !parseTimestampResolution(values[3], candidate.fifo.timestampResolution)) {
+      return invalidValue("fifo_fourth expects off or <temperature|timestamp_step> <dec> <internal|step> <6.4ms|25us>");
+    }
+  } else if (std::strcmp(field, "fifo_fourth_dec") == 0) {
+    if (valueCount != 1U || !parseFifoDecimation(values[0], candidate.fifo.fourthDecimation))
+      return invalidValue("fifo_fourth_dec expects 1|2|3|4|8|16|32, or off only when disabled");
+  } else if (std::strcmp(field, "fifo_trigger") == 0) {
+    if (valueCount != 1U || !parseFifoTrigger(values[0], candidate.fifo.trigger))
+      return invalidValue("fifo_trigger expects internal|step; step requires timestamp_step");
+  } else if (std::strcmp(field, "timestamp_resolution") == 0) {
+    if (valueCount != 1U || !parseTimestampResolution(values[0], candidate.fifo.timestampResolution))
+      return invalidValue("timestamp_resolution expects 6.4ms|25us");
   } else if (std::strcmp(field, "fifo_watermark") == 0) {
     int32_t watermark = 0;
     if (valueCount != 1U || !parseSigned(values[0], 0, 2047, watermark))

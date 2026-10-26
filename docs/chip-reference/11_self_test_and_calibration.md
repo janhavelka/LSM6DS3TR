@@ -80,11 +80,12 @@ until full profile reapply and readback succeeds. Cancellation remains
 bus-silent and therefore reports unknown provenance instead of performing this
 I2C cleanup.
 
-The public hard callback ceiling is `16 * (samples + 1) + 87`: each of four
+The public hard callback ceiling is `16 * (samples + 1) + 106`: each of four
 phases reserves three readiness checks plus one burst for its discard and
 averaged samples, normal fixed test work uses 20 callbacks, one additional
 callback is reserved for a failed terminal write followed by cleanup, and exact
-profile restoration reserves 66.
+profile restoration reserves 85, including the fixed bank-A policy and bounded
+counter resolution/enable stages when restoring a timestamp/step profile.
 
 ## Calibration Is Software Bias Estimation, Not A Chip Procedure
 

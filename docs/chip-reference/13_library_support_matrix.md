@@ -20,12 +20,15 @@
 | Safety-filtered raw register write | diagnostic-only | one transaction, invalidates configuration provenance |
 | SPI host transport | unsupported | core binding is I2C-only; no SPI callback contract exists |
 | Internal-motion FIFO configuration, acquisition, pattern decoding | supported in software; hardware NOT RUN | typed `FifoProfile`, `fifoPatternWord`, bounded `startFifoRead`, caller storage, immutable scale/generation provenance, conservative Continuous occupancy guard (no sticky-overrun assumption) |
-| FIFO fourth datasets and external sensor datasets | unsupported | no typed temperature/step/timestamp/sensor-hub schema |
-| FIFO triggered modes, high-byte packing, stop-on-threshold | unsupported | production profile fixes normal internal trigger and 16-bit motion only |
+| FIFO temperature and timestamp/step fourth datasets | supported in software; hardware NOT RUN | typed mutually exclusive source, three-word schema, raw 24-bit ticks/16-bit steps, resolution, generation and counter epoch; no expanded clock/totals or per-record temperature freshness |
+| FIFO internal and step-event collection triggers | supported in software; hardware NOT RUN | step events require timestamp/step source and trigger all enabled datasets; decimation counts events, with no regular motion ODR claim |
+| FIFO external sensor datasets | unsupported | no sensor-hub topology or external schema |
+| FIFO triggered modes, high-byte packing, stop-on-threshold | unsupported | mode-switch triggers remain unsupported; supported collection triggers do not enable those modes |
 | INT1/INT2 electrical/routing/threshold/event profiles | unsupported | needs electrical, latch, threshold, duration, and route ownership |
-| Pedometer, significant motion, relative/absolute tilt | unsupported | chip facts retained; no typed production profile |
+| Pedometer fixed policy for timestamp/step FIFO | supported in software; hardware NOT RUN | accelerometer at least 26 Hz; fixed bank-A policy with powered-down write/readback and main-bank restoration; explicit bounded counter reset |
+| Significant motion, relative/absolute tilt | unsupported | chip facts retained; no typed production profile |
 | Tap, wake-up, free-fall, activity/inactivity, 4D/6D | unsupported | chip facts retained; no typed production profile |
-| Timestamp/pedometer data batching | unsupported | no rollover/routing/FIFO schema contract |
+| Timestamp/pedometer counter lifetime | supported in software; hardware NOT RUN | raw modular counters with explicit epoch/continuity/reset evidence; ordinary reads/reconcile do not reset; no missed-wrap inference or interrupt routes |
 | Sensor hub, pass-through, hard/soft-iron correction | unsupported | no external-sensor topology or bounded scheduler contract |
 | DEN and sensor synchronization | unsupported | no product timing/electrical contract |
 

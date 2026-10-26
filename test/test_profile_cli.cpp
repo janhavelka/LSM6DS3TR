@@ -234,6 +234,18 @@ void test_profile_cli_equal_compares_every_profile_field() {
   candidate.fifo.watermarkWords = 1;
   assertDifferent(baseline, candidate);
   candidate = baseline;
+  candidate.fifo.fourthDataset = FifoFourthDataset::TEMPERATURE;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.fourthDecimation = FifoDecimation::EVERY_1;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.trigger = FifoTrigger::STEP_EVENT;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.timestampResolution = TimestampResolution::US_25;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
   candidate.interrupts.enabled = true;
   assertDifferent(baseline, candidate);
 
@@ -999,9 +1011,137 @@ void test_profile_cli_fifo_profile_is_atomic_and_complete() {
   TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoDecimationName(static_cast<FifoDecimation>(255)));
 }
 
+
+void test_profile_cli_fourth_dataset_parsers_preserve_invalid_output() {
+  FifoFourthDataset fourth = FifoFourthDataset::OFF;
+  const char* sources[] = {"off", "temperature", "timestamp_step"};
+  const FifoFourthDataset sourceValues[] = {
+      FifoFourthDataset::OFF, FifoFourthDataset::TEMPERATURE,
+      FifoFourthDataset::TIMESTAMP_STEP};
+  for (size_t i = 0; i < 3U; ++i) {
+    TEST_ASSERT_TRUE(profile_cli::parseFifoFourthDataset(sources[i], fourth));
+    assertEnumEqual(sourceValues[i], fourth);
+    TEST_ASSERT_EQUAL_STRING(sources[i], profile_cli::fifoFourthDatasetName(fourth));
+  }
+  const char* invalidSources[] = {nullptr, "both", "sensor_hub", "temp+steps"};
+  for (const char* invalid : invalidSources) {
+    TEST_ASSERT_FALSE(profile_cli::parseFifoFourthDataset(invalid, fourth));
+    assertEnumEqual(FifoFourthDataset::TIMESTAMP_STEP, fourth);
+  }
+  FifoTrigger trigger = FifoTrigger::INTERNAL;
+  TEST_ASSERT_TRUE(profile_cli::parseFifoTrigger("step", trigger));
+  assertEnumEqual(FifoTrigger::STEP_EVENT, trigger);
+  TEST_ASSERT_EQUAL_STRING("step", profile_cli::fifoTriggerName(trigger));
+  TEST_ASSERT_FALSE(profile_cli::parseFifoTrigger(nullptr, trigger));
+  TEST_ASSERT_FALSE(profile_cli::parseFifoTrigger("external", trigger));
+  assertEnumEqual(FifoTrigger::STEP_EVENT, trigger);
+  TEST_ASSERT_TRUE(profile_cli::parseFifoTrigger("internal", trigger));
+  TEST_ASSERT_EQUAL_STRING("internal", profile_cli::fifoTriggerName(trigger));
+  TimestampResolution resolution = TimestampResolution::MS_6_4;
+  TEST_ASSERT_TRUE(profile_cli::parseTimestampResolution("25us", resolution));
+  assertEnumEqual(TimestampResolution::US_25, resolution);
+  TEST_ASSERT_EQUAL_STRING("25us", profile_cli::timestampResolutionName(resolution));
+  TEST_ASSERT_FALSE(profile_cli::parseTimestampResolution(nullptr, resolution));
+  TEST_ASSERT_FALSE(profile_cli::parseTimestampResolution("1ms", resolution));
+  assertEnumEqual(TimestampResolution::US_25, resolution);
+  TEST_ASSERT_TRUE(profile_cli::parseTimestampResolution("6.4ms", resolution));
+  TEST_ASSERT_EQUAL_STRING("6.4ms", profile_cli::timestampResolutionName(resolution));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoFourthDatasetName(static_cast<FifoFourthDataset>(255)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoTriggerName(static_cast<FifoTrigger>(255)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::timestampResolutionName(static_cast<TimestampResolution>(255)));
+  TEST_ASSERT_EQUAL_STRING("gyro", profile_cli::fifoRecordKindName(FifoRecordKind::ANGULAR_RATE));
+  TEST_ASSERT_EQUAL_STRING("accel", profile_cli::fifoRecordKindName(FifoRecordKind::ACCELERATION));
+  TEST_ASSERT_EQUAL_STRING("temperature", profile_cli::fifoRecordKindName(FifoRecordKind::TEMPERATURE));
+  TEST_ASSERT_EQUAL_STRING("timestamp_step", profile_cli::fifoRecordKindName(FifoRecordKind::TIMESTAMP_STEP));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoRecordKindName(static_cast<FifoRecordKind>(255)));
+}
+
+void test_profile_cli_fourth_dataset_edits_are_atomic_and_bus_silent() {
+  LSM6DS3TRTest::FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+  DeviceProfile profile;
+  const char* fifo[] = {"bypass", "104", "1", "1", "24"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo", fifo, 5U).ok());
+  const char* temperature[] = {"temperature", "3", "internal", "6.4ms"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo_fourth", temperature, 4U).ok());
+  assertEnumEqual(FifoFourthDataset::TEMPERATURE, profile.fifo.fourthDataset);
+  assertEnumEqual(FifoDecimation::EVERY_3, profile.fifo.fourthDecimation);
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_g_dec", "off").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_xl_dec", "off").ok());
+  TEST_ASSERT_TRUE(validateProfile(profile).ok());
+  const DeviceProfile temperatureOnly = profile;
+  TEST_ASSERT_FALSE(setOne(profile, "fifo_fourth", "off").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(temperatureOnly, profile));
+  TEST_ASSERT_FALSE(setOne(profile, "fifo_trigger", "step").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(temperatureOnly, profile));
+  TEST_ASSERT_FALSE(setOne(profile, "fifo_fourth_dec", "off").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(temperatureOnly, profile));
+  const char* timestamp[] = {"timestamp_step", "1", "step", "25us"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo_fourth", timestamp, 4U).ok());
+  assertEnumEqual(FifoFourthDataset::TIMESTAMP_STEP, profile.fifo.fourthDataset);
+  assertEnumEqual(FifoTrigger::STEP_EVENT, profile.fifo.trigger);
+  assertEnumEqual(TimestampResolution::US_25, profile.fifo.timestampResolution);
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_odr", "pd").ok());
+  const DeviceProfile eventOnly = profile;
+  TEST_ASSERT_FALSE(setOne(profile, "fifo_trigger", "internal").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(eventOnly, profile));
+  TEST_ASSERT_TRUE(setOne(profile, "timestamp_resolution", "6.4ms").ok());
+  const char* decimations[] = {"1", "2", "3", "4", "8", "16", "32"};
+  for (const char* value : decimations)
+    TEST_ASSERT_TRUE(setOne(profile, "fifo_fourth_dec", value).ok());
+  const DeviceProfile beforeSlow = profile;
+  TEST_ASSERT_FALSE(setOne(profile, "xl_odr", "12.5").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(beforeSlow, profile));
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_g_dec", "1").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_odr", "104").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_fourth", "off").ok());
+  assertEnumEqual(FifoFourthDataset::OFF, profile.fifo.fourthDataset);
+  assertEnumEqual(FifoDecimation::OFF, profile.fifo.fourthDecimation);
+  assertEnumEqual(FifoTrigger::INTERNAL, profile.fifo.trigger);
+  assertEnumEqual(TimestampResolution::MS_6_4, profile.fifo.timestampResolution);
+  const DeviceProfile motionOnly = profile;
+  TEST_ASSERT_FALSE(setOne(profile, "fifo_fourth_dec", "1").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(motionOnly, profile));
+  TEST_ASSERT_EQUAL_UINT32(0, bus.transferCalls);
+}
+
+void test_profile_cli_fourth_dataset_rejects_bad_arity_and_tokens() {
+  DeviceProfile profile;
+  const char* fifo[] = {"bypass", "104", "1", "1", "24"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo", fifo, 5U).ok());
+  const char* values[] = {"timestamp_step", "1", "step", "25us", "extra"};
+  const size_t invalidCounts[] = {0U, 1U, 2U, 3U, 5U};
+  for (size_t count : invalidCounts)
+    assertAtomicError(profile, "fifo_fourth", values, count, Err::INVALID_PARAM);
+  const char* badValues[][4] = {
+      {"both", "1", "internal", "6.4ms"},
+      {"sensor_hub", "1", "internal", "6.4ms"},
+      {"temperature", "5", "internal", "6.4ms"},
+      {"temperature", "1", "external", "6.4ms"},
+      {"timestamp_step", "1", "step", "1ms"},
+  };
+  for (const auto& bad : badValues)
+    assertAtomicError(profile, "fifo_fourth", bad, 4U, Err::INVALID_PARAM);
+  const char* invalidFields[] = {"fifo_fourth_dec", "fifo_trigger", "timestamp_resolution"};
+  for (const char* field : invalidFields) {
+    assertAtomicError(profile, field, values, 0U, Err::INVALID_PARAM);
+    assertAtomicError(profile, field, values, 2U, Err::INVALID_PARAM);
+    const char* invalid[] = {"invalid"};
+    assertAtomicError(profile, field, invalid, 1U, Err::INVALID_PARAM);
+  }
+  const char* conflicting[] = {"temperature", "1", "step", "25us"};
+  const DeviceProfile before = profile;
+  TEST_ASSERT_FALSE(profile_cli::setField(profile, "fifo_fourth", conflicting, 4U).ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(before, profile));
+}
+
 }  // namespace
 
 void runProfileCliTests() {
+  RUN_TEST(test_profile_cli_fourth_dataset_parsers_preserve_invalid_output);
+  RUN_TEST(test_profile_cli_fourth_dataset_edits_are_atomic_and_bus_silent);
+  RUN_TEST(test_profile_cli_fourth_dataset_rejects_bad_arity_and_tokens);
   RUN_TEST(test_profile_cli_fifo_profile_is_atomic_and_complete);
   RUN_TEST(test_profile_cli_names_cover_every_enum_value);
   RUN_TEST(test_profile_cli_equal_compares_every_profile_field);

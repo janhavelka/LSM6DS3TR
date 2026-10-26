@@ -68,21 +68,22 @@ static_assert(sizeof(RawSampleResult) <= 48u,
               "RawSampleResult grew beyond the owner payload contract");
 static_assert(sizeof(PollResult) <= 32u,
               "PollResult grew beyond the owner polling contract");
-// Native x64 measurements: OperationResult 368 bytes and driver 1208 bytes.
-// FIFO adds two bounded status snapshots and consumption evidence to each of
-// the existing working/terminal results, plus a non-owning buffer descriptor,
-// one XYZ accumulator and scalar progress. No queue or schema array is stored.
-static_assert(sizeof(FifoMotionRecord) <= 32u,
-              "A caller-owned motion record must remain at most 32 bytes");
+// Native x64 measurements: fourth records56 bytes, OperationResult392 bytes,
+// driver1288 bytes. A fourth record adds raw counter/temperature payload and
+// immutable epoch/resolution evidence. Driver growth is bounded counter/bank
+// state and effect evidence in its existing working/terminal results; no queue
+// or stored schema array is introduced.
+static_assert(sizeof(FifoMotionRecord) <= 56u,
+              "A caller-owned FIFO record must remain at most 56 bytes");
 static_assert(sizeof(FifoReadRequest) <= 16u,
               "FIFO acquisition stores only a caller buffer descriptor");
 static_assert(sizeof(FifoReadResult) <= 64u,
               "FIFO evidence must remain bounded independently of batch size");
 static_assert(std::is_trivially_copyable<FifoMotionRecord>::value,
               "FIFO records must remain fixed-memory value types");
-static_assert(sizeof(OperationResult) <= 384u,
+static_assert(sizeof(OperationResult) <= 400u,
               "OperationResult grew beyond its fixed-memory maintenance bound");
-static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1280u,
+static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1312u,
               "Driver state grew beyond its fixed-memory bound");
 static_assert(MAX_TRANSPORT_WRITE_BYTES == 33u,
               "External owners depend on the bounded write callback size");

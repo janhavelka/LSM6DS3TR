@@ -12,12 +12,13 @@ of current main. Most historical defects were addressed by the newer bounded
 operation engine, explicit configuration provenance, and current integration
 tests.
 
-FIFO acquisition, fourth-dataset decoding, interrupt routing, and some filters
-discussed in the old audit remain intentionally unsupported. They are real
-capability limits, but the current driver rejects those profiles rather than
-exposing the old incomplete behavior. Add them only for a concrete caller under
-the current architecture. The important deployment gate is new physical
-validation of the actual firmware; the retained campaigns predate later fixes.
+The reviewed snapshot intentionally rejected FIFO acquisition, fourth-dataset
+decoding, interrupt routing and some filters. Subsequent prompt 01 implements
+motion acquisition; prompt 02 adds typed fourth-source/counter behavior under
+the current architecture. R2 and the execution index record each exact software
+gate. Interrupt routing and filter extensions remain separate work. The
+deployment gate is physical validation of the actual firmware; retained
+campaigns predate these changes.
 
 ## Snapshot and graph evidence
 
@@ -107,9 +108,16 @@ fourth-dataset/counter interpretation, supported interrupt routes and filters.
 It records source mechanisms, selected scope, regression acceptance and CI
 requirements. Prompt 01 supplies the motion-acquisition implementation in
 `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06`, with all seven CI jobs passed and
-142 native tests passed after closeout coverage additions. Prompts 02-04
-remain **NOT IMPLEMENTED**. This is a partial resolution of R2/H4/H7: fourth
-FIFO datasets, counters, routes and filter extensions remain out of scope.
+142 native tests passed after closeout coverage additions. Prompt 02 starts
+from its closeout `bce83376aa01d0e9836f9175a9993e93128956e5` and extends the
+same profile/schema/operation owners with temperature or timestamp/step
+records, shared step-event triggering, fixed pedometer policy and explicit
+counter-reset/epoch/loss evidence. Local native verification passed 170/170
+tests; its final build/package/CI gate and resolution SHA remain
+**PENDING** until closeout in the
+[execution record](prompts/README.md#prompt-02-execution-record).
+Prompts 03/04 remain **NOT IMPLEMENTED**; routing and filter extensions are not
+silently included. New fourth-dataset physical evidence is **NOT RUN**.
 
 The motion change starts from fetched baseline
 `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26. It adds typed motion

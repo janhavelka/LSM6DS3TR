@@ -57,6 +57,15 @@ struct FakeBus {
   size_t faultCount = 0;
 
   uint8_t regs[256] = {};
+  // Separate physical bank storage: main-bank aliases are never reused for
+  // embedded parameters. Tests can independently poison the policy bytes.
+  uint8_t bankA[256] = {};
+  uint32_t timestampTicks = 0;
+  uint16_t stepCount = 0;
+  uint32_t timestampResetWrites = 0;
+  uint32_t stepResetAssertions = 0;
+  uint32_t bankWritesWhileSensorsActive = 0;
+  uint32_t fifoFourthTriggers = 0;
   uint32_t notReadyStatusReads = 0;
   uint32_t selfTestNotReadyStatusReads = 0;
   uint32_t notReadyPeriod = 0;
@@ -64,6 +73,7 @@ struct FakeBus {
   uint8_t corruptReadRegister = 0;
   uint8_t corruptReadValue = 0;
   uint32_t corruptReadRemaining = 0;
+  bool corruptReadBankOnly = false;
   bool alternateAccelInt16Extremes = false;
   uint32_t accelDataReads = 0;
   bool holdResetBit = false;
@@ -106,6 +116,12 @@ struct FakeBus {
 
   void resetRegisters() {
     std::memset(regs, 0, sizeof(regs));
+    std::memset(bankA, 0, sizeof(bankA));
+    bankA[0x0F] = 0x10;
+    bankA[0x14] = 0x6E;
+    timestampTicks = 0;
+    stepCount = 0;
+    fifoFourthTriggers = 0;
     fifoUnreadWords = 0;
     fifoHead = 0;
     fifoPattern = 0;
@@ -116,6 +132,50 @@ struct FakeBus {
         static_cast<uint8_t>(cmd::MASK_XLDA | cmd::MASK_GDA | cmd::MASK_TDA);
     setRawSample(6400, 1000, -500, 0, 0, 0, 16384);
     syncFifoRegisters();
+  }
+
+  void setCounters(uint32_t ticks, uint16_t steps) {
+    timestampTicks = ticks & 0xFFFFFFUL;
+    stepCount = steps;
+    regs[cmd::REG_TIMESTAMP0] = static_cast<uint8_t>(timestampTicks);
+    regs[cmd::REG_TIMESTAMP1] = static_cast<uint8_t>(timestampTicks >> 8U);
+    regs[cmd::REG_TIMESTAMP2] = static_cast<uint8_t>(timestampTicks >> 16U);
+    regs[0x4B] = static_cast<uint8_t>(stepCount);
+    regs[0x4C] = static_cast<uint8_t>(stepCount >> 8U);
+  }
+
+  // Explicit physical inputs, independent of the production decoder. Disabling
+  // either engine preserves its counter; an asserted pedometer reset holds zero.
+  void advanceCounters(uint32_t ticks, uint16_t steps) {
+    if ((regs[cmd::REG_CTRL10_C] & 0x20U) != 0U &&
+        ((regs[cmd::REG_CTRL1_XL] & 0xF0U) != 0U ||
+         (regs[cmd::REG_CTRL2_G] & 0xF0U) != 0U))
+      timestampTicks = (timestampTicks + ticks) & 0xFFFFFFUL;
+    if ((regs[cmd::REG_CTRL10_C] & 0x16U) == 0x14U &&
+        (regs[cmd::REG_CTRL1_XL] & 0xF0U) >= 0x20U)
+      stepCount = static_cast<uint16_t>(stepCount + steps);
+    setCounters(timestampTicks, stepCount);
+  }
+
+  // AN5130 Rev1 Tables73/74: literal wire construction from counter/event
+  // inputs. This supports fourth-only fake captures, not a second schema owner.
+  void captureFourthDataset(bool stepEvent, int16_t temperature = 0) {
+    if ((regs[cmd::REG_FIFO_CTRL5] & 7U) == 0U) return;
+    const bool wantsStep = (regs[cmd::REG_FIFO_CTRL2] & 0x40U) != 0U;
+    if (stepEvent != wantsStep) return;
+    const uint8_t decimation = static_cast<uint8_t>((regs[cmd::REG_FIFO_CTRL4] >> 3U) & 7U);
+    static constexpr uint8_t DIVISORS[] = {0, 1, 2, 3, 4, 8, 16, 32};
+    if (decimation == 0U || fifoFourthTriggers++ % DIVISORS[decimation] != 0U) return;
+    if ((regs[cmd::REG_FIFO_CTRL2] & 0x80U) != 0U) {
+      appendFifoWord(static_cast<uint16_t>(((timestampTicks >> 8U) & 0xFFU) |
+                                         ((timestampTicks >> 8U) & 0xFF00U)));
+      appendFifoWord(static_cast<uint16_t>(0x00A5U | ((timestampTicks & 0xFFU) << 8U)));
+      appendFifoWord(stepCount);
+    } else if ((regs[cmd::REG_FIFO_CTRL2] & 0x08U) != 0U) {
+      appendFifoWord(0xBBAAU);
+      appendFifoWord(static_cast<uint16_t>(temperature));
+      appendFifoWord(0xDDCCU);
+    }
   }
 
   void clearTrace() {
@@ -292,6 +352,20 @@ struct FakeBus {
     for (size_t i = 1; i < length; ++i) {
       const uint8_t reg = static_cast<uint8_t>(startReg + i - 1u);
       const uint8_t value = data[i];
+      if (reg != cmd::REG_FUNC_CFG_ACCESS &&
+          (regs[cmd::REG_FUNC_CFG_ACCESS] & 0x80U) != 0U) {
+        bankA[reg] = value;
+        continue;
+      }
+      if (reg == cmd::REG_TIMESTAMP2 && value == 0xAAU) {
+        ++timestampResetWrites;
+        setCounters(0, stepCount);
+        continue;
+      }
+      if (reg == cmd::REG_CTRL10_C && (value & 0x02U) != 0U) {
+        ++stepResetAssertions;
+        setCounters(timestampTicks, 0);
+      }
       if (reg != cmd::REG_CTRL3_C) {
         regs[reg] = value;
         if (reg == cmd::REG_FIFO_CTRL5 && (value & 7U) == 0U) {
@@ -332,6 +406,7 @@ struct FakeBus {
       if (resetImage) {
         resetRegisters();
       }
+      if (softwareReset) setCounters(0, 0);
 
       uint8_t stored = resetImage ? 0u : value;
       if (!holdResetBit && resetBitReadsRemaining == 0u) {
@@ -371,6 +446,16 @@ inline Status fakeWrite(uint8_t address, const uint8_t* data, size_t length,
   if (fault != nullptr && !fault->applyEffect) {
     FakeBus::finishTransfer(transfer, fault->status);
     return fault->status;
+  }
+
+  if ((bus.regs[cmd::REG_FUNC_CFG_ACCESS] & 0x80U) != 0U &&
+      data[0] != cmd::REG_FUNC_CFG_ACCESS &&
+      ((bus.regs[cmd::REG_CTRL1_XL] & 0xF0U) != 0U ||
+       (bus.regs[cmd::REG_CTRL2_G] & 0xF0U) != 0U)) {
+    ++bus.bankWritesWhileSensorsActive;
+    const Status status = Status::Error(Err::I2C_ERROR, "bank policy changed with active sensor");
+    FakeBus::finishTransfer(transfer, status);
+    return status;
   }
 
 
@@ -477,7 +562,10 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
       bus.setI16(cmd::REG_OUTX_L_XL, value);
     }
     for (size_t i = 0; i < rxLength; ++i) {
-      rxData[i] = bus.regs[static_cast<uint8_t>(startReg + i)];
+      const uint8_t reg = static_cast<uint8_t>(startReg + i);
+      rxData[i] = reg != cmd::REG_FUNC_CFG_ACCESS &&
+          (bus.regs[cmd::REG_FUNC_CFG_ACCESS] & 0x80U) != 0U
+          ? bus.bankA[reg] : bus.regs[reg];
     }
     if (countdownReset && --bus.resetBitReadsRemaining == 0u &&
         !bus.holdResetBit) {
@@ -489,7 +577,9 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
       bus.regs[cmd::REG_CTRL3_C] =
           static_cast<uint8_t>(bus.regs[cmd::REG_CTRL3_C] & ~cmd::MASK_BOOT);
     }
-    if (bus.corruptReadRemaining > 0u && bus.corruptReadRegister >= startReg &&
+    if (bus.corruptReadRemaining > 0u &&
+        (!bus.corruptReadBankOnly || (bus.regs[cmd::REG_FUNC_CFG_ACCESS] & 0x80U) != 0U) &&
+        bus.corruptReadRegister >= startReg &&
         static_cast<size_t>(bus.corruptReadRegister - startReg) < rxLength) {
       rxData[bus.corruptReadRegister - startReg] = bus.corruptReadValue;
       bus.corruptReadRemaining--;

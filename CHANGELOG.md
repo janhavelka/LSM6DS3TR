@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Typed mutually exclusive temperature and timestamp/step FIFO fourth datasets,
+  shared internal/step-event collection triggers and 6.4 ms/25 us timer policy.
+  Complete records retain raw counters, generation, counter epoch and truthful
+  buffered-temperature quality without inferred clocks, totals or freshness.
+- Fixed pedometer bank-A policy with powered-down staged writes/readback and
+  proved main-bank restoration, plus explicit bounded `startCounterReset` and
+  matching Arduino/native-IDF `counterreset` commands. Reset/bank/continuity
+  effects remain visible after faults and cancellation. New physical cases are
+  documented as **NOT RUN**.
 - Typed internal gyro/accelerometer FIFO profiles with Bypass, FIFO stop-on-full
   and Continuous modes, ODR/decimation/watermark validation, a bounded untagged
   pattern helper and caller-buffer `startFifoRead` acquisition. Complete vectors
@@ -16,11 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status/pattern, consumption, truncation and continuity evidence remain explicit.
 - Matching Arduino/native ESP-IDF FIFO/profile commands, bounded behavioral FIFO
   fault regressions, precise support checks and repeatable physical qualification
-  cases. New FIFO hardware qualification is **NOT RUN**; fourth datasets,
-  external sources, interrupt routes and other omitted features stay unsupported.
+  cases. New FIFO hardware qualification is **NOT RUN**; external sources,
+  interrupt routes and other omitted features stay unsupported.
 
 ### Changed
 
+- Extended the single untagged pattern/decoder to three datasets (at most 96
+  trigger ticks and 393 words) and reserved the complete enabled trigger group
+  in the Continuous occupancy proof. Counter source/resolution/lifecycle changes
+  invalidate continuity; ordinary reads/reconcile and same-resolution configure
+  do not reset counters. Step-event batching makes no regular motion ODR claim.
+- Read actual timestamp resolution before every configure/replay, including
+  counter disable, and stage the required reset when the resolution changes.
+  Preserve fixed bank-policy proof only for trusted read-only reconcile;
+  destructive raw-read attempts and bind/unbind break counter continuity, and
+  unknown-bank diagnostics remain fenced until main-bank selection is proved.
 - Configuration establishes and verifies sensor/FIFO interpretation in Bypass,
   waits for settling, then activates collection. Interpretation-changing lifecycle
   operations reject a live FIFO before writes and require explicit bounded
@@ -35,8 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evidence marks global continuity lost.
 - Extended callback and fixed-memory bounds for FIFO evidence while retaining
   32-byte maximum receive transfers, zero-I2C admission, owner budgets, immutable
-  deadlines and exactly-once terminal results. This is an additive unreleased
-  feature; package metadata and generated version files are unchanged.
+  deadlines and exactly-once terminal results. Additive features select minor
+  version 2.2.0 in package metadata and regenerate version artifacts; these
+  changes remain unreleased, with no release tag or publication.
 
 ### Fixed
 

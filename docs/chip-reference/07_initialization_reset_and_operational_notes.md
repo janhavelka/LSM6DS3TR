@@ -52,6 +52,17 @@ pp. 24, 47.
 
 ## Feature Notes
 
+- Timestamp/step FIFO setup proves hardware Bypass and sensor power-down before
+  writing the fixed bank-A pedometer policy, verifies it and restores/proves
+  main-bank access. It establishes timestamp resolution before counter enable.
+  Every configure/replay observes actual resolution first, even when disabling
+  counter support, and resolution changes issue the documented timestamp reset.
+  Same-resolution
+  configure, FIFO reads and read-only reconcile do not silently reset counters.
+  Explicit `startCounterReset` requires a known timestamp/step Bypass profile;
+  step reset includes a software clear of `PEDO_RST_STEP`. Raw wraps remain
+  modular values, with epoch and continuity effects separate from host uptime.
+  Source: datasheet pp. 69, 90, 97, 103-104; AN5130 pp. 50-57, 94.
 - Absolute Wrist Tilt requires accelerometer ODR >=26 Hz and setting both `FUNC_EN` and `WRIST_TILT_EN` in `CTRL10_C`. Source: datasheet, p. 17.
 - Sensor-hub mode uses Mode 2 pins `SDx/MSDA`, `SCx/MSCL`, and `INT2/MDRDY` plus `MASTER_CONFIG` (`0x1A`) fields such as `MASTER_ON`, `PASS_THROUGH_MODE`, and `PULL_UP_EN`. Source: datasheet, pp. 19-20, 38, 69.
 - AN5130 supplies LSM6DS3TR-C feature recipes; the design-tip PDFs contain calibration/tilt/noise math but no replacement register reset values or bit definitions for `0x00..0x7F`.

@@ -16,7 +16,7 @@ COMMANDS = {
     "help", "?", "version", "ver", "status", "diag", "job", "result",
     "bind", "unbind", "cancel", "scan", "addr", "freq", "profile", "cfg",
     "settings", "probe", "configure", "sample", "reset", "boot", "recover",
-    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "fifo", "rreg",
+    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "fifo", "counterreset", "rreg",
     "wreg", "dump", "stress", "stress_mix",
 }
 
@@ -24,7 +24,9 @@ PROFILE_FIELDS = {
     "xl_odr", "xl_fs", "xl_power", "xl_lpf2", "xl_slope_hp", "xl_6d_lpf",
     "g_odr", "g_fs", "g_power", "g_lpf1", "g_hpf", "g_hpf_mode",
     "g_sleep", "bdu", "offset_weight", "offset", "fifo",
-    "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark", "interrupts",
+    "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark",
+    "fifo_fourth", "fifo_fourth_dec", "fifo_trigger", "timestamp_resolution",
+    "interrupts",
 }
 
 REQUIRED_IDF_TOKENS = (
@@ -45,6 +47,19 @@ REQUIRED_IDF_TOKENS = (
     "char input[",
     "OperationTiming",
     "startFifoRead",
+    "startCounterReset",
+    "result.counters.epoch",
+    "result.counters.timestampResetMayHaveOccurred",
+    "result.counters.stepResetMayHaveOccurred",
+    "result.registerBankMayBeUnknown",
+    "record.kind == FifoRecordKind::TEMPERATURE",
+    "record.kind == FifoRecordKind::TIMESTAMP_STEP",
+    "record.counterEpoch",
+    "record.timestampTicks",
+    "record.stepCount",
+    "wraps=unexpanded",
+    "freshness=unverified",
+    "expected counterreset <timestamp|steps|both>",
     "FifoMotionRecord fifoRecords[FIFO_RECORD_CAPACITY]",
     "request.stopCollection = count == 3U",
     "result.token == fifoBufferToken",

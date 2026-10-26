@@ -42,6 +42,20 @@
 | `CTRL3_C.SW_RESET` | Set to 1 to reset; bit clears automatically. | Datasheet, p. 63 |
 | `FIFO_CTRL5.FIFO_MODE` | `000` bypass, `001` FIFO stops when full, `011` continuous-to-FIFO, `100` bypass-to-continuous, `110` continuous overwrite. | Datasheet, p. 58 |
 | `CTRL4_C.DRDY_MASK` | Masks data-ready until the selected filter settling path is complete. | Datasheet, p. 64 |
+| `FIFO_CTRL2.TIMER_PEDO_FIFO_EN` / `FIFO_TEMP_EN` | Bits 7/3 select mutually exclusive timestamp-plus-step / temperature fourth datasets. | Datasheet, p. 55; AN5130, pp. 94-95 |
+| `FIFO_CTRL2.TIMER_PEDO_FIFO_DRDY` | Bit 6 selects step-event instead of internal triggering for all enabled FIFO datasets when `MASTER_CONFIG.DATA_VALID_SEL_FIFO=0`. | Datasheet, p. 55; AN5130, p. 87 |
+| `FIFO_CTRL4.DEC_DS4_FIFO` | Bits 5:3 select disabled or factors 1/2/3/4/8/16/32 for the complete three-word fourth record. | Datasheet, p. 57 |
+| `CTRL10_C.TIMER_EN`, `PEDO_EN`, `FUNC_EN`, `PEDO_RST_STEP` | Bits 5/4/2/1; reset-step must be explicitly cleared by software. | Datasheet, p. 69; AN5130, p. 50 |
+| `WAKE_UP_DUR.TIMER_HR` | Bit 4 selects 6.4 ms (0) or 25 us (1) timestamp ticks; establish before counter enable. | Datasheet, p. 90; AN5130, p. 57 |
+
+The fixed timestamp/step policy owns bank-A `CONFIG_PEDO_THS_MIN` (`0x0F`,
+explicit `0x10`), `PEDO_DEB_REG` (`0x14`, `0x6E`) and `STEP_COUNT_DELTA`
+(`0x15`, `0x00`). Bank-A is selected with `FUNC_CFG_ACCESS=0x80`; main bank
+is `0x00`. All embedded-bank modifications require both sensors powered down
+(datasheet p. 97). `CONFIG_PEDO_THS_MIN` has a five-bit threshold and `PEDO_FS`
+in bit 7, with bits 6:5 reserved (p. 103); debounce fields are 13 units of
+80 ms and six steps (p. 104). These parameters are a fixed production policy,
+not an arbitrary embedded-bank register API.
 
 ## ODR Encodings
 

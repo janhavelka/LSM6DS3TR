@@ -45,6 +45,10 @@
 - FIFO can include gyro, accelerometer, third/fourth data sets, and optionally temperature. Source: datasheet, pp. 55-58.
 - For proper FIFO status/data reads, the datasheet recommends setting `CTRL3_C.BDU=1`. Source: datasheet, pp. 79-81.
 - FIFO data are untagged; use `FIFO_PATTERN` and the configured decimation/order to identify stream position. Do not change FIFO configuration while unread data remain, do not read when `FIFO_EMPTY` is set, and drain fast enough to free slots before overflow. Source: AN5130, FIFO reading procedure.
+- The selected temperature or timestamp/step fourth source consumes three words
+  per record. Step-event collection triggering applies to all enabled datasets;
+  it does not enable the unsupported trigger-switched FIFO operating modes or
+  MCU interrupt routes. Source: AN5130, pp. 87, 94-95.
 
 ## Self-Test
 

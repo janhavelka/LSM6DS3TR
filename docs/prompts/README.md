@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: prompt 01 IMPLEMENTED (software); prompts 02-04 NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompts 01/02 IMPLEMENTED (software); prompt 02 final CI pending; prompts 03/04 NOT IMPLEMENTED.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -58,12 +58,44 @@ existing branch, and let the lead own Git mutations when using subagents.
 - Hardware: **NOT RUN**; repeatable qualification cases are in
   [HIL validation](../HIL_VALIDATION.md#motion-fifo-qualification).
 
+## Prompt 02 execution record
+
+- Execution date: 2026-10-26; actual workspace is
+  `C:\Users\HonzovoSpectre\Documents\Projects\LSM6DS3TR`.
+- Fetched execution baseline: `main` and `origin/main` at
+  `bce83376aa01d0e9836f9175a9993e93128956e5`, clean and synchronized.
+- Prerequisite 01: implementation
+  `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06` and acceptance closeout
+  `bce83376aa01d0e9836f9175a9993e93128956e5`.
+- Scope: typed temperature or timestamp/step fourth dataset; shared internal
+  or step-event triggers; raw modular counters with resolution/epoch/effect
+  evidence; fixed bank-A pedometer policy and explicit bounded reset.
+  Interrupt routes, external datasets and filter extensions remain prompts
+  03/04 or unsupported capabilities.
+- Source audit: AN5130 Tables 73/74 were visually inspected in the actual PDF;
+  timestamp byte order and unused temperature bytes are documented in topic 10.
+  The fixed pedometer policy follows datasheet bank-A field definitions and
+  the power-down write requirement. Timestamp dependency ambiguity remains
+  explicit; the joint dataset requires accelerometer ODR at least 26 Hz.
+- Local software verification: **170/170 native tests passed**, all contract
+  guards passed, IDF checker self-tests **3/3**, and HIL-runner tests **18/18**.
+  Strict Doxygen generation passed after clearing Windows read-only attributes
+  only inside the verified generated-documentation directory. This is host
+  software evidence, not a physical HIL run.
+- All three Arduino targets passed an initial build. Final rebuilds after
+  review fixes, packaging and exact-final-commit CI are **PENDING**. No CI pass
+  is claimed by the local results above.
+- Implementation resolution SHA and final closeout evidence: **PENDING** scoped
+  commit/push and verification of its matching CI run.
+- Hardware: **NOT RUN**; repeatable new cases are in
+  [fourth-dataset qualification](../HIL_VALIDATION.md#fourth-dataset-and-counter-qualification).
+
 ## Coverage and execution order
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |
 | --- | --- | --- | --- | --- |
 | [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: original enable-only profile and purge-only mechanism replaced. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | IMPLEMENTED (software); hardware NOT RUN |
-| [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: no fourth-dataset selector/decoder or managed timestamp/pedometer dependencies. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | NOT IMPLEMENTED |
+| [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: typed fourth-source schema and fixed timestamp/pedometer ownership added. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | IMPLEMENTED (software); final CI pending; hardware NOT RUN |
 | [03](03_interrupt_profiles_and_event_evidence.md) | R2: `InterruptProfile` is only an enable flag; managed routes are zero; no typed event-source result. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | NOT IMPLEMENTED |
 | [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |
 

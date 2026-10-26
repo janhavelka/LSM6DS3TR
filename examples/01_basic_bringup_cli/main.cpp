@@ -111,6 +111,7 @@ const char* jobName(JobKind kind) {
     case JobKind::CALIBRATION: return "calibration";
     case JobKind::FIFO_PURGE: return "purge";
     case JobKind::FIFO_READ: return "fifo";
+    case JobKind::COUNTER_RESET: return "counterreset";
     default: return "none";
   }
 }
@@ -200,6 +201,11 @@ void printProfileRecord(const char* label, const DeviceProfile& value) {
       profile_cli::fifoDecimationName(value.fifo.gyroDecimation),
       profile_cli::fifoDecimationName(value.fifo.accelDecimation),
       static_cast<unsigned>(value.fifo.watermarkWords));
+  Serial.printf("profile %s fifo_fourth=%s fifo_fourth_dec=%s fifo_trigger=%s timestamp_resolution=%s\n",
+      label, profile_cli::fifoFourthDatasetName(value.fifo.fourthDataset),
+      profile_cli::fifoDecimationName(value.fifo.fourthDecimation),
+      profile_cli::fifoTriggerName(value.fifo.trigger),
+      profile_cli::timestampResolutionName(value.fifo.timestampResolution));
 }
 
 void printProfiles(uint64_t now) {
@@ -229,7 +235,7 @@ void printProfiles(uint64_t now) {
                     : "no",
                 static_cast<unsigned>(verifiedStatus.code), verifiedStatus.msg);
   if (verifiedStatus.ok()) printProfileRecord("verified", verified);
-  Serial.println("profile locked if_inc=on bdu=on byte_order=little fifo_sources=motion interrupts=off");
+  Serial.println("profile locked if_inc=on bdu=on byte_order=little fifo_sources=motion_or_typed_fourth interrupts=off");
 }
 
 bool ownerMutationBlocked() {
@@ -327,6 +333,13 @@ void printTerminalResult(const OperationResult& result) {
                 result.hardwareStateMayHaveChanged ? "yes" : "no",
                 result.startedUptimeMs, result.completedUptimeMs);
   printStatus(result.status);
+  Serial.printf("  counter_epoch=%" PRIu64 " counter_continuity_lost=%s timestamp_reset_possible=%s timestamp_reset_confirmed=%s step_reset_possible=%s step_reset_confirmed=%s bank_unknown=%s\n",
+      result.counters.epoch, result.counters.continuityLost ? "yes" : "no",
+      result.counters.timestampResetMayHaveOccurred ? "yes" : "no",
+      result.counters.timestampResetConfirmed ? "yes" : "no",
+      result.counters.stepResetMayHaveOccurred ? "yes" : "no",
+      result.counters.stepResetConfirmed ? "yes" : "no",
+      result.registerBankMayBeUnknown ? "yes" : "no");
 
   if (result.kind == JobKind::PROBE) {
     Serial.printf("  address=0x%02X who_am_i=0x%02X\n",
@@ -391,12 +404,25 @@ void printTerminalResult(const OperationResult& result) {
       for (uint16_t index = 0; index < batch.records && index < FIFO_RECORD_CAPACITY; ++index) {
         const FifoMotionRecord& record = fifoRecords[index];
         if (record.token != result.token) break;
-        Serial.printf("  fifo_record index=%u quantity=%s raw=%d,%d,%d generation=%lu xl_fs_g=%s g_fs_dps=%s read_ms=%" PRIu64 " sample_time=unknown\n",
-            index, record.quantityMask == SAMPLE_ACCELERATION ? "accel" : "gyro",
-            static_cast<int>(record.raw.x), static_cast<int>(record.raw.y),
-            static_cast<int>(record.raw.z), static_cast<unsigned long>(record.configGeneration),
-            profile_cli::accelFsName(record.accelFullScale),
-            profile_cli::gyroFsName(record.gyroFullScale), record.readUptimeMs);
+        if (record.kind == FifoRecordKind::TEMPERATURE) {
+          Serial.printf("  fifo_record index=%u quantity=temperature raw=%d generation=%lu read_ms=%" PRIu64 " freshness=unverified sample_time=unknown\n",
+              index, static_cast<int>(record.temperatureRaw),
+              static_cast<unsigned long>(record.configGeneration), record.readUptimeMs);
+        } else if (record.kind == FifoRecordKind::TIMESTAMP_STEP) {
+          Serial.printf("  fifo_record index=%u quantity=timestamp_step ticks=%lu width=24 resolution=%s steps=%u step_width=16 counter_epoch=%" PRIu64 " counter_continuity_lost=%s generation=%lu read_ms=%" PRIu64 " sample_time=unknown wraps=unexpanded\n",
+              index, static_cast<unsigned long>(record.timestampTicks),
+              profile_cli::timestampResolutionName(record.timestampResolution),
+              static_cast<unsigned>(record.stepCount), record.counterEpoch,
+              record.counterContinuityLost ? "yes" : "no",
+              static_cast<unsigned long>(record.configGeneration), record.readUptimeMs);
+        } else {
+          Serial.printf("  fifo_record index=%u quantity=%s raw=%d,%d,%d generation=%lu xl_fs_g=%s g_fs_dps=%s read_ms=%" PRIu64 " sample_time=unknown\n",
+              index, profile_cli::fifoRecordKindName(record.kind),
+              static_cast<int>(record.raw.x), static_cast<int>(record.raw.y),
+              static_cast<int>(record.raw.z), static_cast<unsigned long>(record.configGeneration),
+              profile_cli::accelFsName(record.accelFullScale),
+              profile_cli::gyroFsName(record.gyroFullScale), record.readUptimeMs);
+        }
       }
     } else if (result.status.ok() && batch.records != 0U) {
       Serial.println("  fifo record storage reused; cached metadata only");
@@ -705,6 +731,10 @@ void printHelp() {
   Serial.println("FIFO profile: profile set fifo <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <0..2047>");
   Serial.println("FIFO fields: fifo_mode fifo_odr fifo_g_dec fifo_xl_dec fifo_watermark; decimation=off|1|2|3|4|8|16|32");
   Serial.println("FIFO off: profile set fifo off; watermark 0 is always reached, not disabled.");
+  Serial.println("Fourth dataset: profile set fifo_fourth <temperature|timestamp_step> <dec> <internal|step> <6.4ms|25us> | fifo_fourth off");
+  Serial.println("Fourth fields: fifo_fourth_dec fifo_trigger timestamp_resolution; step triggers all enabled datasets, not regular ODR.");
+  Serial.println("Temperature FIFO records may repeat; buffered data has no TDA freshness proof. Counter ticks/steps are raw and wraps are unexpanded.");
+  Serial.println("Counter reset: counterreset <timestamp|steps|both>; requires verified timestamp_step profile in bypass. This changes counter epochs.");
   Serial.println("Booleans: 0/1, off/on, or false/true; unsupported production values are rejected.");
   Serial.println("Stress: stress [1..10000] [all|accel|gyro|temp] [ready|direct]");
   Serial.println("Stress: stress_mix [1..10000] (probe/reconcile/ready/direct, non-destructive)");
@@ -1161,6 +1191,18 @@ void handleCommand(char* line) {
                             timing(now, calibrationTimeoutMs(request, verified)),
                             token),
                         token);
+  } else if (strcmp(command, "counterreset") == 0) {
+    if (count != 2U || (strcmp(tokens[1], "timestamp") != 0 &&
+        strcmp(tokens[1], "steps") != 0 && strcmp(tokens[1], "both") != 0)) {
+      Serial.println("expected counterreset <timestamp|steps|both>");
+      return;
+    }
+    if (!requireOwnerIdle("counterreset")) return;
+    CounterResetRequest request{};
+    request.timestamp = strcmp(tokens[1], "steps") != 0;
+    request.steps = strcmp(tokens[1], "timestamp") != 0;
+    OperationToken token{};
+    (void)acceptedStart(device.startCounterReset(request, timing(now, 5000), token), token);
   } else if (strcmp(command, "fifo") == 0) {
     uint32_t words = 0;
     uint32_t capacity = FIFO_RECORD_CAPACITY;

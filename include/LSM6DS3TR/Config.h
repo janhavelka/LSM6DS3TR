@@ -153,13 +153,35 @@ enum class FifoDecimation : uint8_t {
   EVERY_32 = 7   ///< Store every thirty-second trigger.
 };
 
-/// @brief Replayable internal accelerometer/gyroscope FIFO policy.
+/// @brief Mutually exclusive interpretation of the six-byte fourth dataset.
+enum class FifoFourthDataset : uint8_t {
+  OFF = 0,         ///< Fourth dataset excluded.
+  TEMPERATURE,     ///< Signed temperature in bytes 2/3; other bytes unused.
+  TIMESTAMP_STEP   ///< Captured raw 24-bit timer and 16-bit step counter.
+};
+
+/// @brief Shared trigger for every enabled FIFO dataset.
+enum class FifoTrigger : uint8_t {
+  INTERNAL = 0,  ///< Internal sensor/FIFO ODR trigger.
+  STEP_EVENT     ///< STEP_DETECTED events, including accompanying motion records.
+};
+
+/// @brief Sensor timestamp tick resolution; not an owner-clock mapping.
+enum class TimestampResolution : uint8_t {
+  MS_6_4 = 0,  ///< 6400 microseconds per tick.
+  US_25        ///< 25 microseconds per tick.
+};
+
+/// @brief Replayable internal motion and optional fourth-dataset FIFO policy.
 /// @note Disabled profiles require the canonical default values below. Enabled
-/// profiles require a 12.5..6660 Hz FIFO ODR and at least one active dataset,
+/// profiles require at least one active dataset and an active internal sensor,
 /// including when preparing BYPASS. Selected sensors must supply at least the
-/// decimated trigger cadence. Accelerometer 1.6 Hz and gyroscope sleep are not
+/// decimated internal trigger cadence. Internal triggering requires a
+/// 12.5..6660 Hz FIFO ODR. Step triggering requires the timestamp/step dataset
+/// and accelerometer >=26 Hz; its ODR may be power-down because events supply
+/// the shared trigger. Accelerometer 1.6 Hz and gyroscope sleep are not
 /// admitted with FIFO, including when that sensor's dataset is excluded.
-/// @note External/fourth datasets, triggered modes, high-byte packing and
+/// @note External datasets, triggered modes, high-byte packing and
 /// stop-on-threshold are deliberately absent from this full-word contract.
 struct FifoProfile {
   bool enabled = false;  ///< Enable the typed FIFO interpretation profile.
@@ -168,6 +190,10 @@ struct FifoProfile {
   FifoDecimation gyroDecimation = FifoDecimation::OFF;  ///< Dataset 1 cadence.
   FifoDecimation accelDecimation = FifoDecimation::OFF;  ///< Dataset 2 cadence.
   uint16_t watermarkWords = 0;  ///< 0..2047 words; zero is always reached, not disabled.
+  FifoFourthDataset fourthDataset = FifoFourthDataset::OFF;  ///< One fourth-record schema.
+  FifoDecimation fourthDecimation = FifoDecimation::OFF;  ///< Dataset 4 trigger divisor.
+  FifoTrigger trigger = FifoTrigger::INTERNAL;  ///< Shared by motion and fourth records.
+  TimestampResolution timestampResolution = TimestampResolution::MS_6_4;  ///< Timer policy.
 };
 
 /// @brief Interrupt policy represented by the production profile.

@@ -71,7 +71,8 @@ enum class JobKind : uint8_t {
   SELF_TEST,    ///< Built-in sensor self-test and profile restoration.
   CALIBRATION,  ///< Bounded bias candidate measurement.
   FIFO_PURGE,   ///< Bounded destructive FIFO data removal.
-  FIFO_READ     ///< Bounded typed motion FIFO acquisition into caller storage.
+  FIFO_READ,    ///< Bounded typed FIFO acquisition into caller storage.
+  COUNTER_RESET ///< Explicit timestamp/step reset in a verified Bypass profile.
 };
 
 /// @brief Lifecycle state reported for an operation.
@@ -248,17 +249,51 @@ struct FifoPurgeResult {
   bool residualLossPossible = false;  ///< Bypass may discard residual words or arrivals after the last observation.
 };
 
-/// @brief One complete FIFO XYZ vector with immutable interpretation provenance.
+/// @brief Interpretation of one complete six-byte FIFO record.
+enum class FifoRecordKind : uint8_t {
+  ANGULAR_RATE = 0,  ///< Signed gyroscope XYZ.
+  ACCELERATION,     ///< Signed accelerometer XYZ.
+  TEMPERATURE,      ///< Signed temperature; batching proves no new conversion.
+  TIMESTAMP_STEP    ///< Raw counters, without wrap expansion or clock mapping.
+};
+
+/// @brief One complete FIFO record with immutable interpretation provenance.
 /// @note No sample timestamp or freshness is inferred. The read time describes
 /// host capture only. The token is published only for a successful batch.
 struct FifoMotionRecord {
   OperationToken token = {};  ///< Successful acquisition identity; zero while scratch.
-  uint64_t readUptimeMs = 0;  ///< Caller clock at the read completing this vector.
+  uint64_t readUptimeMs = 0;  ///< Caller clock at the read completing this record.
   uint32_t configGeneration = 0;  ///< Verified generation at acquisition admission.
   RawAxes raw = {};  ///< Complete signed sensor-native XYZ vector.
-  uint8_t quantityMask = 0;  ///< Exactly SAMPLE_ACCELERATION or SAMPLE_ANGULAR_RATE.
+  uint8_t quantityMask = 0;  ///< Motion/temperature quantity; zero for counter records.
   AccelFs accelFullScale = AccelFs::G_2;  ///< Immutable accelerometer scale.
   GyroFs gyroFullScale = GyroFs::DPS_250;  ///< Immutable gyroscope scale.
+  FifoRecordKind kind = FifoRecordKind::ANGULAR_RATE;  ///< Selects the meaningful payload.
+  int16_t temperatureRaw = 0;  ///< TEMPERATURE only: raw/256 + 25 degrees Celsius.
+  uint32_t timestampTicks = 0;  ///< TIMESTAMP_STEP only: raw 24-bit timer, may wrap.
+  uint16_t stepCount = 0;  ///< TIMESTAMP_STEP only: raw 16-bit count, may wrap.
+  TimestampResolution timestampResolution = TimestampResolution::MS_6_4;  ///< Tick scale.
+  uint64_t counterEpoch = 0;  ///< Driver-instance interpretation interval, never a wrap total.
+  bool counterContinuityLost = true;  ///< No lossless counter observation claim in this interval.
+};
+
+/// @brief General FIFO record name; the historical motion name remains compatible.
+using FifoRecord = FifoMotionRecord;
+
+/// @brief Explicit reset selection; at least one counter must be selected.
+struct CounterResetRequest {
+  bool timestamp = true;  ///< Reset timestamp, acknowledging its end-counter indication.
+  bool steps = true;  ///< Assert and explicitly clear PEDO_RST_STEP.
+};
+
+/// @brief Counter lifetime and reset effects, including incomplete operations.
+struct CounterResult {
+  uint64_t epoch = 0;  ///< Interpretation interval; counters remain raw and wrapping.
+  bool continuityLost = true;  ///< Sticky uncertainty until a successful joint explicit reset.
+  bool timestampResetMayHaveOccurred = false;  ///< Timestamp command was attempted.
+  bool stepResetMayHaveOccurred = false;  ///< Pedometer reset assertion was attempted.
+  bool timestampResetConfirmed = false;  ///< Timestamp reset write succeeded.
+  bool stepResetConfirmed = false;  ///< Pedometer reset assertion/clear/readback succeeded.
 };
 
 /// @brief Bounded caller storage and consumption limit for one FIFO acquisition.
@@ -318,6 +353,8 @@ struct OperationResult {
   CalibrationResult calibration = {};  ///< Candidate bias for CALIBRATION jobs.
   FifoPurgeResult fifoPurge = {};  ///< Destructive progress for FIFO_PURGE jobs.
   FifoReadResult fifoRead = {};  ///< Typed batch and destructive-read evidence for FIFO_READ.
+  CounterResult counters = {};  ///< Raw-counter epoch and explicit/required reset effects.
+  bool registerBankMayBeUnknown = false;  ///< Embedded-bank restoration was not proved.
 };
 
 /// @brief Result of one poll call.
@@ -351,12 +388,13 @@ struct DriverDiagnostics {
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 71;  ///< Includes FIFO guard/activation.
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 90;  ///< Includes fixed bank policy and counters.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 92;  ///< Reset/boot with FIFO activation.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 91;  ///< Recovery with FIFO activation.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 111;  ///< Reset/boot with counter/FIFO restoration.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 110;  ///< Recovery with counter/FIFO restoration.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 9;  ///< Includes FIFO bypass guard.
+static constexpr uint32_t MAX_COUNTER_RESET_TRANSACTIONS = 7;  ///< Identity, Bypass, reset/clear verification.
 ///@}
 
 /// @name Fixed transport buffer ceilings
@@ -380,18 +418,19 @@ Status validateDriverConfig(const DriverConfig& config);
 /// @return OK when every value and cross-field combination is supported.
 Status validateProfile(const DeviceProfile& profile);
 
-/// @brief One position in the untagged internal-motion FIFO pattern.
+/// @brief One position in the untagged internal FIFO pattern.
 struct FifoPatternWord {
-  uint16_t patternWords = 0;  ///< Complete repeating pattern length, at most 105.
-  uint8_t quantityMask = 0;  ///< SAMPLE_ACCELERATION or SAMPLE_ANGULAR_RATE.
-  uint8_t axis = 0;  ///< 0=X, 1=Y, 2=Z; never a sample timestamp.
+  uint16_t patternWords = 0;  ///< Complete repeating pattern length, at most 393.
+  uint8_t quantityMask = 0;  ///< Motion/temperature quantity; zero for counter records.
+  uint8_t axis = 0;  ///< Record word 0..2; X/Y/Z for motion, payload words for fourth.
+  FifoRecordKind kind = FifoRecordKind::ANGULAR_RATE;  ///< Schema, not an on-wire tag.
 };
 
-static constexpr uint16_t MAX_FIFO_PATTERN_WORDS = 105;  ///< Factors 3/32: 35 XYZ records.
+static constexpr uint16_t MAX_FIFO_PATTERN_WORDS = 393;  ///< Three factors 1/3/32: 131 records.
 static constexpr uint16_t MAX_FIFO_PATTERN_TICKS = 96;  ///< LCM of admitted factors.
 
 /// @brief Resolve a word position using one bounded, allocation-free pattern walk.
-/// @param profile Valid enabled motion FIFO profile, including prepared BYPASS.
+/// @param profile Valid enabled FIFO profile, including prepared BYPASS.
 /// @param index Word index in the repeating pattern; out-of-range is rejected.
 /// @param out Receives sensor, axis and length only on success.
 /// @return OK or a validation error; performs zero I2C and preserves out on error.
@@ -616,7 +655,7 @@ public:
   Status startFifoPurge(const FifoPurgeRequest& request, const OperationTiming& timing,
                         OperationToken& token);
 
-  /// @brief Read complete motion vectors from the settled verified FIFO profile.
+  /// @brief Read complete typed records from the settled verified FIFO profile.
   /// @param request Caller-owned scratch storage and finite consumption bound.
   /// @param timing Admission and immutable absolute deadline in the owner clock.
   /// @param token Receives a nonzero identity only on acceptance.
@@ -628,6 +667,17 @@ public:
   /// activation discards the first complete vector of each selected sensor.
   Status startFifoRead(const FifoReadRequest& request, const OperationTiming& timing,
                        OperationToken& token);
+
+  /// @brief Explicitly reset selected counters through the bounded operation engine.
+  /// @param request Timestamp/step selection; neither selected is invalid.
+  /// @param timing One immutable absolute deadline in owner uptime.
+  /// @param token Receives an accepted operation identity, otherwise zero.
+  /// @return IN_PROGRESS, or a bus-silent admission error.
+  /// @note Requires a known timestamp/step Bypass profile. Reads/reconcile never
+  /// reset counters. Cancellation is bus-silent; an uncleared step reset leaves
+  /// configuration unknown. Raw wraps are never expanded into monotonic time.
+  Status startCounterReset(const CounterResetRequest& request,
+                           const OperationTiming& timing, OperationToken& token);
 
   /// @brief Advance one operation without exceeding a callback budget.
   /// @param nowMs Current time in the operation's caller-owned monotonic domain.
@@ -729,6 +779,9 @@ private:
   Status _stepCalibration(uint64_t nowMs);
   Status _stepFifoPurge(uint64_t nowMs);
   Status _stepFifoRead(uint64_t nowMs);
+  Status _stepCounterReset(uint64_t nowMs);
+  Status _stepCounterSetup(const DeviceProfile& target, uint64_t nowMs);
+  void _breakCounterContinuity();
   void _clearFifoOutput();
   Status _finish(const Status& status, OperationState state);
   Status _fail(const Status& status);
@@ -782,6 +835,12 @@ private:
   uint64_t _validAfterUptimeMs = 0;
   uint8_t _fifoDiscardMask = 0;
   bool _fifoContinuityLost = false;
+  uint64_t _counterEpoch = 0;
+  bool _counterContinuityLost = true;
+  bool _bankMayBeUnknown = false;
+  uint8_t _counterSetupStep = 0;
+  bool _timestampResetNeeded = false;
+  CounterResetRequest _counterResetRequest = {};
   uint8_t _managedRegisters[MANAGED_REGISTER_COUNT] = {};
   uint8_t _managedValues[MANAGED_REGISTER_COUNT] = {};
   uint8_t _mismatchRegister = 0;

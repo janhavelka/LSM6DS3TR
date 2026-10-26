@@ -166,13 +166,14 @@ also leave the expected pattern index.
 
 **Resolution (engineering inference):** the owner must be the sole FIFO
 consumer and must not change interpretation outside the serialized driver.
-For the admitted two motion datasets, one trigger stores at most six words.
+For each enabled motion or fourth dataset, one trigger stores three words.
 Reserve that complete group from the 2048-word capacity: the conservative
-occupancy floor after a possible overflow is 2042 words before host removal.
+occupancy floor after a possible overflow is 2042 words for two motion datasets
+or 2039 words when all three admitted datasets are enabled, before host removal.
 After a burst consuming `N` words, overflow since the pre-status observation
-cannot leave fewer than `2042 - N` unread words: concurrent producer writes
+cannot leave fewer than `2048 - groupWords - N` unread words: concurrent producer writes
 cannot reduce occupancy and this driver removed only `N` words. Consequently,
-Continuous acquisition rejects post-status occupancy `>= 2042 - N` with
+Continuous acquisition rejects post-status occupancy `>= 2048 - groupWords - N` with
 `OPERATION_INDETERMINATE` and `continuityLost`, even when OVER_RUN is clear and
 the next pattern matches. This deliberately rejects some coherent nearly full
 bursts rather than relying on undocumented flag persistence. It is a bounded
@@ -235,9 +236,21 @@ AN5130 p. 50 groups timestamp with accelerometer-only embedded functions that
 require accel ODR >=26 Hz, while its dedicated timestamp section on p. 57 says
 the counter stops only when both accel and gyro are powered down.
 
-**Resolution:** timestamp is unsupported in the production profile. Any future
-implementation must validate its chosen sensor dependency on hardware rather
-than silently relying on either broad statement.
+**Resolution:** the joint timestamp/step fourth dataset requires accelerometer
+ODR at least 26 Hz, satisfying the concrete pedometer requirement and the
+conservative common dependency. It does not admit gyro-only timestamps or
+claim that the broader contradiction is resolved. Physical sensor-dependency
+qualification remains **NOT RUN**.
+
+## Pedometer Minimum-Threshold Width
+
+AN5130 p. 51 describes six minimum-threshold bits, while datasheet Table 251
+p. 103 defines only `ths_min[4:0]`, with bits 6:5 reserved and bit 7 `PEDO_FS`.
+
+**Resolution:** follow the datasheet field table. The fixed production policy
+writes `CONFIG_PEDO_THS_MIN=0x10`, keeping reserved bits zero and selecting the
+2 g internal pedometer range. Bank-A writes obey the power-down requirement
+on datasheet p. 97 and use bounded readback/main-bank restoration.
 
 ## Package Height On The Live Product Page
 

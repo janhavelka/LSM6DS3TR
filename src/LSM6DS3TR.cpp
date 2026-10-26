@@ -13,14 +13,17 @@ constexpr uint16_t SELF_TEST_MAX_SAMPLES = 100;
 constexpr uint16_t CALIBRATION_MIN_SAMPLES = 1;
 constexpr uint16_t CALIBRATION_MAX_SAMPLES = 1000;
 constexpr uint16_t FIFO_CAPACITY_WORDS = 2048;
-// Conservative occupancy floor for a motion FIFO overwrite. The largest
-// admitted trigger group contains gyro XYZ plus accel XYZ (six words).
-constexpr uint16_t FIFO_MOTION_FULL_FLOOR_WORDS = FIFO_CAPACITY_WORDS - 6U;
 constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
 constexpr uint64_t CLOCK_QUANTIZATION_MARGIN_MS = 1;
-constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 87;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 106;
+// Datasheet pp.97/103/104: fixed bank-A pedometer policy, modified only in
+// proved sensor power-down. No sensor-hub or general embedded-bank API.
+constexpr uint8_t PEDOMETER_REGISTERS[] = {0x0F, 0x14, 0x15};
+constexpr uint8_t PEDOMETER_VALUES[] = {0x10, 0x6E, 0x00};
+constexpr uint8_t COUNTER_ENABLE = 0x34;  // FUNC_EN | PEDO_EN | TIMER_EN.
+constexpr uint8_t PEDOMETER_RESET = 0x02;
 constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
 constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
 constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
@@ -275,6 +278,36 @@ bool fifoCollecting(const DeviceProfile& profile) {
   return profile.fifo.enabled && profile.fifo.mode != FifoMode::BYPASS;
 }
 
+bool counterProfile(const DeviceProfile& profile) {
+  return profile.fifo.enabled &&
+         profile.fifo.fourthDataset == FifoFourthDataset::TIMESTAMP_STEP;
+}
+
+uint8_t buildCounterControl(const DeviceProfile& profile) {
+  return counterProfile(profile) ? COUNTER_ENABLE : 0U;
+}
+
+uint8_t buildTimerResolution(const DeviceProfile& profile) {
+  return counterProfile(profile) &&
+                 profile.fifo.timestampResolution == TimestampResolution::US_25
+             ? cmd::MASK_TIMER_HR : 0U;
+}
+
+uint8_t buildFifoCtrl2(const DeviceProfile& profile) {
+  return static_cast<uint8_t>(((profile.fifo.watermarkWords >> 8U) & 7U) |
+      (profile.fifo.fourthDataset == FifoFourthDataset::TEMPERATURE ? 0x08U : 0U) |
+      (counterProfile(profile) ? 0x80U : 0U) |
+      (profile.fifo.trigger == FifoTrigger::STEP_EVENT ? 0x40U : 0U));
+}
+
+uint16_t fifoOverwriteFloor(const DeviceProfile& profile) {
+  const uint16_t datasets =
+      (profile.fifo.gyroDecimation != FifoDecimation::OFF ? 1U : 0U) +
+      (profile.fifo.accelDecimation != FifoDecimation::OFF ? 1U : 0U) +
+      (profile.fifo.fourthDataset != FifoFourthDataset::OFF ? 1U : 0U);
+  return static_cast<uint16_t>(FIFO_CAPACITY_WORDS - 3U * datasets);
+}
+
 uint8_t buildFifoCtrl5(const DeviceProfile& profile) {
   return profile.fifo.enabled
              ? static_cast<uint8_t>((static_cast<uint8_t>(profile.fifo.odr)
@@ -453,25 +486,48 @@ Status validateProfile(const DeviceProfile& profile) {
   if (fifo.watermarkWords > 2047U ||
       static_cast<uint8_t>(fifo.gyroDecimation) > 7U ||
       static_cast<uint8_t>(fifo.accelDecimation) > 7U ||
+      static_cast<uint8_t>(fifo.fourthDecimation) > 7U ||
+      static_cast<uint8_t>(fifo.fourthDataset) > 2U ||
+      static_cast<uint8_t>(fifo.trigger) > 1U ||
+      static_cast<uint8_t>(fifo.timestampResolution) > 1U ||
       static_cast<uint8_t>(fifo.odr) > static_cast<uint8_t>(Odr::HZ_6660)) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid FIFO ODR, decimation or watermark");
   }
   if (!fifo.enabled) {
     if (fifo.mode != FifoMode::BYPASS || fifo.odr != Odr::POWER_DOWN ||
         fifo.gyroDecimation != FifoDecimation::OFF ||
-        fifo.accelDecimation != FifoDecimation::OFF || fifo.watermarkWords != 0U) {
+        fifo.accelDecimation != FifoDecimation::OFF || fifo.watermarkWords != 0U ||
+        fifo.fourthDataset != FifoFourthDataset::OFF ||
+        fifo.fourthDecimation != FifoDecimation::OFF ||
+        fifo.trigger != FifoTrigger::INTERNAL ||
+        fifo.timestampResolution != TimestampResolution::MS_6_4) {
       return Status::Error(Err::INVALID_CONFIG, "Disabled FIFO requires canonical bypass");
     }
     return Status::Ok();
   }
   const uint8_t gyroFactor = fifoDecimationFactor(fifo.gyroDecimation);
   const uint8_t accelFactor = fifoDecimationFactor(fifo.accelDecimation);
-  if (fifo.odr == Odr::POWER_DOWN || (gyroFactor == 0U && accelFactor == 0U) ||
+  const uint8_t fourthFactor = fifoDecimationFactor(fifo.fourthDecimation);
+  const bool fourthEnabled = fifo.fourthDataset != FifoFourthDataset::OFF;
+  if (fourthEnabled != (fourthFactor != 0U) ||
+      (!counterProfile(profile) &&
+       (fifo.trigger != FifoTrigger::INTERNAL ||
+        fifo.timestampResolution != TimestampResolution::MS_6_4)) ||
+      (counterProfile(profile) &&
+       static_cast<uint8_t>(profile.accelOdr) < static_cast<uint8_t>(Odr::HZ_26))) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid fourth source, trigger or counter dependency");
+  }
+  if ((fifo.trigger == FifoTrigger::INTERNAL && fifo.odr == Odr::POWER_DOWN) ||
+      (gyroFactor == 0U && accelFactor == 0U && !fourthEnabled) ||
       profile.accelOdr == Odr::HZ_1_6 || profile.gyroSleepEnabled ||
+      (profile.accelOdr == Odr::POWER_DOWN && profile.gyroOdr == Odr::POWER_DOWN) ||
       (gyroFactor != 0U && profile.gyroOdr == Odr::POWER_DOWN) ||
       (accelFactor != 0U && profile.accelOdr == Odr::POWER_DOWN)) {
-    return Status::Error(Err::INVALID_CONFIG, "FIFO requires active motion sources");
+    return Status::Error(Err::INVALID_CONFIG, "FIFO requires active sensor sources");
   }
+  // Step events replace the trigger for every dataset. Their captured motion
+  // values have no promised periodic cadence or per-event freshness.
+  if (fifo.trigger == FifoTrigger::STEP_EVENT) return Status::Ok();
   // AN5130 Figure 32: min(max(sensor ODR), ODR_FIFO). Compare nominal
   // cadence classes, whose successive encodings double, instead of treating
   // rounded labels such as 416/833 Hz as exact independent oscillators.
@@ -497,29 +553,36 @@ Status fifoPatternWord(const DeviceProfile& profile, uint16_t index,
   if (!profile.fifo.enabled) {
     return Status::Error(Err::INVALID_PARAM, "FIFO pattern requires enabled profile");
   }
-  const uint8_t gyroFactor = fifoDecimationFactor(profile.fifo.gyroDecimation);
-  const uint8_t accelFactor = fifoDecimationFactor(profile.fifo.accelDecimation);
-  uint16_t ticks = gyroFactor != 0U ? gyroFactor : accelFactor;
-  if (gyroFactor != 0U && accelFactor != 0U) {
-    uint8_t common = 1;
+  const uint8_t factors[3] = {
+      fifoDecimationFactor(profile.fifo.gyroDecimation),
+      fifoDecimationFactor(profile.fifo.accelDecimation),
+      fifoDecimationFactor(profile.fifo.fourthDecimation)};
+  uint16_t ticks = 1;
+  for (uint8_t factor : factors) {
+    if (factor == 0U) continue;
+    uint16_t common = 1;
     for (uint8_t divisor = 1; divisor <= 32U; ++divisor) {
-      if (gyroFactor % divisor == 0U && accelFactor % divisor == 0U)
-        common = divisor;
+      if (ticks % divisor == 0U && factor % divisor == 0U) common = divisor;
     }
-    ticks = static_cast<uint16_t>(gyroFactor * accelFactor / common);
+    ticks = static_cast<uint16_t>(ticks * factor / common);
   }
   FifoPatternWord candidate{};
   uint16_t words = 0;
   // At most 96 trigger positions, including the relatively-prime 3/32 case.
   // Each enabled dataset contributes a complete XYZ in gyro/accel order.
   for (uint16_t tick = 0; tick < ticks; ++tick) {
-    const uint8_t factors[2] = {gyroFactor, accelFactor};
-    const uint8_t quantities[2] = {SAMPLE_ANGULAR_RATE, SAMPLE_ACCELERATION};
-    for (uint8_t sensor = 0; sensor < 2U; ++sensor) {
+    const bool temperature = profile.fifo.fourthDataset == FifoFourthDataset::TEMPERATURE;
+    const uint8_t quantities[3] = {SAMPLE_ANGULAR_RATE, SAMPLE_ACCELERATION,
+        static_cast<uint8_t>(temperature ? SAMPLE_TEMPERATURE : 0U)};
+    const FifoRecordKind kinds[3] = {FifoRecordKind::ANGULAR_RATE,
+        FifoRecordKind::ACCELERATION,
+        temperature ? FifoRecordKind::TEMPERATURE : FifoRecordKind::TIMESTAMP_STEP};
+    for (uint8_t sensor = 0; sensor < 3U; ++sensor) {
       if (factors[sensor] == 0U || tick % factors[sensor] != 0U) continue;
       if (index >= words && index < words + 3U) {
         candidate.quantityMask = quantities[sensor];
         candidate.axis = static_cast<uint8_t>(index - words);
+        candidate.kind = kinds[sensor];
       }
       words = static_cast<uint16_t>(words + 3U);
     }
@@ -737,6 +800,7 @@ Status LSM6DS3TR::bind(const DriverConfig& config) {
   _configurationState = ConfigurationState::UNCONFIGURED;
   _configGeneration = 0;
   _validAfterUptimeMs = 0;
+  _breakCounterContinuity();
   _mismatchRegister = 0;
   _mismatchExpected = 0;
   _mismatchObserved = 0;
@@ -748,6 +812,7 @@ Status LSM6DS3TR::bind(const DriverConfig& config) {
 }
 
 void LSM6DS3TR::unbind() {
+  _breakCounterContinuity();
   _clearFifoOutput();
   _fifoReadRequest = {};
   _bound = false;
@@ -824,6 +889,8 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   _workingResult.state = OperationState::ACTIVE;
   _workingResult.status = inProgressStatus();
   _workingResult.startedUptimeMs = timing.nowMs;
+  _counterSetupStep = 0;
+  _timestampResetNeeded = false;
   return inProgressStatus();
 }
 
@@ -961,7 +1028,8 @@ Status LSM6DS3TR::startReconcile(const OperationTiming& timing,
   if (!_hasDesiredProfile) {
     return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to reconcile");
   }
-  if (fifoCollecting(_desiredProfile) && !_hasVerifiedProfile) {
+  if ((fifoCollecting(_desiredProfile) || counterProfile(_desiredProfile)) &&
+      !_hasVerifiedProfile) {
     return Status::Error(Err::FIFO_MAINTENANCE_REQUIRED,
                          "Readback cannot establish buffered FIFO provenance");
   }
@@ -1118,13 +1186,15 @@ void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
   const uint8_t values[MANAGED_REGISTER_COUNT] = {
       0, 0, 0,
       static_cast<uint8_t>(profile.fifo.watermarkWords & 0xFFU),
-      static_cast<uint8_t>((profile.fifo.watermarkWords >> 8U) & 0x07U),
+      buildFifoCtrl2(profile),
       static_cast<uint8_t>((static_cast<uint8_t>(profile.fifo.gyroDecimation) << 3U) |
                            static_cast<uint8_t>(profile.fifo.accelDecimation)),
-      0, buildFifoCtrl5(profile), 0, 0, 0,
+      static_cast<uint8_t>(static_cast<uint8_t>(profile.fifo.fourthDecimation) << 3U),
+      buildFifoCtrl5(profile), 0, 0, 0,
       buildCtrl1(profile), buildCtrl2(profile), buildCtrl3(profile),
       buildCtrl4(profile), 0, buildCtrl6(profile), buildCtrl7(profile),
-      buildCtrl8(profile), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      buildCtrl8(profile), 0, buildCounterControl(profile), 0, 0, 0, 0, 0,
+      buildTimerResolution(profile), 0, 0, 0,
       static_cast<uint8_t>(profile.accelUserOffset.x),
       static_cast<uint8_t>(profile.accelUserOffset.y),
       static_cast<uint8_t>(profile.accelUserOffset.z)};
@@ -1153,6 +1223,8 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
       _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
   if (status.ok()) {
     _transportSuccesses = saturatingIncrement(_transportSuccesses);
+    if (reg == cmd::REG_FUNC_CFG_ACCESS)
+      _bankMayBeUnknown = (data[0] & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U;
   } else {
     _transportFailures = saturatingIncrement(_transportFailures);
     _lastTransportError = status;
@@ -1170,6 +1242,9 @@ Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs) {
   const uint8_t payload[2] = {reg, value};
   // Every managed write can change hardware state; the flags must be raised
   // only after the transaction-limit guard above has let the write through.
+  if (!_hardwareStateMayHaveChanged && _job != JobKind::COUNTER_RESET)
+    _breakCounterContinuity();
+  if (reg == cmd::REG_FUNC_CFG_ACCESS) _bankMayBeUnknown = true;
   _hardwareStateMayHaveChanged = true;
   _configurationMayBeUnknown = true;
   _transactionUsed = true;
@@ -1202,6 +1277,156 @@ void LSM6DS3TR::_invalidateConfiguration() {
                                             : ConfigurationState::UNCONFIGURED;
   _hasVerifiedProfile = false;
   _validAfterUptimeMs = 0;
+  _fifoContinuityLost = true;
+  _breakCounterContinuity();
+}
+
+void LSM6DS3TR::_breakCounterContinuity() {
+  _counterEpoch = saturatingIncrement64(_counterEpoch);
+  _counterContinuityLost = true;
+}
+
+Status LSM6DS3TR::startCounterReset(const CounterResetRequest& request,
+                                   const OperationTiming& timing,
+                                   OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  if (!request.timestamp && !request.steps)
+    return Status::Error(Err::INVALID_PARAM, "Select at least one counter reset");
+  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (!ready.ok()) return ready;
+  if (!counterProfile(_verifiedProfile))
+    return Status::Error(Err::UNSUPPORTED_PROFILE, "Counter reset requires timestamp/step profile");
+  if (fifoCollecting(_verifiedProfile))
+    return Status::Error(Err::FIFO_MAINTENANCE_REQUIRED, "Counter reset requires FIFO Bypass");
+  const Status status = _start(JobKind::COUNTER_RESET, timing, token);
+  if (status.inProgress()) {
+    _counterResetRequest = request;
+    _operationTransactionLimit = MAX_COUNTER_RESET_TRANSACTIONS;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::_stepCounterReset(uint64_t nowMs) {
+  if (_step < 2U) {
+    uint8_t value = 0;
+    const uint8_t reg = _step == 0U ? cmd::REG_FUNC_CFG_ACCESS : cmd::REG_WHO_AM_I;
+    const Status status = _read(reg, &value, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((_step == 0U && value != 0U) ||
+        (_step == 1U && value != cmd::WHO_AM_I_VALUE)) {
+      _invalidateConfiguration();
+      return Status::Error(_step == 0U ? Err::CONFIGURATION_UNKNOWN : Err::CHIP_ID_MISMATCH,
+                           "Counter reset bank or identity mismatch", value);
+    }
+    if (_step == 1U)
+      _workingResult.probe = {static_cast<uint8_t>(_driverConfig.address), value};
+    ++_step;
+    return inProgressStatus();
+  }
+  if (_step == 2U) {
+    const Status status = _checkFifoBypass(nowMs);
+    if (!status.ok()) return status;
+    _step = 3;
+    return inProgressStatus();
+  }
+  if (_step == 3U) {
+    // The epoch changes once before the first possible reset effect.
+    _breakCounterContinuity();
+    _fifoContinuityLost = true;
+    _step = 4;
+    if (_counterResetRequest.timestamp) {
+      const uint32_t before = _operationTransactions;
+      const Status status = _writeByte(cmd::REG_TIMESTAMP2, cmd::TIMESTAMP_RESET_VALUE, nowMs);
+      _workingResult.counters.timestampResetMayHaveOccurred = _operationTransactions != before;
+      if (!status.ok()) return status;
+      _workingResult.counters.timestampResetConfirmed = true;
+      // The command changes counter state, not the stable profile image.
+      _configurationMayBeUnknown = false;
+      return inProgressStatus();
+    }
+  }
+  if (_step == 4U) {
+    _step = 5;
+    if (_counterResetRequest.steps) {
+      const uint32_t before = _operationTransactions;
+      const Status status = _writeByte(cmd::REG_CTRL10_C,
+          static_cast<uint8_t>(COUNTER_ENABLE | PEDOMETER_RESET), nowMs);
+      _workingResult.counters.stepResetMayHaveOccurred = _operationTransactions != before;
+      if (!status.ok()) return status;
+      return inProgressStatus();
+    }
+  }
+  if (_step == 5U && _counterResetRequest.steps) {
+    const Status status = _writeByte(cmd::REG_CTRL10_C, COUNTER_ENABLE, nowMs);
+    if (!status.ok()) return status;
+    _step = 6;
+    return inProgressStatus();
+  }
+  if (_step == 6U && _counterResetRequest.steps) {
+    uint8_t observed = 0;
+    const Status status = _read(cmd::REG_CTRL10_C, &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != COUNTER_ENABLE) {
+      _recordMismatch(cmd::REG_CTRL10_C, COUNTER_ENABLE, observed);
+      return Status::Error(Err::CONFIGURATION_MISMATCH, "Pedometer reset clear mismatch");
+    }
+    _workingResult.counters.stepResetConfirmed = true;
+    _configurationMayBeUnknown = false;
+  }
+  if (_counterResetRequest.timestamp && _counterResetRequest.steps)
+    _counterContinuityLost = false;
+  return _finish(Status::Ok(), OperationState::SUCCEEDED);
+}
+
+Status LSM6DS3TR::_stepCounterSetup(const DeviceProfile& target, uint64_t nowMs) {
+  // All sixteen phases perform at most one callback. A partial bank transition
+  // leaves explicit unknown evidence; cancel never performs cleanup I/O.
+  const uint8_t phase = _counterSetupStep;
+  uint8_t observed = 0;
+  Status status = Status::Ok();
+  if (phase == 0U) {
+    status = _read(cmd::REG_WAKE_UP_DUR, &observed, 1, nowMs);
+    if (status.ok()) _timestampResetNeeded =
+        (observed & cmd::MASK_TIMER_HR) != buildTimerResolution(target);
+  } else if (phase == 1U) {
+    status = _writeByte(cmd::REG_CTRL10_C, 0, nowMs);
+  } else if (phase == 2U || phase == 3U) {
+    status = _writeByte(phase == 2U ? cmd::REG_CTRL1_XL : cmd::REG_CTRL2_G, 0, nowMs);
+  } else if (phase == 4U || phase == 5U) {
+    const uint8_t reg = phase == 4U ? cmd::REG_CTRL1_XL : cmd::REG_CTRL2_G;
+    status = _read(reg, &observed, 1, nowMs);
+    if (status.ok() && observed != 0U) {
+      _recordMismatch(reg, 0, observed);
+      status = Status::Error(Err::CONFIGURATION_MISMATCH, "Bank policy requires sensor power-down", reg);
+    }
+  } else if (phase == 6U || phase == 14U) {
+    const uint32_t before = _operationTransactions;
+    status = _writeByte(cmd::REG_FUNC_CFG_ACCESS,
+                         phase == 6U ? cmd::MASK_FUNC_CFG_EN : 0U, nowMs);
+    if (_operationTransactions != before) _bankMayBeUnknown = true;
+  } else if (phase == 7U || phase == 15U) {
+    const uint8_t expected = phase == 7U ? cmd::MASK_FUNC_CFG_EN : 0U;
+    status = _read(cmd::REG_FUNC_CFG_ACCESS, &observed, 1, nowMs);
+    if (status.ok() && observed != expected) {
+      _recordMismatch(cmd::REG_FUNC_CFG_ACCESS, expected, observed);
+      status = Status::Error(Err::CONFIGURATION_MISMATCH, "Counter policy bank readback mismatch");
+    }
+    if (status.ok() && phase == 15U) _bankMayBeUnknown = false;
+  } else if (phase >= 8U && phase <= 10U) {
+    const uint8_t index = phase - 8U;
+    status = _writeByte(PEDOMETER_REGISTERS[index], PEDOMETER_VALUES[index], nowMs);
+  } else if (phase >= 11U && phase <= 13U) {
+    const uint8_t index = phase - 11U;
+    status = _read(PEDOMETER_REGISTERS[index], &observed, 1, nowMs);
+    if (status.ok() && observed != PEDOMETER_VALUES[index]) {
+      _recordMismatch(PEDOMETER_REGISTERS[index], PEDOMETER_VALUES[index], observed);
+      status = Status::Error(Err::CONFIGURATION_MISMATCH, "Fixed pedometer policy mismatch");
+    }
+  }
+  if (status.ok()) ++_counterSetupStep;
+  return status.ok() ? inProgressStatus() : status;
 }
 
 Status LSM6DS3TR::_stepProbe(uint64_t nowMs) {
@@ -1274,6 +1499,19 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     return inProgressStatus();
   }
 
+  if (!reconcileOnly && counterProfile(target) && _counterSetupStep < 16U)
+    return _stepCounterSetup(target, nowMs);
+  if (!reconcileOnly && !counterProfile(target) && _counterSetupStep == 0U) {
+    // Disabling a counter profile can also change TIMER_HR. Observe the actual
+    // bit, including after raw access, and apply the same required reset rule.
+    uint8_t observed = 0;
+    const Status status = _read(cmd::REG_WAKE_UP_DUR, &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    _timestampResetNeeded = (observed & cmd::MASK_TIMER_HR) != 0U;
+    _counterSetupStep = 16;
+    return inProgressStatus();
+  }
+
   if (reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
     uint8_t observed = 0;
     const uint8_t index = static_cast<uint8_t>(_step);
@@ -1296,7 +1534,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
 
   if (!reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
     const uint8_t index = static_cast<uint8_t>(_step);
-    const uint8_t value = _managedRegisters[index] == cmd::REG_FIFO_CTRL5
+    const uint8_t value = _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
+                         _managedRegisters[index] == cmd::REG_FIFO_CTRL5
                               ? static_cast<uint8_t>(_managedValues[index] &
                                                      ~cmd::MASK_FIFO_MODE)
                               : _managedValues[index];
@@ -1309,7 +1548,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
 
   if (!reconcileOnly && _step < CONFIGURE_SETTLE_ARM) {
     const uint8_t index = static_cast<uint8_t>(_step - MANAGED_REGISTER_COUNT);
-    const uint8_t expected = _managedRegisters[index] == cmd::REG_FIFO_CTRL5
+    const uint8_t expected = _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
+                            _managedRegisters[index] == cmd::REG_FIFO_CTRL5
                                  ? static_cast<uint8_t>(_managedValues[index] &
                                                         ~cmd::MASK_FIFO_MODE)
                                  : _managedValues[index];
@@ -1329,6 +1569,49 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       // changing poll budget can put earlier profile writes in this same poll.
       _pollBoundary = true;
     }
+    return inProgressStatus();
+  }
+
+  if (!reconcileOnly && !counterProfile(target) && !_timestampResetNeeded &&
+      _step == CONFIGURE_SETTLE_ARM)
+    _counterSetupStep = 19;
+
+  if (!reconcileOnly &&
+      _step == CONFIGURE_SETTLE_ARM && _counterSetupStep < 19U) {
+    if (_counterSetupStep == 16U) {
+      _counterSetupStep = 17;
+      if (_timestampResetNeeded) {
+        const uint32_t before = _operationTransactions;
+        const Status status = _writeByte(cmd::REG_TIMESTAMP2,
+                                         cmd::TIMESTAMP_RESET_VALUE, nowMs);
+        _workingResult.counters.timestampResetMayHaveOccurred =
+            _operationTransactions != before;
+        if (!status.ok()) return status;
+        _workingResult.counters.timestampResetConfirmed = true;
+        _timestampResetNeeded = false;
+        return inProgressStatus();
+      }
+    }
+    if (_counterSetupStep == 17U) {
+      if (!counterProfile(target)) {
+        _counterSetupStep = 19;
+        _pollBoundary = true;
+        return inProgressStatus();
+      }
+      const Status status = _writeByte(cmd::REG_CTRL10_C, COUNTER_ENABLE, nowMs);
+      if (!status.ok()) return status;
+      _counterSetupStep = 18;
+      return inProgressStatus();
+    }
+    uint8_t observed = 0;
+    const Status status = _read(cmd::REG_CTRL10_C, &observed, 1, nowMs);
+    if (!status.ok()) return status;
+    if (observed != COUNTER_ENABLE) {
+      _recordMismatch(cmd::REG_CTRL10_C, COUNTER_ENABLE, observed);
+      return Status::Error(Err::CONFIGURATION_MISMATCH, "Counter enable readback mismatch");
+    }
+    _counterSetupStep = 19;
+    _pollBoundary = true;
     return inProgressStatus();
   }
 
@@ -2257,7 +2540,7 @@ Status LSM6DS3TR::_stepFifoRead(uint64_t nowMs) {
       return Status::Error(Err::FIFO_OVERRUN, "FIFO overrun prevents a coherent batch");
     }
     if (_step == 4U && _verifiedProfile.fifo.mode == FifoMode::CONTINUOUS &&
-        result.after.unreadWords >= FIFO_MOTION_FULL_FLOOR_WORDS - _substep) {
+        result.after.unreadWords >= fifoOverwriteFloor(_verifiedProfile) - _substep) {
       // AN5130 p79 does not promise sticky OVER_RUN: consumption can remove
       // the full condition before this observation. Engineering inference:
       // any overwrite would fill the queue, and this sole consumer has removed
@@ -2353,6 +2636,25 @@ Status LSM6DS3TR::_stepFifoRead(uint64_t nowMs) {
         record.quantityMask = word.quantityMask;
         record.accelFullScale = _verifiedProfile.accelFullScale;
         record.gyroFullScale = _verifiedProfile.gyroFullScale;
+        record.kind = word.kind;
+        if (word.kind == FifoRecordKind::TEMPERATURE) {
+          // AN5130 Table 74: only bytes 2/3 are temperature. The other two
+          // words are unused, and a FIFO trigger proves no new conversion.
+          record.temperatureRaw = _fifoAxes.y;
+          record.raw = {};
+        } else if (word.kind == FifoRecordKind::TIMESTAMP_STEP) {
+          // AN5130 Table 73, deliberately not contiguous LE24:
+          // bytes: ts[15:8],ts[23:16],unused,ts[7:0],stepsL,stepsH.
+          const uint16_t first = static_cast<uint16_t>(_fifoAxes.x);
+          const uint16_t middle = static_cast<uint16_t>(_fifoAxes.y);
+          record.timestampTicks = (static_cast<uint32_t>(first >> 8U) << 16U) |
+              (static_cast<uint32_t>(first & 0xFFU) << 8U) | (middle >> 8U);
+          record.stepCount = static_cast<uint16_t>(_fifoAxes.z);
+          record.timestampResolution = _verifiedProfile.fifo.timestampResolution;
+          record.counterEpoch = _counterEpoch;
+          record.counterContinuityLost = _counterContinuityLost;
+          record.raw = {};
+        }
       }
     }
   }
@@ -2527,7 +2829,7 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
     if (!status.ok()) {
       _clearFifoOutput();
       result.records = 0;
-      if (result.wordsPossiblyConsumed != 0U) _fifoContinuityLost = true;
+      _fifoContinuityLost = true;
     } else {
       for (uint16_t i = 0; i < result.records; ++i)
         _fifoReadRequest.records[i].token = _token;
@@ -2537,8 +2839,22 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
       _fifoContinuityLost = true;
       result.truncated = true;
     }
+    const bool newLoss = !status.ok() || result.wordsDiscarded != 0U ||
+                         (_fifoContinuityLost && !result.continuityLost);
     result.continuityLost = _fifoContinuityLost;
+    if (newLoss) {
+      _breakCounterContinuity();
+      // Publication follows all post-status and terminal evidence. Every
+      // counter record in the batch reports the same final interval evidence.
+      for (uint16_t i = 0; i < result.records; ++i) {
+        if (_fifoReadRequest.records[i].kind == FifoRecordKind::TIMESTAMP_STEP) {
+          _fifoReadRequest.records[i].counterEpoch = _counterEpoch;
+          _fifoReadRequest.records[i].counterContinuityLost = true;
+        }
+      }
+    }
   }
+  if (_job == JobKind::FIFO_PURGE) _breakCounterContinuity();
   if (_configurationState == ConfigurationState::SETTLING &&
       _pollNowMs >= _validAfterUptimeMs) {
     _configurationState = ConfigurationState::KNOWN;
@@ -2552,6 +2868,9 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
   _workingResult.configuration.state = configurationState(_pollNowMs);
   _workingResult.configuration.generation = _configGeneration;
   _workingResult.configuration.validAfterUptimeMs = _validAfterUptimeMs;
+  _workingResult.counters.epoch = _counterEpoch;
+  _workingResult.counters.continuityLost = _counterContinuityLost;
+  _workingResult.registerBankMayBeUnknown = _bankMayBeUnknown;
   _terminalResult = _workingResult;
   _resultPending = true;
   _clearActive();
@@ -2608,6 +2927,7 @@ PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
     case JobKind::CALIBRATION: status = _stepCalibration(nowMs); break;
     case JobKind::FIFO_PURGE: status = _stepFifoPurge(nowMs); break;
     case JobKind::FIFO_READ: status = _stepFifoRead(nowMs); break;
+    case JobKind::COUNTER_RESET: status = _stepCounterReset(nowMs); break;
     case JobKind::NONE: break;
   }
   if (_active && !status.ok() && !status.inProgress()) _fail(status);
@@ -2705,7 +3025,12 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
   if (maxTransactions == 0U) {
     _transactionUsed = false;
     _waiting = false;
-    const bool configurationCompute = _step == CONFIGURE_SETTLE_ARM ||
+    const DeviceProfile& target = _job == JobKind::SELF_TEST
+                                      ? _selfTestRestoreProfile : _desiredProfile;
+    const bool counterWorkPending = _job != JobKind::RECONCILE &&
+        _counterSetupStep < 19U && (counterProfile(target) || _timestampResetNeeded);
+    const bool configurationCompute =
+        (_step == CONFIGURE_SETTLE_ARM && !counterWorkPending) ||
         _step == CONFIGURE_SETTLE_WAIT || _step == CONFIGURE_COMMIT;
     bool safeComputeStep = false;
     if ((_job == JobKind::CONFIGURE || _job == JobKind::RECONCILE) &&
@@ -2972,12 +3297,16 @@ Status LSM6DS3TR::diagnosticReadBlock(uint8_t startReg, uint8_t* data,
     return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
   if (data == nullptr || !_validDiagnosticRange(startReg, length))
     return Status::Error(Err::INVALID_PARAM, "Invalid diagnostic read range");
+  if (_bankMayBeUnknown && !(startReg == cmd::REG_FUNC_CFG_ACCESS && length == 1U))
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "Diagnostic access requires proven main bank");
   _operationTransactions = 0;
   _operationTransactionLimit = 1;
   _transactionUsed = false;
   if (startReg <= cmd::REG_FIFO_DATA_OUT_H &&
-      static_cast<size_t>(startReg) + length > cmd::REG_FIFO_DATA_OUT_L)
+      static_cast<size_t>(startReg) + length > cmd::REG_FIFO_DATA_OUT_L) {
     _fifoContinuityLost = true;
+    _breakCounterContinuity();
+  }
   return _read(startReg, data, length, nowMs);
 }
 
@@ -2989,6 +3318,8 @@ Status LSM6DS3TR::diagnosticWriteRegister(uint8_t reg, uint8_t value,
     return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
   if (!_safeDiagnosticWrite(reg, value))
     return Status::Error(Err::INVALID_PARAM, "Unsafe or read-only diagnostic write");
+  if (_bankMayBeUnknown && !(reg == cmd::REG_FUNC_CFG_ACCESS && value == 0U))
+    return Status::Error(Err::CONFIGURATION_UNKNOWN, "Diagnostic access requires proven main bank");
   _operationTransactions = 0;
   _operationTransactionLimit = 1;
   _transactionUsed = false;

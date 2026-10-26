@@ -299,3 +299,59 @@ part marking, orientation and complete CLI/raw/logic-analyzer evidence.
 
 Do not extend the snapshot-focused `run_hil.py` pass claim to these FIFO cases.
 The manual CLI/analyzer procedure above is a separate physical acceptance gate.
+
+## Fourth Dataset And Counter Qualification
+
+**Status: NOT RUN.** This software task starts from
+`bce83376aa01d0e9836f9175a9993e93128956e5`, after motion-FIFO implementation
+`0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06` and its closeout. Use only a
+separately authorized fixture. Retain exact final commit/build, S2/S3/backend,
+address, wiring, full profile and timestamped raw/CLI/analyzer logs. Historical
+snapshot or motion-only evidence does not qualify this extension.
+
+1. Configure timestamp/step in Bypass with accelerometer at least 26 Hz. Trace
+   both sensors reaching power-down before bank-A selection and parameter
+   writes (`0x0F=0x10`, `0x14=0x6E`, `0x15=0`), their readback, and proved
+   main-bank restoration. Verify resolution is established before TIMER_EN.
+   Deliberately interrupt an authorized bank access; preserve bank uncertainty
+   and verify fenced operations cannot treat a bank alias as WHO_AM_I.
+2. Observe same-resolution configure and ordinary reconcile/read operations.
+   Confirm neither silently resets timestamp nor steps. Explicitly run
+   `counterreset timestamp`, `counterreset steps` and `counterreset both` in
+   Bypass; verify timestamp `0xAA` command and software set/clear of step reset,
+   along with epoch and possible/confirmed effects. Change 6.4 ms/25 us policy,
+   then disable the 25 us counter profile; confirm actual-resolution prereads,
+   required timestamp reset and discontinuity in both cases. No interrupt routes
+   or generic clear-all commands are part of this task.
+3. Capture temperature-only and timestamp/step-only FIFO batches, then mixtures
+   with one or both motion datasets and every fourth decimator. Check dataset
+   order, six-byte layouts from AN5130 Tables 73/74, pattern positions and
+   boundaries across 32-byte bursts. Exercise factors 1/3/32 together; do not
+   identify payloads by values or assume FIFO_PATTERN is a type tag.
+4. Compare buffered temperature with independently observed conversion cadence:
+   gyro active (52 Hz), gyro off with accelerometer low-power 12.5/26 Hz, and
+   another admitted configuration. Batch faster than conversion and retain
+   repeated values without labeling them new/fresh conversions. No temperature
+   FIFO record inherits snapshot TDA freshness merely from its trigger.
+5. Produce controlled step sessions under the fixed pedometer policy and log
+   debounce behavior separately from software decoding. Compare internal versus
+   step-event triggering with/without motion datasets. Prove step events trigger
+   all enabled datasets and their decimators count events; do not infer regular
+   motion sample spacing or simultaneous motion/counter captures.
+6. Observe raw timestamp `0xFFFFFF -> 0` and step `0xFFFF -> 0` if practical,
+   recording whether a test is actual wrap or explicit reset. At 25 us the full
+   timestamp period is 419.4304 s; at 6.4 ms it is 107374.1824 s. Include gaps that
+   could hide multiple wraps and verify no expanded clock/total or uptime map
+   is invented. Power-down/disable pauses and counter retention are separate
+   physical checks; record continuity/epoch changes honestly.
+7. Exercise empty/full/overrun, partial fourth records, output exhaustion,
+   purge/stop, source changes, destructive raw-read attempts, bind/unbind,
+   failed consuming reads and cancellation with
+   multiple poll budgets. Confirm terminal consumed-word evidence survives,
+   no failed batch publishes scratch records, and counter uncertainty remains
+   visible. With all three datasets, test Continuous post-read occupancy just
+   below and at `2039 - N`; preserve sole-consumer evidence.
+8. Retain a sustained real application load campaign, including repeated source
+   changes and explicit maintenance/replay. Qualify only the cadence, counter,
+   event and continuity claims demonstrated by matching logs; electrical
+   interrupt routing remains a later prompt and is not qualified here.
