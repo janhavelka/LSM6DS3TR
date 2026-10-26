@@ -112,9 +112,10 @@ requirements. Prompt 01 supplies the motion-acquisition implementation in
 from its closeout `bce83376aa01d0e9836f9175a9993e93128956e5` and extends the
 same profile/schema/operation owners with temperature or timestamp/step
 records, shared step-event triggering, fixed pedometer policy and explicit
-counter-reset/epoch/loss evidence. Local native verification passed 170/170
-tests; its final build/package/CI gate and resolution SHA remain
-**PENDING** until closeout in the
+counter-reset/epoch/loss evidence. Implementation resolution is
+`f7c2d5d87a505d428a379b6628c447b62ec5a1b8`. All 170 native tests, three Arduino
+targets and local contract/documentation/package checks passed. The exact final
+closeout commit must also pass all CI jobs; its evidence is described in the
 [execution record](prompts/README.md#prompt-02-execution-record).
 Prompts 03/04 remain **NOT IMPLEMENTED**; routing and filter extensions are not
 silently included. New fourth-dataset physical evidence is **NOT RUN**.

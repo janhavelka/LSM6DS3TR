@@ -1,6 +1,6 @@
 # 02 - Fourth FIFO dataset and counter provenance
 
-**Status: IMPLEMENTED (software); final CI pending; hardware NOT RUN.** Original execution instructions follow for
+**Status: IMPLEMENTED (software); hardware NOT RUN.** Original execution instructions follow for
 `C:\Users\Honza\Documents\Projects\LSM6DS3TR`.
 Preparation baseline: `e262bf22f3d0cf035fbbca10f45b3e0752bf2bac`.
 Historical audit tip: `035eff530e72ea43e4b42b02df0ea2ff05e33383`.
@@ -9,8 +9,9 @@ Execution started on 2026-10-26 from fetched, synchronized baseline
 `bce83376aa01d0e9836f9175a9993e93128956e5`, after prerequisite implementation
 `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06` and its acceptance closeout.
 Actual workspace: `C:\Users\HonzovoSpectre\Documents\Projects\LSM6DS3TR`.
-Native verification passed 170/170 tests; software resolution SHA, final
-build/package checks and exact-commit CI remain pending in the
+Implementation resolution: `f7c2d5d87a505d428a379b6628c447b62ec5a1b8`.
+Native verification passed 170/170 tests; final local build/package results
+and the exact-final-commit CI requirement are recorded in the
 [execution record](README.md#prompt-02-execution-record). Physical
 fourth-dataset/counter qualification is **NOT RUN**.
 
