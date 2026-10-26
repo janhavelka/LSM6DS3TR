@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: prompt 01 software implementation in verification; prompts 02-04 NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompt 01 IMPLEMENTED (software); prompts 02-04 NOT IMPLEMENTED.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -38,8 +38,23 @@ existing branch, and let the lead own Git mutations when using subagents.
   `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc`, clean and synchronized.
 - Scope: typed internal-motion FIFO only. Fourth datasets/counters, routes and
   filter extensions remain separate prompts 02-04, not silently enabled here.
-- Resolution commit, final local verification and exact-commit CI: pending
-  closeout. Do not interpret this record as a completed verification claim.
+- Implementation resolution: `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06`.
+  [Implementation CI](https://github.com/janhavelka/LSM6DS3TR/actions/runs/40387449884)
+  passed all seven jobs, including native ESP-IDF 5.4.4 for S2 and S3.
+- Closeout adds named configuration phases and independent acceptance coverage
+  for every motion decimator wire image, all 105 maximum-pattern positions,
+  the Continuous occupancy boundary, and exact reset/boot/recovery ceilings.
+  Native verification: **142/142 tests passed**. The exact final source revision
+  is the commit containing this closeout; its own GitHub CI check is the final
+  verification record. The implementation run above verifies only its stated SHA.
+- Local validation passed: all three Arduino targets (`esp32s3dev`,
+  `esp32s3hil`, `esp32s2dev`), core timing/version/CLI/IDF/chip coverage checks,
+  three IDF checker tests, 18 HIL-runner tests, runner Python compilation,
+  strict Doxygen generation, package validation (37 files), and whitespace.
+  The clean documentation wrapper passed initially; a repeat encountered a
+  Windows read-only generated directory. Direct `doxygen Doxyfile` passed;
+  clean-wrapper execution also passed in CI. Native ESP-IDF was verified in CI,
+  not locally, because this shell has no exported IDF SDK.
 - Hardware: **NOT RUN**; repeatable qualification cases are in
   [HIL validation](../HIL_VALIDATION.md#motion-fifo-qualification).
 
@@ -47,7 +62,7 @@ existing branch, and let the lead own Git mutations when using subagents.
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |
 | --- | --- | --- | --- | --- |
-| [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: `FifoProfile` is only an enable flag; `validateProfile()` rejects it; `_prepareManagedImage()` zeroes FIFO registers; only destructive `_stepFifoPurge()` exists. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | Software implemented; final verification pending |
+| [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: original enable-only profile and purge-only mechanism replaced. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | IMPLEMENTED (software); hardware NOT RUN |
 | [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: no fourth-dataset selector/decoder or managed timestamp/pedometer dependencies. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | NOT IMPLEMENTED |
 | [03](03_interrupt_profiles_and_event_evidence.md) | R2: `InterruptProfile` is only an enable flag; managed routes are zero; no typed event-source result. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | NOT IMPLEMENTED |
 | [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |

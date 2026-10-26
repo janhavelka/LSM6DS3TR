@@ -712,6 +712,11 @@ private:
   friend struct TransactionCeilingTestAccess;
 
   static constexpr uint8_t MANAGED_REGISTER_COUNT = 33;
+  static constexpr uint16_t CONFIGURE_SETTLE_ARM = 2U * MANAGED_REGISTER_COUNT;
+  static constexpr uint16_t CONFIGURE_SETTLE_WAIT = CONFIGURE_SETTLE_ARM + 1U;
+  static constexpr uint16_t CONFIGURE_FIFO_ACTIVATE = CONFIGURE_SETTLE_WAIT + 1U;
+  static constexpr uint16_t CONFIGURE_FIFO_VERIFY = CONFIGURE_FIFO_ACTIVATE + 1U;
+  static constexpr uint16_t CONFIGURE_COMMIT = CONFIGURE_FIFO_VERIFY + 1U;
 
   Status _start(JobKind kind, const OperationTiming& timing, OperationToken& token);
   PollResult _pollOne(uint64_t nowMs);

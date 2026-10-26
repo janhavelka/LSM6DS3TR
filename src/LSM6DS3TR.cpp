@@ -1288,7 +1288,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     }
     ++_step;
     if (_step == MANAGED_REGISTER_COUNT) {
-      _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
+      _step = CONFIGURE_SETTLE_ARM;
       _pollBoundary = true;
     }
     return inProgressStatus();
@@ -1307,7 +1307,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     return inProgressStatus();
   }
 
-  if (!reconcileOnly && _step < 2U * MANAGED_REGISTER_COUNT) {
+  if (!reconcileOnly && _step < CONFIGURE_SETTLE_ARM) {
     const uint8_t index = static_cast<uint8_t>(_step - MANAGED_REGISTER_COUNT);
     const uint8_t expected = _managedRegisters[index] == cmd::REG_FIFO_CTRL5
                                  ? static_cast<uint8_t>(_managedValues[index] &
@@ -1324,7 +1324,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
                            _managedRegisters[index]);
     }
     ++_step;
-    if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT)) {
+    if (_step == CONFIGURE_SETTLE_ARM) {
       // Finalize from a fresh caller clock after the complete readback. A
       // changing poll budget can put earlier profile writes in this same poll.
       _pollBoundary = true;
@@ -1332,7 +1332,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     return inProgressStatus();
   }
 
-  if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT)) {
+  if (_step == CONFIGURE_SETTLE_ARM) {
     _mismatchRegister = 0;
     _mismatchExpected = 0;
     _mismatchObserved = 0;
@@ -1370,30 +1370,30 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
                                              : ConfigurationState::SETTLING;
     }
     _configurationMayBeUnknown = activateFifo;
-    _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 1U);
+    _step = CONFIGURE_SETTLE_WAIT;
     if (settleMs != 0U) {
       _waiting = true;
       return inProgressStatus();
     }
   }
 
-  if (_step == static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 1U) &&
+  if (_step == CONFIGURE_SETTLE_WAIT &&
       nowMs < _validAfterUptimeMs) {
     _waiting = true;
     return inProgressStatus();
   }
   if (activateFifo) {
-    if (_step == 2U * MANAGED_REGISTER_COUNT + 1U) {
-      _step = static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT + 2U);
+    if (_step == CONFIGURE_SETTLE_WAIT) {
+      _step = CONFIGURE_FIFO_ACTIVATE;
       return inProgressStatus();
     }
-    if (_step == 2U * MANAGED_REGISTER_COUNT + 2U) {
+    if (_step == CONFIGURE_FIFO_ACTIVATE) {
       const Status status = _writeByte(cmd::REG_FIFO_CTRL5, buildFifoCtrl5(target), nowMs);
       if (!status.ok()) return status;
-      ++_step;
+      _step = CONFIGURE_FIFO_VERIFY;
       return inProgressStatus();
     }
-    if (_step == 2U * MANAGED_REGISTER_COUNT + 3U) {
+    if (_step == CONFIGURE_FIFO_VERIFY) {
       uint8_t observed = 0;
       const Status status = _read(cmd::REG_FIFO_CTRL5, &observed, 1, nowMs);
       if (!status.ok()) return status;
@@ -1404,7 +1404,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
         return Status::Error(Err::CONFIGURATION_MISMATCH,
                              "FIFO activation readback mismatch", cmd::REG_FIFO_CTRL5);
       }
-      ++_step;
+      _step = CONFIGURE_COMMIT;
       return inProgressStatus();
     }
     _verifiedProfile = target;
@@ -2658,13 +2658,11 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     return PollResult{};
   }
   if (nowMs >= _deadlineMs) {
-    const uint16_t configurationDone =
-        static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
     const bool selfTestUntouched =
         _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
     const bool selfTestRestored =
         _job == JobKind::SELF_TEST && _substep == 100U &&
-        _step > configurationDone && _hasVerifiedProfile &&
+        _step >= CONFIGURE_SETTLE_WAIT && _hasVerifiedProfile &&
         !_configurationMayBeUnknown;
     if (_configurationMayBeUnknown) {
       _invalidateConfiguration();
@@ -2707,10 +2705,8 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
   if (maxTransactions == 0U) {
     _transactionUsed = false;
     _waiting = false;
-    const uint16_t configurationDone =
-        static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
-    const bool configurationCompute = _step == configurationDone ||
-        _step == configurationDone + 1U || _step == configurationDone + 4U;
+    const bool configurationCompute = _step == CONFIGURE_SETTLE_ARM ||
+        _step == CONFIGURE_SETTLE_WAIT || _step == CONFIGURE_COMMIT;
     bool safeComputeStep = false;
     if ((_job == JobKind::CONFIGURE || _job == JobKind::RECONCILE) &&
         configurationCompute) {
@@ -2809,13 +2805,11 @@ Status LSM6DS3TR::cancelActiveJob(uint64_t nowMs) {
   if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
   if (!_active) return Status::Error(Err::RESULT_NOT_AVAILABLE, "No active operation");
   _pollNowMs = nowMs;
-  const uint16_t configurationDone =
-      static_cast<uint16_t>(2U * MANAGED_REGISTER_COUNT);
   const bool selfTestUntouched =
       _job == JobKind::SELF_TEST && !_hardwareStateMayHaveChanged;
   const bool selfTestRestored =
       _job == JobKind::SELF_TEST && _substep == 100U &&
-      _step > configurationDone && _hasVerifiedProfile &&
+      _step >= CONFIGURE_SETTLE_WAIT && _hasVerifiedProfile &&
       !_configurationMayBeUnknown;
   if (_configurationMayBeUnknown) {
     _invalidateConfiguration();

@@ -105,8 +105,9 @@ The [implementation prompt sequence](prompts/README.md), prepared on 2026-10-25,
 turns this item into four ordered software tasks covering motion FIFO,
 fourth-dataset/counter interpretation, supported interrupt routes and filters.
 It records source mechanisms, selected scope, regression acceptance and CI
-requirements. Prompt 01 now supplies the motion-acquisition implementation;
-software closeout is pending the final commit's verification. Prompts 02-04
+requirements. Prompt 01 supplies the motion-acquisition implementation in
+`0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06`, with all seven CI jobs passed and
+142 native tests passed after closeout coverage additions. Prompts 02-04
 remain **NOT IMPLEMENTED**. This is a partial resolution of R2/H4/H7: fourth
 FIFO datasets, counters, routes and filter extensions remain out of scope.
 

@@ -906,6 +906,179 @@ void test_fifo_explicit_stop_all_fault_cancel_and_ceiling_stages_preserve_effect
   }
 }
 
+void test_fifo_every_motion_decimator_has_an_independent_literal_wire_image() {
+  // Datasheet Tables 33/34 and AN5130 Tables 54/55: these expected bytes are
+  // literal wire fixtures, independent of enum values and register builders.
+  const FifoDecimation factors[] = {FifoDecimation::EVERY_1,
+      FifoDecimation::EVERY_2, FifoDecimation::EVERY_3, FifoDecimation::EVERY_4,
+      FifoDecimation::EVERY_8, FifoDecimation::EVERY_16, FifoDecimation::EVERY_32};
+  const uint8_t gyroBytes[] = {0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38};
+  const uint8_t accelBytes[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+  for (bool gyro : {false, true}) {
+    for (uint8_t i = 0; i < 7U; ++i) {
+      FakeBus bus;
+      LSM6DS3TR::LSM6DS3TR driver;
+      TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+      DeviceProfile profile = motionProfile();
+      profile.fifo.gyroDecimation = gyro ? factors[i] : FifoDecimation::OFF;
+      profile.fifo.accelDecimation = gyro ? FifoDecimation::OFF : factors[i];
+      (void)fifoConfigure(driver, bus, profile);
+      const uint8_t expected[] = {0x00, 0x00, gyro ? gyroBytes[i] : accelBytes[i],
+                                  0x00, 0x26};
+      TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, bus.regs + 0x06, 5);
+      bool writeSeen = false;
+      bool readbackSeen = false;
+      for (size_t n = 0; n < bus.traceCount; ++n) {
+        const Transfer& transfer = bus.trace[n];
+        if (transfer.startReg != 0x08) continue;
+        if (transfer.kind == TransferKind::WRITE) {
+          TEST_ASSERT_EQUAL_HEX8(expected[2], transfer.firstValue);
+          writeSeen = true;
+        } else {
+          TEST_ASSERT_TRUE(writeSeen);
+          readbackSeen = true;
+        }
+      }
+      TEST_ASSERT_TRUE(writeSeen);
+      TEST_ASSERT_TRUE(readbackSeen);
+    }
+  }
+}
+
+void test_fifo_acquisition_decodes_every_start_in_the_maximum_pattern() {
+  // 96 trigger ticks: G at 0,3,...,93; A at 0,32,64. Dataset order at a
+  // shared tick is G then A. This explicit 35-vector schedule is independent
+  // of fifoPatternWord(), including the asymmetric gap around factor 3.
+  static constexpr char VECTORS[] = "GAGGGGGGGGGGAGGGGGGGGGGGAGGGGGGGGGG";
+  static_assert(sizeof(VECTORS) == 36U, "Maximum schedule has 35 XYZ vectors");
+  for (uint16_t pattern = 0; pattern < 105U; ++pattern) {
+    FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    DeviceProfile profile = motionProfile();
+    profile.fifo.gyroDecimation = FifoDecimation::EVERY_3;
+    profile.fifo.accelDecimation = FifoDecimation::EVERY_32;
+    (void)fifoConfigure(driver, bus, profile);
+    // Both selected sensors occur in the first six words; consume only their
+    // required transition vectors before the independently seeded backlog.
+    bus.setFifo(6, 0, 10);
+    bus.fifoPatternWords = 105;
+    FifoMotionRecord records[35];
+    const OperationResult transition = fifoRead(driver, bus, records, 35, 6);
+    TEST_ASSERT_TRUE(transition.status.ok());
+    TEST_ASSERT_EQUAL_UINT16(0, transition.fifoRead.records);
+    TEST_ASSERT_EQUAL_UINT16(6, transition.fifoRead.wordsDiscarded);
+    bus.clearTrace();
+    bus.setFifo(105, pattern, 1000);
+    const OperationResult result = fifoRead(driver, bus, records, 35, 105);
+    TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
+    const uint16_t leading = static_cast<uint16_t>((3U - pattern % 3U) % 3U);
+    const uint16_t complete = static_cast<uint16_t>((105U - leading) / 3U);
+    TEST_ASSERT_EQUAL_UINT16(complete, result.fifoRead.records);
+    TEST_ASSERT_EQUAL_UINT16(105, result.fifoRead.wordsConsumed);
+    TEST_ASSERT_EQUAL_UINT16(105, result.fifoRead.wordsPossiblyConsumed);
+    TEST_ASSERT_EQUAL_UINT16(105U - 3U * complete, result.fifoRead.wordsDiscarded);
+    TEST_ASSERT_EQUAL_UINT16(pattern, result.fifoRead.before.pattern);
+    TEST_ASSERT_EQUAL_UINT16(pattern, result.fifoRead.after.pattern);
+    TEST_ASSERT_FALSE(result.fifoRead.patternDiscontinuity);
+    TEST_ASSERT_FALSE(result.fifoRead.overrunObserved);
+    for (uint16_t i = 0; i < complete; ++i) {
+      const uint16_t vector = static_cast<uint16_t>(
+          ((pattern + leading + 3U * i) % 105U) / 3U);
+      TEST_ASSERT_EQUAL_UINT8(VECTORS[vector] == 'G' ? SAMPLE_ANGULAR_RATE :
+                                                    SAMPLE_ACCELERATION,
+                            records[i].quantityMask);
+      TEST_ASSERT_EQUAL_INT16(1000U + leading + 3U * i, records[i].raw.x);
+      TEST_ASSERT_EQUAL_INT16(1001U + leading + 3U * i, records[i].raw.y);
+      TEST_ASSERT_EQUAL_INT16(1002U + leading + 3U * i, records[i].raw.z);
+      TEST_ASSERT_EQUAL_UINT64(result.token.value, records[i].token.value);
+    }
+  }
+}
+
+void test_fifo_continuous_post_burst_headroom_boundary_is_exact() {
+  for (uint16_t initial : {2041, 2042}) {
+    FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    warmFifo(driver, bus);
+    bus.setFifo(initial, 0, 101);
+    bus.fifoPatternWords = 6;
+    FifoMotionRecord records[6];
+    const OperationResult result = fifoRead(driver, bus, records, 6, 16);
+    TEST_ASSERT_EQUAL_UINT16(16, result.fifoRead.wordsConsumed);
+    TEST_ASSERT_EQUAL_UINT16(initial - 16U, result.fifoRead.after.unreadWords);
+    TEST_ASSERT_FALSE(result.fifoRead.overrunObserved);
+    TEST_ASSERT_FALSE(result.fifoRead.patternDiscontinuity);
+    if (initial == 2041U) {
+      // 2025 retained words proves the 16-word burst did not cross the
+      // conservative full floor. Exactly 2026 cannot provide that proof.
+      TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
+      TEST_ASSERT_EQUAL_UINT16(5, result.fifoRead.records);
+      TEST_ASSERT_EQUAL_UINT16(1, result.fifoRead.wordsDiscarded);
+    } else {
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OPERATION_INDETERMINATE),
+                              static_cast<uint8_t>(result.status.code));
+      TEST_ASSERT_EQUAL_UINT16(0, result.fifoRead.records);
+      TEST_ASSERT_TRUE(result.fifoRead.continuityLost);
+      assertOutputCleared(records, 6);
+    }
+  }
+}
+
+void test_fifo_reset_boot_recover_restore_active_profile_at_exact_ceiling() {
+  for (uint8_t operation = 0; operation < 3U; ++operation) {
+    FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    DeviceProfile profile = motionProfile();
+    profile.accelFullScale = AccelFs::G_4;
+    profile.gyroFullScale = GyroFs::DPS_1000;
+    warmFifo(driver, bus, profile);
+    bus.setFifo(6, 0, 100);
+    bus.fifoPatternWords = 6;
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startFifoPurge({6, true}, fifoTiming(bus), token).inProgress());
+    fifoRun(driver, bus);
+    const OperationResult stopped = fifoTake(driver, token);
+    TEST_ASSERT_TRUE(stopped.status.ok());
+    TEST_ASSERT_TRUE(stopped.fifoPurge.collectionStopped);
+    const uint32_t generation = driver.configGeneration();
+    bus.clearTrace();
+    if (operation == 1U) bus.bootBitReadsRemaining = 15;
+    else bus.resetBitReadsRemaining = 15;
+    bus.resetRegistersOnSoftwareReset = true;
+    const Status start = operation == 0U ? driver.startReset(fifoTiming(bus), token) :
+                         operation == 1U ? driver.startBoot(fifoTiming(bus), token) :
+                                           driver.startRecover(fifoTiming(bus), token);
+    TEST_ASSERT_TRUE(start.inProgress());
+    fifoRun(driver, bus);
+    const OperationResult result = fifoTake(driver, token);
+    TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
+    const uint32_t ceiling = operation == 2U ? MAX_RECOVER_TRANSACTIONS :
+                                               MAX_RESET_TRANSACTIONS;
+    TEST_ASSERT_EQUAL_UINT32(ceiling, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(ceiling, result.transactionLimit);
+    TEST_ASSERT_EQUAL_UINT32(ceiling, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT32(generation + 1U, driver.configGeneration());
+    TEST_ASSERT_EQUAL_HEX8(0x26, bus.regs[0x0A]);
+    TEST_ASSERT_EQUAL_HEX8(0x48, bus.regs[0x10]);
+    TEST_ASSERT_EQUAL_HEX8(0x48, bus.regs[0x11]);
+    TEST_ASSERT_EQUAL_UINT16(0, bus.fifoUnreadWords);
+    bus.setFifo(12, 0, 800);
+    bus.fifoPatternWords = 6;
+    FifoMotionRecord records[4];
+    const OperationResult read = fifoRead(driver, bus, records, 4, 12);
+    TEST_ASSERT_TRUE(read.status.ok());
+    TEST_ASSERT_EQUAL_UINT16(6, read.fifoRead.wordsDiscarded);
+    TEST_ASSERT_EQUAL_UINT16(2, read.fifoRead.records);
+    TEST_ASSERT_EQUAL_INT16(806, records[0].raw.x);
+    TEST_ASSERT_EQUAL_UINT32(result.configuration.generation, records[0].configGeneration);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AccelFs::G_4),
+                            static_cast<uint8_t>(records[1].accelFullScale));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(GyroFs::DPS_1000),
+                            static_cast<uint8_t>(records[0].gyroFullScale));
+  }
+}
+
 } // namespace
 
 void runFifoTests() {
@@ -931,4 +1104,8 @@ void runFifoTests() {
   RUN_TEST(test_fifo_identity_and_post_read_empty_contradiction_invalidate_batch);
   RUN_TEST(test_fifo_transient_overwrite_with_whole_pattern_skip_never_publishes);
   RUN_TEST(test_fifo_explicit_stop_all_fault_cancel_and_ceiling_stages_preserve_effects);
+  RUN_TEST(test_fifo_every_motion_decimator_has_an_independent_literal_wire_image);
+  RUN_TEST(test_fifo_acquisition_decodes_every_start_in_the_maximum_pattern);
+  RUN_TEST(test_fifo_continuous_post_burst_headroom_boundary_is_exact);
+  RUN_TEST(test_fifo_reset_boot_recover_restore_active_profile_at_exact_ceiling);
 }
