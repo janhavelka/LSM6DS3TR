@@ -15,11 +15,13 @@
 | Built-in accelerometer and gyro self-test | supported | AN5130 procedure in `startSelfTest`, bounded status checks, explicit restoration evidence |
 | Bias estimation/calibration | supported library policy | bounded `startCalibration`; results are explicit and not auto-applied |
 | User offset registers | supported | typed profile, range/weight validation, write/readback |
-| FIFO status evidence within a bounded destructive purge | supported maintenance operation | `startFifoPurge`; no passive typed inspection or decoding/acquisition claim |
+| FIFO status evidence within a bounded destructive purge | supported maintenance operation | `startFifoPurge`; optional explicit stop reports possible residual loss |
 | Raw main-bank register/block reads | diagnostic-only | one transaction, no production cache population |
 | Safety-filtered raw register write | diagnostic-only | one transaction, invalidates configuration provenance |
 | SPI host transport | unsupported | core binding is I2C-only; no SPI callback contract exists |
-| FIFO configuration, acquisition, pattern decoding | unsupported | needs a complete replayable profile and typed decoder |
+| Internal-motion FIFO configuration, acquisition, pattern decoding | supported in software; hardware NOT RUN | typed `FifoProfile`, `fifoPatternWord`, bounded `startFifoRead`, caller storage, immutable scale/generation provenance, conservative Continuous occupancy guard (no sticky-overrun assumption) |
+| FIFO fourth datasets and external sensor datasets | unsupported | no typed temperature/step/timestamp/sensor-hub schema |
+| FIFO triggered modes, high-byte packing, stop-on-threshold | unsupported | production profile fixes normal internal trigger and 16-bit motion only |
 | INT1/INT2 electrical/routing/threshold/event profiles | unsupported | needs electrical, latch, threshold, duration, and route ownership |
 | Pedometer, significant motion, relative/absolute tilt | unsupported | chip facts retained; no typed production profile |
 | Tap, wake-up, free-fall, activity/inactivity, 4D/6D | unsupported | chip facts retained; no typed production profile |
@@ -38,7 +40,8 @@ and the change supplies all of the following:
 4. Configuration-provenance rules for partial writes, reset, cancellation, and
    restoration.
 5. Native tests for every transfer failure stage and source-backed timing.
-6. HIL coverage for the real electrical route and device behavior.
+6. A repeatable HIL qualification plan; real matching evidence is required before
+   claiming physical qualification. Software support alone is labelled explicitly.
 7. Updates to this matrix, public Doxygen, README, and changelog.
 
 Raw diagnostic access or an example recipe is not evidence that these

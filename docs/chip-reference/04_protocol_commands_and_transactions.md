@@ -48,6 +48,16 @@ high. Source: datasheet, pp. 41-44.
 - Temperature output is `OUT_TEMP_L/H` at `0x20..0x21`, 16-bit two's-complement, with typ. 0 LSB at 25 degC and 256 LSB/degC. Source: datasheet, pp. 25, 73.
 - With default `CTRL3_C.BLE=0`, output LSB bytes are at the lower addresses (`0x20`, `0x22`, `0x24`, `0x26`, `0x28`, `0x2A`, `0x2C`) and MSB bytes are at the next address. Setting `BLE=1` swaps byte order for output data. Source: datasheet, pp. 63, 73-76.
 
+## FIFO Output Rounding
+
+AN5130 Rev 1 section 4.7.1, p. 27 and section 8.4, p. 88 specify automatic
+rounding of multiple FIFO output reads: the address cycles between
+`FIFO_DATA_OUT_L` (`0x3E`) and `FIFO_DATA_OUT_H` (`0x3F`). It does not proceed
+into `TIMESTAMP0_REG`. Typed acquisition uses even bursts no larger than the
+32-byte transport bound, after consistent nonempty status and pattern evidence.
+This automatic FIFO rule is separate from the optional sensor-output rounding
+bits in `CTRL5_C`.
+
 ## Reserved And Access Notes
 
 - The datasheet's register map marks many holes between `0x00` and `0x7F`; only documented user-interface addresses in Table 19 have defined behavior. Source: datasheet, pp. 49-52.

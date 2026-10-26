@@ -70,7 +70,8 @@ enum class JobKind : uint8_t {
   POWER_DOWN,   ///< Verified accelerometer and gyroscope power-down.
   SELF_TEST,    ///< Built-in sensor self-test and profile restoration.
   CALIBRATION,  ///< Bounded bias candidate measurement.
-  FIFO_PURGE    ///< Bounded destructive FIFO data removal.
+  FIFO_PURGE,   ///< Bounded destructive FIFO data removal.
+  FIFO_READ     ///< Bounded typed motion FIFO acquisition into caller storage.
 };
 
 /// @brief Lifecycle state reported for an operation.
@@ -231,6 +232,7 @@ struct CalibrationResult {
 /// @brief Bound for one explicitly destructive FIFO purge.
 struct FifoPurgeRequest {
   uint16_t maxWords = 1;  ///< Maximum destructive FIFO word reads, 1..2048.
+  bool stopCollection = false;  ///< Explicitly flush residual/racing arrivals in Bypass after draining.
 };
 
 /// @brief FIFO loss and progress evidence from a purge operation.
@@ -241,6 +243,61 @@ struct FifoPurgeResult {
   uint16_t finalUnreadWords = 0;  ///< Unread words reported by the final status read.
   bool overrunObserved = false;  ///< True when either status snapshot reported overrun.
   bool truncated = false;  ///< True when unread data remained or exceeded the request.
+  uint16_t wordsPossiblyDiscarded = 0;  ///< Upper bound of attempted consuming reads, including failed reads.
+  bool collectionStopped = false;  ///< Bypass was written and read back successfully.
+  bool residualLossPossible = false;  ///< Bypass may discard residual words or arrivals after the last observation.
+};
+
+/// @brief One complete FIFO XYZ vector with immutable interpretation provenance.
+/// @note No sample timestamp or freshness is inferred. The read time describes
+/// host capture only. The token is published only for a successful batch.
+struct FifoMotionRecord {
+  OperationToken token = {};  ///< Successful acquisition identity; zero while scratch.
+  uint64_t readUptimeMs = 0;  ///< Caller clock at the read completing this vector.
+  uint32_t configGeneration = 0;  ///< Verified generation at acquisition admission.
+  RawAxes raw = {};  ///< Complete signed sensor-native XYZ vector.
+  uint8_t quantityMask = 0;  ///< Exactly SAMPLE_ACCELERATION or SAMPLE_ANGULAR_RATE.
+  AccelFs accelFullScale = AccelFs::G_2;  ///< Immutable accelerometer scale.
+  GyroFs gyroFullScale = GyroFs::DPS_250;  ///< Immutable gyroscope scale.
+};
+
+/// @brief Bounded caller storage and consumption limit for one FIFO acquisition.
+/// @note Storage must remain alive and exclusively owned by the operation until
+/// takeResult(), or unbind(). Accepted admission clears all capacity entries;
+/// rejected admission leaves storage unchanged. Storage is scratch until a
+/// successful matching terminal result is taken. Only its records count is valid.
+/// Failure, cancellation and unbind clear the accepted buffer. No partial vector
+/// is published; leading/trailing fragments and transition vectors are discarded.
+struct FifoReadRequest {
+  FifoMotionRecord* records = nullptr;  ///< Required buffer of capacity entries.
+  uint16_t capacity = 0;  ///< Buffer entries, 1..682; short buffers stop consumption.
+  uint16_t maxWords = 1;  ///< Maximum consumed words, 1..2048, including discards.
+};
+
+/// @brief One bounded status/pattern observation; not an atomic sample timestamp.
+struct FifoStatusSnapshot {
+  uint64_t readUptimeMs = 0;  ///< Caller time associated with the status callback.
+  uint16_t unreadWords = 0;  ///< Decoded count; overrun/count-zero is 2048.
+  uint16_t pattern = 0;  ///< Next word index within the verified pattern.
+  bool valid = false;  ///< Status callback succeeded; consistency checked separately.
+  bool empty = false;  ///< FIFO_EMPTY; asserted EMPTY always prevents data reads.
+  bool full = false;  ///< FIFO_FULL_SMART predicts the next complete data set filling FIFO.
+  bool overrun = false;  ///< OVER_RUN observation.
+  bool watermark = false;  ///< WaterM observation, not an acquisition trigger.
+};
+
+/// @brief FIFO batch, consumption and continuity evidence, retained even on failure.
+struct FifoReadResult {
+  FifoStatusSnapshot before = {};  ///< Initial status before any consumption.
+  FifoStatusSnapshot after = {};  ///< Latest successful status after a burst or initial status.
+  uint16_t records = 0;  ///< Published complete vectors; zero on any failed/cancelled job.
+  uint16_t wordsConsumed = 0;  ///< Words confirmed returned by successful callbacks.
+  uint16_t wordsPossiblyConsumed = 0;  ///< Upper bound including a failed consuming callback.
+  uint16_t wordsDiscarded = 0;  ///< Confirmed words not in the successful published vectors.
+  bool truncated = false;  ///< Word/capacity limit, partial vector, or unread words remained.
+  bool overrunObserved = false;  ///< Any observed overrun; a batch then fails.
+  bool patternDiscontinuity = false;  ///< Observed index differed from predicted progress.
+  bool continuityLost = false;  ///< Loss/uncertainty since activation; never a timestamp/freshness claim.
 };
 
 /// @brief One terminal result. The caller must take it exactly once.
@@ -260,6 +317,7 @@ struct OperationResult {
   SelfTestResult selfTest = {};  ///< Measurements and restoration evidence for SELF_TEST.
   CalibrationResult calibration = {};  ///< Candidate bias for CALIBRATION jobs.
   FifoPurgeResult fifoPurge = {};  ///< Destructive progress for FIFO_PURGE jobs.
+  FifoReadResult fifoRead = {};  ///< Typed batch and destructive-read evidence for FIFO_READ.
 };
 
 /// @brief Result of one poll call.
@@ -293,12 +351,12 @@ struct DriverDiagnostics {
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 68;  ///< Configure ceiling.
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 71;  ///< Includes FIFO guard/activation.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 89;  ///< Reset/boot ceiling.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 88;  ///< Recovery ceiling.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 92;  ///< Reset/boot with FIFO activation.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 91;  ///< Recovery with FIFO activation.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
-static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 8;  ///< Worst power-down ceiling.
+static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 9;  ///< Includes FIFO bypass guard.
 ///@}
 
 /// @name Fixed transport buffer ceilings
@@ -321,6 +379,24 @@ Status validateDriverConfig(const DriverConfig& config);
 /// @param profile Candidate replayable profile.
 /// @return OK when every value and cross-field combination is supported.
 Status validateProfile(const DeviceProfile& profile);
+
+/// @brief One position in the untagged internal-motion FIFO pattern.
+struct FifoPatternWord {
+  uint16_t patternWords = 0;  ///< Complete repeating pattern length, at most 105.
+  uint8_t quantityMask = 0;  ///< SAMPLE_ACCELERATION or SAMPLE_ANGULAR_RATE.
+  uint8_t axis = 0;  ///< 0=X, 1=Y, 2=Z; never a sample timestamp.
+};
+
+static constexpr uint16_t MAX_FIFO_PATTERN_WORDS = 105;  ///< Factors 3/32: 35 XYZ records.
+static constexpr uint16_t MAX_FIFO_PATTERN_TICKS = 96;  ///< LCM of admitted factors.
+
+/// @brief Resolve a word position using one bounded, allocation-free pattern walk.
+/// @param profile Valid enabled motion FIFO profile, including prepared BYPASS.
+/// @param index Word index in the repeating pattern; out-of-range is rejected.
+/// @param out Receives sensor, axis and length only on success.
+/// @return OK or a validation error; performs zero I2C and preserves out on error.
+Status fifoPatternWord(const DeviceProfile& profile, uint16_t index,
+                       FifoPatternWord& out);
 
 /// @brief Return the nominal period of an output data rate.
 /// @param odr Output data rate.
@@ -347,7 +423,14 @@ uint32_t maximumCalibrationTransactions(uint16_t samples);
 /// @brief Calculate the hard callback ceiling for destructive FIFO purge.
 /// @param maxWords Maximum FIFO words to consume.
 /// @return Exact ceiling for 1..2048 words, otherwise zero.
-uint32_t maximumFifoPurgeTransactions(uint16_t maxWords);
+/// @param stopCollection Include the final Bypass write and verification.
+uint32_t maximumFifoPurgeTransactions(uint16_t maxWords, bool stopCollection = false);
+
+/// @brief Conservative FIFO read ceiling: identity checks, initial status, then
+/// at most one data/status pair per word. Each actual burst receives 1..16 words.
+/// @param maxWords Maximum destructive words, 1..2048.
+/// @return Hard callback ceiling 2*maxWords+3, or zero for invalid input.
+uint32_t maximumFifoReadTransactions(uint16_t maxWords);
 
 /// @brief Return accelerometer sensitivity for a full-scale range.
 /// @param fullScale Range encoding.
@@ -448,6 +531,10 @@ public:
   Status startProbe(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Start complete profile application and register readback.
+  /// @note Hardware FIFO must already be in BYPASS. A collecting FIFO fails
+  /// before interpretation writes with FIFO_MAINTENANCE_REQUIRED, even if empty;
+  /// use explicit bounded stopCollection maintenance first. An enabled target
+  /// is activated and verified only after the disabled image has settled.
   /// @param profile Valid replayable production profile retained as desired state.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
@@ -464,18 +551,21 @@ public:
                      OperationToken& token);
 
   /// @brief Start software reset followed by desired-profile replay/readback.
+  /// @note Requires observed FIFO BYPASS before changing sensor configuration.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
   Status startReset(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Start device boot/reload followed by desired-profile replay/readback.
+  /// @note Requires observed FIFO BYPASS before changing sensor configuration.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
   Status startBoot(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Re-probe, reset, and replay the desired profile on caller request.
+  /// @note Stop collection explicitly first; recovery never silently flushes FIFO.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
@@ -483,12 +573,15 @@ public:
   Status startRecover(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Read back the entire desired managed image without writing it.
+  /// @note Readback cannot restore lost provenance for an active FIFO profile;
+  /// that case requires stopCollection maintenance and configure/recover.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
   Status startReconcile(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Set and verify both sensor ODRs to power-down.
+  /// @note Requires observed FIFO BYPASS before either sensor write.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
@@ -496,6 +589,8 @@ public:
   Status startPowerDown(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Start bounded built-in self-test and full-profile restoration/readback.
+  /// @note Requires a verified BYPASS profile; active FIFO returns
+  /// FIFO_MAINTENANCE_REQUIRED without issuing a token or performing I2C.
   /// @note Keep the device stationary for the complete operation.
   /// @note SelfTestResult reports the primary and restoration outcomes separately.
   /// @param request Average count for each test phase.
@@ -520,6 +615,19 @@ public:
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
   Status startFifoPurge(const FifoPurgeRequest& request, const OperationTiming& timing,
                         OperationToken& token);
+
+  /// @brief Read complete motion vectors from the settled verified FIFO profile.
+  /// @param request Caller-owned scratch storage and finite consumption bound.
+  /// @param timing Admission and immutable absolute deadline in the owner clock.
+  /// @param token Receives a nonzero identity only on acceptance.
+  /// @return IN_PROGRESS or a zero-I2C admission error.
+  /// @note Only the initial observed backlog is eligible; concurrent arrivals
+  /// remain queued. Every burst is followed by status/pattern validation. Overrun,
+  /// discontinuity or any callback failure publishes zero records. There is no
+  /// retry and possible hardware consumption cannot be rolled back. A new
+  /// activation discards the first complete vector of each selected sensor.
+  Status startFifoRead(const FifoReadRequest& request, const OperationTiming& timing,
+                       OperationToken& token);
 
   /// @brief Advance one operation without exceeding a callback budget.
   /// @param nowMs Current time in the operation's caller-owned monotonic domain.
@@ -615,6 +723,8 @@ private:
   Status _stepSelfTest(uint64_t nowMs);
   Status _stepCalibration(uint64_t nowMs);
   Status _stepFifoPurge(uint64_t nowMs);
+  Status _stepFifoRead(uint64_t nowMs);
+  void _clearFifoOutput();
   Status _finish(const Status& status, OperationState state);
   Status _fail(const Status& status);
   void _clearActive();
@@ -625,6 +735,7 @@ private:
   Status _writeByte(uint8_t reg, uint8_t value, uint64_t nowMs);
   Status _checkStart(const OperationTiming& timing) const;
   Status _checkReadyForKnownConfiguration(uint64_t nowMs) const;
+  Status _checkFifoBypass(uint64_t nowMs);
   static bool _validDiagnosticRange(uint8_t startReg, size_t length);
   static bool _safeDiagnosticWrite(uint8_t reg, uint8_t value);
 
@@ -664,6 +775,8 @@ private:
   ConfigurationState _configurationState = ConfigurationState::UNCONFIGURED;
   uint32_t _configGeneration = 0;
   uint64_t _validAfterUptimeMs = 0;
+  uint8_t _fifoDiscardMask = 0;
+  bool _fifoContinuityLost = false;
   uint8_t _managedRegisters[MANAGED_REGISTER_COUNT] = {};
   uint8_t _managedValues[MANAGED_REGISTER_COUNT] = {};
   uint8_t _mismatchRegister = 0;
@@ -677,6 +790,11 @@ private:
   SelfTestRequest _selfTestRequest = {};
   CalibrationRequest _calibrationRequest = {};
   FifoPurgeRequest _fifoPurgeRequest = {};
+  FifoReadRequest _fifoReadRequest = {};
+  RawAxes _fifoAxes = {};
+  uint16_t _fifoReadTarget = 0;
+  uint16_t _fifoPatternWords = 0;
+  uint8_t _fifoAxesCount = 0;
   Status _primaryStatus = Status::Ok();
   RawAxes _phaseBaseline = {};
   RawAxes _phaseStimulus = {};

@@ -54,6 +54,9 @@ Status busInitializationStatus =
     Status::Error(Err::INVALID_CONFIG, "I2C initialization not attempted");
 LSM6DS3TR::LSM6DS3TR device;
 DeviceProfile stagedProfile{};
+static constexpr uint16_t FIFO_RECORD_CAPACITY = 32;
+FifoMotionRecord fifoRecords[FIFO_RECORD_CAPACITY]{};
+OperationToken fifoBufferToken{};
 SensorAddress selectedAddress = SensorAddress::SA0_GND;
 uint32_t selectedFrequencyHz = DEFAULT_I2C_FREQUENCY_HZ;
 OperationToken pendingToken{};
@@ -269,6 +272,7 @@ const char* jobName(JobKind kind) {
     case JobKind::SELF_TEST: return "selftest";
     case JobKind::CALIBRATION: return "calibration";
     case JobKind::FIFO_PURGE: return "purge";
+    case JobKind::FIFO_READ: return "fifo";
     default: return "none";
   }
 }
@@ -351,6 +355,12 @@ void printProfileRecord(const char* label, const DeviceProfile& value) {
       static_cast<int>(value.accelUserOffset.z),
       profile_cli::boolName(value.fifo.enabled),
       profile_cli::boolName(value.interrupts.enabled));
+  printf("profile %s fifo_mode=%s fifo_odr=%s fifo_g_dec=%s fifo_xl_dec=%s fifo_watermark=%u\n",
+      label, profile_cli::fifoModeName(value.fifo.mode),
+      profile_cli::odrName(value.fifo.odr),
+      profile_cli::fifoDecimationName(value.fifo.gyroDecimation),
+      profile_cli::fifoDecimationName(value.fifo.accelDecimation),
+      static_cast<unsigned>(value.fifo.watermarkWords));
 }
 
 void printProfiles(uint64_t now) {
@@ -381,7 +391,7 @@ void printProfiles(uint64_t now) {
              : "no",
          static_cast<unsigned>(verifiedStatus.code), verifiedStatus.msg);
   if (verifiedStatus.ok()) printProfileRecord("verified", verified);
-  puts("profile locked if_inc=on bdu=on byte_order=little fifo=bypass interrupts=off");
+  puts("profile locked if_inc=on bdu=on byte_order=little fifo_sources=motion interrupts=off");
 }
 
 bool ownerMutationBlocked() {
@@ -529,6 +539,36 @@ void printTerminalResult(const OperationResult& result) {
            result.calibration.bias.z, result.calibration.peakToPeak.x,
            result.calibration.peakToPeak.y, result.calibration.peakToPeak.z,
            result.calibration.samples);
+  } else if (result.kind == JobKind::FIFO_READ) {
+    const FifoReadResult& batch = result.fifoRead;
+    printf("  fifo records=%u consumed=%u possible=%u discarded=%u truncated=%s overrun=%s pattern_discontinuity=%s continuity_lost=%s\n",
+        batch.records, batch.wordsConsumed, batch.wordsPossiblyConsumed,
+        batch.wordsDiscarded, batch.truncated ? "yes" : "no",
+        batch.overrunObserved ? "yes" : "no", batch.patternDiscontinuity ? "yes" : "no",
+        batch.continuityLost ? "yes" : "no");
+    printf("  fifo before_valid=%s before_words=%u before_pattern=%u before_empty=%s before_full=%s before_watermark=%s before_ms=%" PRIu64
+        " after_valid=%s after_words=%u after_pattern=%u after_empty=%s after_full=%s after_watermark=%s after_ms=%" PRIu64 "\n",
+        batch.before.valid ? "yes" : "no", batch.before.unreadWords, batch.before.pattern,
+        batch.before.empty ? "yes" : "no", batch.before.full ? "yes" : "no",
+        batch.before.watermark ? "yes" : "no", batch.before.readUptimeMs,
+        batch.after.valid ? "yes" : "no", batch.after.unreadWords, batch.after.pattern,
+        batch.after.empty ? "yes" : "no", batch.after.full ? "yes" : "no",
+        batch.after.watermark ? "yes" : "no", batch.after.readUptimeMs);
+    if (result.status.ok() && result.state == OperationState::SUCCEEDED &&
+        result.token == fifoBufferToken) {
+      for (uint16_t index = 0; index < batch.records && index < FIFO_RECORD_CAPACITY; ++index) {
+        const FifoMotionRecord& record = fifoRecords[index];
+        if (record.token != result.token) break;
+        printf("  fifo_record index=%u quantity=%s raw=%d,%d,%d generation=%lu xl_fs_g=%s g_fs_dps=%s read_ms=%" PRIu64 " sample_time=unknown\n",
+            index, record.quantityMask == SAMPLE_ACCELERATION ? "accel" : "gyro",
+            static_cast<int>(record.raw.x), static_cast<int>(record.raw.y),
+            static_cast<int>(record.raw.z), static_cast<unsigned long>(record.configGeneration),
+            profile_cli::accelFsName(record.accelFullScale),
+            profile_cli::gyroFsName(record.gyroFullScale), record.readUptimeMs);
+      }
+    } else if (result.status.ok() && batch.records != 0U) {
+      puts("  fifo record storage reused; cached metadata only");
+    }
   } else if (result.kind == JobKind::FIFO_PURGE) {
     printf("  discarded=%u initial=%u final=%u overrun=%s truncated=%s\n",
            result.fifoPurge.wordsDiscarded,
@@ -536,6 +576,10 @@ void printTerminalResult(const OperationResult& result) {
            result.fifoPurge.finalUnreadWords,
            result.fifoPurge.overrunObserved ? "yes" : "no",
            result.fifoPurge.truncated ? "yes" : "no");
+    printf("  possibly_discarded=%u collection_stopped=%s residual_loss_possible=%s\n",
+        result.fifoPurge.wordsPossiblyDiscarded,
+        result.fifoPurge.collectionStopped ? "yes" : "no",
+        result.fifoPurge.residualLossPossible ? "yes" : "no");
   }
   fflush(stdout);
 }
@@ -825,12 +869,16 @@ void printHelp() {
   puts("Values: g_odr=pd|12.5|26|52|104|208|416|833|1660|3330|6660");
   puts("Values: xl_fs=2|4|8|16 g_fs=125|250|500|1000|2000 xl_power/g_power=hp|lp");
   puts("Values: offset_weight=1|16; offset components=-127..127");
-  puts("Invariant probes: xl_slope_hp xl_6d_lpf g_hpf bdu fifo interrupts");
+  puts("Invariant probes: xl_slope_hp xl_6d_lpf g_hpf bdu interrupts");
+  puts("FIFO profile: profile set fifo <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <0..2047>");
+  puts("FIFO fields: fifo_mode fifo_odr fifo_g_dec fifo_xl_dec fifo_watermark; decimation=off|1|2|3|4|8|16|32");
+  puts("FIFO off: profile set fifo off; watermark 0 is always reached, not disabled.");
   puts("Booleans: 0/1, off/on, or false/true; unsupported production values are rejected.");
   puts("Stress: stress [1..10000] [all|accel|gyro|temp] [ready|direct]");
   puts("Stress: stress_mix [1..10000] (probe/reconcile/ready/direct, non-destructive)");
   puts("Maintenance: calxl [samples [x y z [max_p2p_g]]] calg [samples [max_p2p_dps]]");
-  puts("Maintenance: purge <1..2048> rreg <reg> wreg <reg> <value> dump <reg> <1..32>");
+  puts("FIFO: fifo <1..2048 words> [1..32 records]; acquisition read time is not sample time.");
+  puts("Maintenance: purge <1..2048> [stop] rreg <reg> wreg <reg> <value> dump <reg> <1..32>");
   puts("All jobs use absolute deadlines and one transport callback per loop poll.");
   puts("scan checks ACK only at 0x6A/0x6B; probe validates WHO_AM_I. Profile edits are staged until apply.");
 }
@@ -1366,15 +1414,33 @@ void handleCommand(char* line) {
                             timing(now, calibrationTimeoutMs(request, verified)),
                             token),
                         token);
+  } else if (strcmp(command, "fifo") == 0) {
+    uint32_t words = 0;
+    uint32_t capacity = FIFO_RECORD_CAPACITY;
+    if ((count != 2U && count != 3U) ||
+        !parseUnsigned(tokens[1], 2048, words) || words == 0U ||
+        (count == 3U && (!parseUnsigned(tokens[2], FIFO_RECORD_CAPACITY, capacity) || capacity == 0U))) {
+      puts("expected fifo <1..2048 words> [1..32 records]");
+      return;
+    }
+    if (!requireOwnerIdle("fifo")) return;
+    FifoReadRequest request{};
+    request.records = fifoRecords;
+    request.capacity = static_cast<uint16_t>(capacity);
+    request.maxWords = static_cast<uint16_t>(words);
+    OperationToken token{};
+    const Status status = device.startFifoRead(request, timing(now, 5000), token);
+    if (acceptedStart(status, token)) fifoBufferToken = token;
   } else if (strcmp(command, "purge") == 0) {
     uint32_t words = 0;
     if (count != 2U || !parseUnsigned(tokens[1], 2048, words) ||
         words == 0U) {
-      puts("expected purge <1..2048>");
+      puts("expected purge <1..2048> [stop]");
       return;
     }
     if (!requireOwnerIdle("purge")) return;
     FifoPurgeRequest request{static_cast<uint16_t>(words)};
+    request.stopCollection = count == 3U;
     OperationToken token{};
     (void)acceptedStart(
         device.startFifoPurge(request, timing(now, 5000), token), token);

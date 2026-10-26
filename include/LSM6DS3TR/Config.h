@@ -134,12 +134,40 @@ struct GyroFilterConfig {
   GyroHpfMode highPassMode = GyroHpfMode::HZ_0_016;  ///< Register encoding when enabled.
 };
 
-/// @brief FIFO policy represented by the production profile.
-///
-/// Version 2 production jobs support bypass only. Data removal remains available
-/// as the explicitly destructive, bounded FIFO_PURGE operation.
+/// @brief Supported internal-trigger, full-word motion FIFO modes.
+enum class FifoMode : uint8_t {
+  BYPASS = 0,      ///< Collection disabled; selecting this mode clears FIFO.
+  FIFO = 1,        ///< Stop collection when the physical FIFO is full.
+  CONTINUOUS = 6   ///< Replace the oldest words when the physical FIFO is full.
+};
+
+/// @brief Dataset decimation register encodings (not numeric divisors).
+enum class FifoDecimation : uint8_t {
+  OFF = 0,       ///< Dataset excluded from the FIFO pattern.
+  EVERY_1 = 1,   ///< Store every trigger.
+  EVERY_2 = 2,   ///< Store every second trigger.
+  EVERY_3 = 3,   ///< Store every third trigger.
+  EVERY_4 = 4,   ///< Store every fourth trigger.
+  EVERY_8 = 5,   ///< Store every eighth trigger.
+  EVERY_16 = 6,  ///< Store every sixteenth trigger.
+  EVERY_32 = 7   ///< Store every thirty-second trigger.
+};
+
+/// @brief Replayable internal accelerometer/gyroscope FIFO policy.
+/// @note Disabled profiles require the canonical default values below. Enabled
+/// profiles require a 12.5..6660 Hz FIFO ODR and at least one active dataset,
+/// including when preparing BYPASS. Selected sensors must supply at least the
+/// decimated trigger cadence. Accelerometer 1.6 Hz and gyroscope sleep are not
+/// admitted with FIFO, including when that sensor's dataset is excluded.
+/// @note External/fourth datasets, triggered modes, high-byte packing and
+/// stop-on-threshold are deliberately absent from this full-word contract.
 struct FifoProfile {
-  bool enabled = false;  ///< Must remain false in version 2 production profiles.
+  bool enabled = false;  ///< Enable the typed FIFO interpretation profile.
+  FifoMode mode = FifoMode::BYPASS;  ///< Collection mode, activated after settling.
+  Odr odr = Odr::POWER_DOWN;  ///< Maximum internal FIFO trigger frequency.
+  FifoDecimation gyroDecimation = FifoDecimation::OFF;  ///< Dataset 1 cadence.
+  FifoDecimation accelDecimation = FifoDecimation::OFF;  ///< Dataset 2 cadence.
+  uint16_t watermarkWords = 0;  ///< 0..2047 words; zero is always reached, not disabled.
 };
 
 /// @brief Interrupt policy represented by the production profile.
@@ -164,7 +192,7 @@ struct DeviceProfile {
   bool blockDataUpdate = true;  ///< Must remain enabled for managed burst reads.
   AccelOffsetWeight accelOffsetWeight = AccelOffsetWeight::MG_1;  ///< Offset scale.
   AccelUserOffset accelUserOffset = {};  ///< Signed hardware offset values.
-  FifoProfile fifo = {};  ///< FIFO policy; version 2 requires bypass.
+  FifoProfile fifo = {};  ///< Typed motion FIFO policy; default is disabled.
   InterruptProfile interrupts = {};  ///< Interrupt policy; version 2 requires disabled.
 };
 

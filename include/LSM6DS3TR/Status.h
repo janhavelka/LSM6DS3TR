@@ -39,7 +39,8 @@ enum class Err : uint8_t {
   I2C_NACK_DATA,             ///< Data phase was not acknowledged.
   I2C_TIMEOUT,               ///< Transport callback timed out.
   I2C_BUS,                   ///< Bus-level transport fault.
-  I2C_BUSY                   ///< Transport owner reported the bus busy.
+  I2C_BUSY,                  ///< Transport owner reported the bus busy.
+  FIFO_MAINTENANCE_REQUIRED  ///< Stop FIFO explicitly before changing buffered interpretation.
 };
 
 /// @brief Status structure returned by every fallible public operation.

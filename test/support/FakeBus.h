@@ -80,6 +80,20 @@ struct FakeBus {
   uint16_t fifoUnreadWords = 0;
   uint16_t fifoPattern = 0;
   uint16_t fifoNextWord = 0;
+  // Independent destructive FIFO storage. Tests specify the wire pattern
+  // modulus explicitly; the fake never calls the production schema helper.
+  uint16_t fifoWords[2048] = {};
+  uint16_t fifoHead = 0;
+  uint16_t fifoPatternWords = 1024;
+  uint16_t fifoEmptyReadAttempts = 0;
+  uint16_t fifoStatusReads = 0;
+  uint16_t fifoPatternJumpAfterRead = 0;
+  uint16_t fifoPatternJump = 0;
+  uint16_t fifoOverflowOnDataRead = 0;
+  uint16_t fifoOverflowArrivalWords = 0;
+  bool fifoClearOverrunOnDataRead = false;
+  bool fifoStoppedOnFull = false;
+  bool fifoFullSmart = false;
   bool fifoOverrun = false;
   bool forceFifoEmptyClear = false;
   bool forceFifoEmptySet = false;
@@ -92,6 +106,11 @@ struct FakeBus {
 
   void resetRegisters() {
     std::memset(regs, 0, sizeof(regs));
+    fifoUnreadWords = 0;
+    fifoHead = 0;
+    fifoPattern = 0;
+    fifoOverrun = false;
+    fifoStoppedOnFull = false;
     regs[cmd::REG_WHO_AM_I] = cmd::WHO_AM_I_VALUE;
     regs[cmd::REG_STATUS_REG] =
         static_cast<uint8_t>(cmd::MASK_XLDA | cmd::MASK_GDA | cmd::MASK_TDA);
@@ -175,8 +194,73 @@ struct FakeBus {
     fifoUnreadWords = unreadWords;
     fifoPattern = pattern;
     fifoNextWord = firstWord;
+    fifoHead = 0;
+    for (uint16_t i = 0; i < unreadWords && i < 2048U; ++i) {
+      fifoWords[i] = static_cast<uint16_t>(firstWord + i);
+    }
     fifoOverrun = overrun;
+    fifoDataReads = 0;
+    fifoStatusReads = 0;
+    fifoArrivalInjected = false;
+    fifoStoppedOnFull = unreadWords == 2048U &&
+                        (regs[cmd::REG_FIFO_CTRL5] & 7U) == 1U;
     syncFifoRegisters();
+  }
+
+  void setFifoWords(const int16_t* words, uint16_t count, uint16_t pattern,
+                    uint16_t patternWords) {
+    setFifo(count, pattern, 0);
+    fifoPatternWords = patternWords;
+    for (uint16_t i = 0; i < count && i < 2048U; ++i) {
+      fifoWords[i] = static_cast<uint16_t>(words[i]);
+    }
+    syncFifoRegisters();
+  }
+
+  void appendFifoWord(uint16_t value) {
+    if (fifoStoppedOnFull) return;
+    if (fifoUnreadWords == 2048U) {
+      fifoOverrun = true;
+      if ((regs[cmd::REG_FIFO_CTRL5] & 7U) == 1U) {
+        fifoStoppedOnFull = true;
+        return;
+      }
+      fifoHead = static_cast<uint16_t>((fifoHead + 1U) % 2048U);
+      fifoPattern = static_cast<uint16_t>((fifoPattern + 1U) % fifoPatternWords);
+      --fifoUnreadWords;
+    }
+    fifoWords[(fifoHead + fifoUnreadWords) % 2048U] = value;
+    ++fifoUnreadWords;
+    if (fifoUnreadWords == 2048U && (regs[cmd::REG_FIFO_CTRL5] & 7U) == 1U) {
+      fifoStoppedOnFull = true;
+    }
+    syncFifoRegisters();
+  }
+
+  uint16_t consumeFifoWord() {
+    if (fifoOverflowOnDataRead == fifoDataReads + 1U) {
+      for (uint16_t i = 0; i < fifoOverflowArrivalWords; ++i) {
+        appendFifoWord(static_cast<uint16_t>(0x7000U + i));
+      }
+    }
+    if (fifoUnreadWords == 0U) {
+      ++fifoEmptyReadAttempts;
+      return 0;
+    }
+    const uint16_t value = fifoWords[fifoHead];
+    fifoHead = static_cast<uint16_t>((fifoHead + 1U) % 2048U);
+    --fifoUnreadWords;
+    ++fifoDataReads;
+    fifoPattern = static_cast<uint16_t>((fifoPattern + 1U) % fifoPatternWords);
+    if (fifoPatternJumpAfterRead != 0U &&
+        fifoDataReads == fifoPatternJumpAfterRead) {
+      fifoPattern = static_cast<uint16_t>((fifoPattern + fifoPatternJump) %
+                                          fifoPatternWords);
+    }
+    fifoNextWord = static_cast<uint16_t>(value + 1U);
+    if (fifoClearOverrunOnDataRead) fifoOverrun = false;
+    syncFifoRegisters();
+    return value;
   }
 
   void syncFifoRegisters() {
@@ -192,6 +276,12 @@ struct FakeBus {
     if (fifoOverrun) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_OVER_RUN;
     }
+    if (fifoFullSmart || fifoUnreadWords > 2045U) {
+      regs[cmd::REG_FIFO_STATUS2] |= 0x20U;
+    }
+    const uint16_t threshold = static_cast<uint16_t>(regs[cmd::REG_FIFO_CTRL1]) |
+        static_cast<uint16_t>((regs[cmd::REG_FIFO_CTRL2] & 7U) << 8U);
+    if (fifoUnreadWords >= threshold) regs[cmd::REG_FIFO_STATUS2] |= 0x80U;
     regs[cmd::REG_FIFO_STATUS3] = static_cast<uint8_t>(fifoPattern & 0xFFu);
     regs[cmd::REG_FIFO_STATUS4] = static_cast<uint8_t>((fifoPattern >> 8) & 0x03u);
     setI16(cmd::REG_FIFO_DATA_OUT_L, static_cast<int16_t>(fifoNextWord));
@@ -204,6 +294,14 @@ struct FakeBus {
       const uint8_t value = data[i];
       if (reg != cmd::REG_CTRL3_C) {
         regs[reg] = value;
+        if (reg == cmd::REG_FIFO_CTRL5 && (value & 7U) == 0U) {
+          fifoUnreadWords = 0;
+          fifoHead = 0;
+          fifoPattern = 0;
+          fifoOverrun = false;
+          fifoStoppedOnFull = false;
+          syncFifoRegisters();
+        }
         if (reg == cmd::REG_CTRL5_C && simulateSelfTest) {
           if ((value & cmd::MASK_ST_XL) != 0u) {
             if (negativeSelfTestStimulus) {
@@ -275,6 +373,7 @@ inline Status fakeWrite(uint8_t address, const uint8_t* data, size_t length,
     return fault->status;
   }
 
+
   bus.applyWrite(data, length);
   if (fault != nullptr) {
     FakeBus::finishTransfer(transfer, fault->status, true);
@@ -310,6 +409,30 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     return fault->status;
   }
 
+  if (startReg == cmd::REG_FIFO_DATA_OUT_L && rxLength >= 2U) {
+    // AN5130 sections 4.7.1 and 8.4: FIFO output addresses round from
+    // 0x3F back to 0x3E. Every received L/H pair destructively pops one word.
+    uint8_t received[32] = {};
+    if (rxLength > sizeof(received) || (rxLength & 1U) != 0U) {
+      const Status status = Status::Error(Err::INVALID_PARAM, "invalid FIFO burst");
+      FakeBus::finishTransfer(transfer, status);
+      return status;
+    }
+    for (size_t i = 0; i < rxLength; i += 2U) {
+      const uint16_t word = bus.consumeFifoWord();
+      received[i] = static_cast<uint8_t>(word);
+      received[i + 1U] = static_cast<uint8_t>(word >> 8U);
+    }
+    if (fault != nullptr) {
+      // Simulate consumption without any trustworthy bytes reaching the host.
+      FakeBus::finishTransfer(transfer, fault->status, true);
+      return fault->status;
+    }
+    std::memcpy(rxData, received, rxLength);
+    FakeBus::finishTransfer(transfer, Status::Ok(), true);
+    return Status::Ok();
+  }
+
   const bool selfTestActive =
       (bus.regs[cmd::REG_CTRL5_C] & (cmd::MASK_ST_XL | cmd::MASK_ST_G)) != 0u;
   if (startReg == cmd::REG_STATUS_REG && bus.notReadyPeriod > 1u &&
@@ -337,11 +460,13 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     }
     if (startReg == cmd::REG_FIFO_STATUS1 && bus.fifoDataReads > 0u &&
         bus.fifoConcurrentArrivalWords > 0u && !bus.fifoArrivalInjected) {
-      bus.fifoUnreadWords = static_cast<uint16_t>(
-          bus.fifoUnreadWords + bus.fifoConcurrentArrivalWords);
+      for (uint16_t i = 0; i < bus.fifoConcurrentArrivalWords; ++i) {
+        bus.appendFifoWord(static_cast<uint16_t>(bus.fifoNextWord + i));
+      }
       bus.fifoArrivalInjected = true;
     }
     if (startReg == cmd::REG_FIFO_STATUS1) {
+      ++bus.fifoStatusReads;
       bus.syncFifoRegisters();
     }
     if (startReg == cmd::REG_DATA_START_ACCEL &&
@@ -369,15 +494,6 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
       rxData[bus.corruptReadRegister - startReg] = bus.corruptReadValue;
       bus.corruptReadRemaining--;
     }
-  }
-
-  if (startReg == cmd::REG_FIFO_DATA_OUT_L && rxLength >= 2u &&
-      bus.fifoUnreadWords > 0u) {
-    bus.fifoUnreadWords--;
-    bus.fifoDataReads++;
-    bus.fifoPattern = static_cast<uint16_t>((bus.fifoPattern + 1u) & 0x03FFu);
-    bus.fifoNextWord++;
-    bus.syncFifoRegisters();
   }
 
   if (fault != nullptr) {

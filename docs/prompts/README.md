@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompt 01 software implementation in verification; prompts 02-04 NOT IMPLEMENTED.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -30,11 +30,24 @@ not instructions to reset to an old checkout. Later prompts also inspect the
 committed results of earlier prompts. Preserve unrelated changes, work on the
 existing branch, and let the lead own Git mutations when using subagents.
 
+## Prompt 01 execution record
+
+- Execution date: 2026-10-26; actual workspace is
+  `C:\Users\HonzovoSpectre\Documents\Projects\LSM6DS3TR`.
+- Fetched execution baseline: `main` and `origin/main` at
+  `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc`, clean and synchronized.
+- Scope: typed internal-motion FIFO only. Fourth datasets/counters, routes and
+  filter extensions remain separate prompts 02-04, not silently enabled here.
+- Resolution commit, final local verification and exact-commit CI: pending
+  closeout. Do not interpret this record as a completed verification claim.
+- Hardware: **NOT RUN**; repeatable qualification cases are in
+  [HIL validation](../HIL_VALIDATION.md#motion-fifo-qualification).
+
 ## Coverage and execution order
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |
 | --- | --- | --- | --- | --- |
-| [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: `FifoProfile` is only an enable flag; `validateProfile()` rejects it; `_prepareManagedImage()` zeroes FIFO registers; only destructive `_stepFifoPurge()` exists. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | NOT IMPLEMENTED |
+| [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: `FifoProfile` is only an enable flag; `validateProfile()` rejects it; `_prepareManagedImage()` zeroes FIFO registers; only destructive `_stepFifoPurge()` exists. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | Software implemented; final verification pending |
 | [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: no fourth-dataset selector/decoder or managed timestamp/pedometer dependencies. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | NOT IMPLEMENTED |
 | [03](03_interrupt_profiles_and_event_evidence.md) | R2: `InterruptProfile` is only an enable flag; managed routes are zero; no typed event-source result. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | NOT IMPLEMENTED |
 | [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |

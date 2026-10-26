@@ -1,6 +1,6 @@
 # 01 - Typed motion FIFO and bounded acquisition
 
-**Status: NOT IMPLEMENTED.** Execute in
+**Status: SOFTWARE IMPLEMENTED; FINAL VERIFICATION PENDING.** Original execution path:
 `C:\Users\Honza\Documents\Projects\LSM6DS3TR`.
 Preparation baseline: `e262bf22f3d0cf035fbbca10f45b3e0752bf2bac`.
 Historical audit tip: `035eff530e72ea43e4b42b02df0ea2ff05e33383`.

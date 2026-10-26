@@ -7,7 +7,7 @@
  * the complete resulting profile passes the production driver's validation.
  * It covers every DeviceProfile field: supported ODR/range/power/filter/sleep
  * and offset values, inactive gyro HPF mode bits, and the invariant fields
- * that production validation deliberately keeps at BDU-on, FIFO/interrupt-off,
+ * that production validation deliberately keeps at BDU-on, interrupt-off,
  * and unsupported-filter-off values.
  *
  * @note Boolean grammar is 0/1, off/on, or false/true. Parsing an unsupported
@@ -110,6 +110,29 @@ inline const char* offsetWeightName(AccelOffsetWeight value) {
   }
 }
 
+inline const char* fifoModeName(FifoMode value) {
+  switch (value) {
+    case FifoMode::BYPASS: return "bypass";
+    case FifoMode::FIFO: return "fifo";
+    case FifoMode::CONTINUOUS: return "continuous";
+    default: return "invalid";
+  }
+}
+
+inline const char* fifoDecimationName(FifoDecimation value) {
+  switch (value) {
+    case FifoDecimation::OFF: return "off";
+    case FifoDecimation::EVERY_1: return "1";
+    case FifoDecimation::EVERY_2: return "2";
+    case FifoDecimation::EVERY_3: return "3";
+    case FifoDecimation::EVERY_4: return "4";
+    case FifoDecimation::EVERY_8: return "8";
+    case FifoDecimation::EVERY_16: return "16";
+    case FifoDecimation::EVERY_32: return "32";
+    default: return "invalid";
+  }
+}
+
 inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
   return lhs.accelOdr == rhs.accelOdr &&
          lhs.accelFullScale == rhs.accelFullScale &&
@@ -130,6 +153,11 @@ inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
          lhs.accelUserOffset.y == rhs.accelUserOffset.y &&
          lhs.accelUserOffset.z == rhs.accelUserOffset.z &&
          lhs.fifo.enabled == rhs.fifo.enabled &&
+         lhs.fifo.mode == rhs.fifo.mode &&
+         lhs.fifo.odr == rhs.fifo.odr &&
+         lhs.fifo.gyroDecimation == rhs.fifo.gyroDecimation &&
+         lhs.fifo.accelDecimation == rhs.fifo.accelDecimation &&
+         lhs.fifo.watermarkWords == rhs.fifo.watermarkWords &&
          lhs.interrupts.enabled == rhs.interrupts.enabled;
 }
 
@@ -240,6 +268,30 @@ inline Status invalidValue(const char* message) {
   return Status::Error(Err::INVALID_PARAM, message);
 }
 
+inline bool parseFifoMode(const char* text, FifoMode& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "bypass") == 0) value = FifoMode::BYPASS;
+  else if (std::strcmp(text, "fifo") == 0) value = FifoMode::FIFO;
+  else if (std::strcmp(text, "continuous") == 0) value = FifoMode::CONTINUOUS;
+  else return false;
+  return true;
+}
+
+inline bool parseFifoDecimation(const char* text, FifoDecimation& value) {
+  if (text == nullptr) return false;
+  static constexpr FifoDecimation VALUES[] = {
+      FifoDecimation::OFF, FifoDecimation::EVERY_1, FifoDecimation::EVERY_2,
+      FifoDecimation::EVERY_3, FifoDecimation::EVERY_4, FifoDecimation::EVERY_8,
+      FifoDecimation::EVERY_16, FifoDecimation::EVERY_32};
+  for (const FifoDecimation candidate : VALUES) {
+    if (std::strcmp(text, fifoDecimationName(candidate)) == 0) {
+      value = candidate;
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * @brief Apply one typed field update atomically to a valid profile draft.
  * @param profile Current valid draft; unchanged on any error.
@@ -321,8 +373,38 @@ inline Status setField(DeviceProfile& profile, const char* field,
     candidate.accelUserOffset = {static_cast<int8_t>(x), static_cast<int8_t>(y),
                                  static_cast<int8_t>(z)};
   } else if (std::strcmp(field, "fifo") == 0) {
-    if (valueCount != 1U || !parseBool(values[0], candidate.fifo.enabled))
-      return invalidValue("fifo expects 0|1");
+    if (valueCount == 1U) {
+      if (!parseBool(values[0], candidate.fifo.enabled))
+        return invalidValue("fifo expects off or <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <watermark>");
+      if (!candidate.fifo.enabled) candidate.fifo = {};
+    } else {
+      int32_t watermark = 0;
+      if (valueCount != 5U || !parseFifoMode(values[0], candidate.fifo.mode) ||
+          !parseOdr(values[1], candidate.fifo.odr) ||
+          !parseFifoDecimation(values[2], candidate.fifo.gyroDecimation) ||
+          !parseFifoDecimation(values[3], candidate.fifo.accelDecimation) ||
+          !parseSigned(values[4], 0, 2047, watermark))
+        return invalidValue("fifo expects <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <0..2047>");
+      candidate.fifo.enabled = true;
+      candidate.fifo.watermarkWords = static_cast<uint16_t>(watermark);
+    }
+  } else if (std::strcmp(field, "fifo_mode") == 0) {
+    if (valueCount != 1U || !parseFifoMode(values[0], candidate.fifo.mode))
+      return invalidValue("fifo_mode expects bypass|fifo|continuous");
+  } else if (std::strcmp(field, "fifo_odr") == 0) {
+    if (valueCount != 1U || !parseOdr(values[0], candidate.fifo.odr))
+      return invalidValue("fifo_odr expects 12.5|26|52|104|208|416|833|1660|3330|6660");
+  } else if (std::strcmp(field, "fifo_g_dec") == 0) {
+    if (valueCount != 1U || !parseFifoDecimation(values[0], candidate.fifo.gyroDecimation))
+      return invalidValue("fifo_g_dec expects off|1|2|3|4|8|16|32");
+  } else if (std::strcmp(field, "fifo_xl_dec") == 0) {
+    if (valueCount != 1U || !parseFifoDecimation(values[0], candidate.fifo.accelDecimation))
+      return invalidValue("fifo_xl_dec expects off|1|2|3|4|8|16|32");
+  } else if (std::strcmp(field, "fifo_watermark") == 0) {
+    int32_t watermark = 0;
+    if (valueCount != 1U || !parseSigned(values[0], 0, 2047, watermark))
+      return invalidValue("fifo_watermark expects 0..2047 words");
+    candidate.fifo.watermarkWords = static_cast<uint16_t>(watermark);
   } else if (std::strcmp(field, "interrupts") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.interrupts.enabled))
       return invalidValue("interrupts expects 0|1");

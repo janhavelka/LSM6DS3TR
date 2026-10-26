@@ -16,14 +16,15 @@ COMMANDS = {
     "help", "?", "version", "ver", "status", "diag", "job", "result",
     "bind", "unbind", "cancel", "scan", "addr", "freq", "profile", "cfg",
     "settings", "probe", "configure", "sample", "reset", "boot", "recover",
-    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "rreg",
+    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "fifo", "rreg",
     "wreg", "dump", "stress", "stress_mix",
 }
 
 PROFILE_FIELDS = {
     "xl_odr", "xl_fs", "xl_power", "xl_lpf2", "xl_slope_hp", "xl_6d_lpf",
     "g_odr", "g_fs", "g_power", "g_lpf1", "g_hpf", "g_hpf_mode",
-    "g_sleep", "bdu", "offset_weight", "offset", "fifo", "interrupts",
+    "g_sleep", "bdu", "offset_weight", "offset", "fifo",
+    "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark", "interrupts",
 }
 
 REQUIRED_IDF_TOKENS = (
@@ -43,6 +44,10 @@ REQUIRED_IDF_TOKENS = (
     "clearerr(stdin)",
     "char input[",
     "OperationTiming",
+    "startFifoRead",
+    "FifoMotionRecord fifoRecords[FIFO_RECORD_CAPACITY]",
+    "request.stopCollection = count == 3U",
+    "result.token == fifoBufferToken",
     "OperationToken",
     "DeviceProfile stagedProfile",
     "profile_cli::setField",

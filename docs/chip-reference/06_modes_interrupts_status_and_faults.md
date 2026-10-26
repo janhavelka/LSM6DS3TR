@@ -1,8 +1,8 @@
 # Modes, Interrupts, Status, And Faults
 
 > Source confidence: vendor fact. Library status: polling status and bounded
-> FIFO purge are supported; interrupt routing and FIFO acquisition are
-> unsupported production features.
+> motion FIFO acquisition/purge are supported in software; interrupt routing
+> remains unsupported. New motion FIFO hardware qualification is NOT RUN.
 
 ## ODR And Power Modes
 

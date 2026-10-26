@@ -55,8 +55,17 @@ ESP-IDF facilities:
   desired, and verified profiles. `profile set` atomically covers every
   `DeviceProfile` field, including ranges, ODR/power modes, supported filters,
   gyro sleep, HPF mode bits, hardware offsets, and the explicitly rejected
-  production invariants (BDU off, FIFO/interrupt enable, gyro HPF enable,
+  production invariants (BDU off, interrupt enable, gyro HPF enable,
   slope/high-pass output, and 6D filtering);
+- `fifo <1..2048 words> [1..32 records]` starts typed motion acquisition into
+  static caller storage retained through terminal consumption. It prints complete
+  vectors only after matching success, plus immutable scale/generation/read-time
+  and loss evidence. `purge <1..2048> [stop]` is explicit destructive maintenance;
+  `stop` drains bounded content, selects Bypass, and reports possible residual
+  loss before later configure/recovery. `profile set fifo continuous 104 1 1 24`
+  atomically stages the FIFO mode, ODR, gyro/accel decimation and watermark.
+  FIFO interpretation and protocol remain in the core; no raw FIFO recipes are
+  present in this native application;
 - `stress [count] [quantity] [mode]` runs an exact cooperative sample campaign
   (default count 100, quantity `all`, mode `ready`), while
   `stress_mix [count]` rotates probe, reconcile, ready, and direct jobs. Both
@@ -64,7 +73,7 @@ ESP-IDF facilities:
   and terminal/nonzero-transaction/provenance summaries;
 - `selftest [5..100]`,
   `calxl [samples [x y z [max_p2p_g]]]`,
-  `calg [samples [max_p2p_dps]]`, `purge <1..2048>`, `rreg`, `wreg`, and
+  `calg [samples [max_p2p_dps]]`, `purge <1..2048> [stop]`, `rreg`, `wreg`, and
   `dump` remain explicit stationary-fixture, destructive, or diagnostic
   maintenance commands.
 

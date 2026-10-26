@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Typed internal gyro/accelerometer FIFO profiles with Bypass, FIFO stop-on-full
+  and Continuous modes, ODR/decimation/watermark validation, a bounded untagged
+  pattern helper and caller-buffer `startFifoRead` acquisition. Complete vectors
+  carry token, configuration generation, immutable full scales and capture time;
+  status/pattern, consumption, truncation and continuity evidence remain explicit.
+- Matching Arduino/native ESP-IDF FIFO/profile commands, bounded behavioral FIFO
+  fault regressions, precise support checks and repeatable physical qualification
+  cases. New FIFO hardware qualification is **NOT RUN**; fourth datasets,
+  external sources, interrupt routes and other omitted features stay unsupported.
+
+### Changed
+
+- Configuration establishes and verifies sensor/FIFO interpretation in Bypass,
+  waits for settling, then activates collection. Interpretation-changing lifecycle
+  operations reject a live FIFO before writes and require explicit bounded
+  purge/stop maintenance first. Stop reports possible arrivals/residual loss and
+  invalidates verified state; read-only reconciliation cannot reinterpret unknown
+  queued words. The first complete vector from each enabled sensor is discarded
+  after activation. Default polling snapshots remain the default configuration.
+- Kept Continuous FIFO burst validity independent of undocumented OVER_RUN
+  stickiness: a conservative post-read occupancy bound rejects possible hidden
+  overwrite even when the bit clears and the pattern wraps to the expected
+  index. Stop-on-full can retain coherent buffered records while FULL_SMART
+  evidence marks global continuity lost.
+- Extended callback and fixed-memory bounds for FIFO evidence while retaining
+  32-byte maximum receive transfers, zero-I2C admission, owner budgets, immutable
+  deadlines and exactly-once terminal results. This is an additive unreleased
+  feature; package metadata and generated version files are unchanged.
+
 ### Fixed
 
 - Included profile settling in both CLI examples' configure, reset/boot/

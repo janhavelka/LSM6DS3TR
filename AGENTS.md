@@ -213,8 +213,16 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   desired runtime profile only for an explicit later configure or recovery.
   It is admissible from any bound idle configuration state, writes and verifies
   exact zero CTRL1_XL/CTRL2_G values, and proves no other register state.
-- FIFO acquisition and interrupt routing are unsupported until complete typed
-  production profiles exist. The bounded FIFO purge is explicitly destructive.
+- Internal motion FIFO acquisition uses typed `FifoProfile`, bounded
+  `startFifoRead`, caller-owned records, and immutable interpretation provenance.
+  Fourth/external datasets, triggered modes, packing, stop-on-threshold and
+  interrupt routing remain unsupported. The bounded FIFO purge is explicitly
+  destructive; stopping collection reports possible residual loss.
+- Interpretation-changing operations require hardware FIFO Bypass before
+  writes. Use explicit bounded purge with `stopCollection=true` before replay;
+  never silently flush or reinterpret queued old-generation words. Activate
+  collection only after complete image verification and settling, and discard
+  the first complete vector of each enabled sensor after activation.
 
 ### Transport And Diagnostics
 
@@ -229,9 +237,11 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   bus recovery remain application responsibilities.
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
-  and reserve the complete 66-callback profile reapply/readback budget.
-  Reset/boot use at most 89 callbacks, recovery 88, and FIFO purge
-  `maxWords + 5`; all validate identity before their first destructive device
+  and reserve the complete 68-callback profile reapply/readback/activation budget.
+  Configure uses at most 71 callbacks (69 without active FIFO), reset/boot 92,
+  recovery 91, power-down 9, and FIFO purge `maxWords + 5` (two additional
+  callbacks when explicitly stopping collection). FIFO acquisition reserves
+  `2 * maxWords + 3` callbacks; all validate identity before their first destructive device
   action after bank selection is proved.
 - Self-test and calibration allow at most three status checks per required
   sample. Self-test gates by its active sensor ODR period rounded up to

@@ -219,6 +219,21 @@ void test_profile_cli_equal_compares_every_profile_field() {
   candidate.fifo.enabled = true;
   assertDifferent(baseline, candidate);
   candidate = baseline;
+  candidate.fifo.mode = FifoMode::FIFO;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.odr = Odr::HZ_104;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.gyroDecimation = FifoDecimation::EVERY_1;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.accelDecimation = FifoDecimation::EVERY_1;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
+  candidate.fifo.watermarkWords = 1;
+  assertDifferent(baseline, candidate);
+  candidate = baseline;
   candidate.interrupts.enabled = true;
   assertDifferent(baseline, candidate);
 
@@ -634,7 +649,8 @@ void test_profile_cli_set_field_rejects_every_bad_arity_atomically() {
       {"g_hpf", "0"},          {"g_hpf_mode", "0.016"},
       {"g_sleep", "0"},        {"bdu", "1"},
       {"offset_weight", "1"},  {"fifo", "0"},
-      {"interrupts", "0"},
+      {"interrupts", "0"}, {"fifo_mode", "bypass"}, {"fifo_odr", "104"},
+      {"fifo_g_dec", "1"}, {"fifo_xl_dec", "1"}, {"fifo_watermark", "12"},
   };
   for (const OneValueField& entry : FIELDS) {
     DeviceProfile profile;
@@ -672,7 +688,8 @@ void test_profile_cli_set_field_rejects_every_bad_token_atomically() {
       {"g_hpf", "2"},           {"g_hpf_mode", "0.26"},
       {"g_sleep", "2"},         {"bdu", "2"},
       {"offset_weight", "2"},   {"fifo", "2"},
-      {"interrupts", "2"},
+      {"interrupts", "2"}, {"fifo_mode", "triggered"}, {"fifo_odr", "invalid"},
+      {"fifo_g_dec", "5"}, {"fifo_xl_dec", "64"}, {"fifo_watermark", "2048"},
   };
   for (const InvalidCase& entry : CASES) {
     DeviceProfile profile;
@@ -692,7 +709,8 @@ void test_profile_cli_set_field_rejects_every_bad_token_atomically() {
       "xl_slope_hp", "xl_6d_lpf", "g_odr",     "g_fs",
       "g_power",     "g_lpf1",    "g_hpf",     "g_hpf_mode",
       "g_sleep",     "bdu",       "offset_weight", "fifo",
-      "interrupts",
+      "interrupts", "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec",
+      "fifo_watermark",
   };
   const char* nullValue[] = {nullptr};
   for (const char* field : fields) {
@@ -708,7 +726,7 @@ void test_profile_cli_set_field_rejects_every_bad_token_atomically() {
 }
 
 void test_profile_cli_set_field_rejects_all_production_invariants_atomically() {
-  const char* fields[] = {"xl_slope_hp", "xl_6d_lpf", "g_hpf", "fifo",
+  const char* fields[] = {"xl_slope_hp", "xl_6d_lpf", "g_hpf",
                           "interrupts"};
   const char* trueTokens[] = {"1", "on", "true"};
   for (const char* field : fields) {
@@ -923,9 +941,68 @@ void test_profile_cli_selftest_deadline_covers_verified_profile_restoration() {
   }
 }
 
+void test_profile_cli_fifo_profile_is_atomic_and_complete() {
+  DeviceProfile profile;
+  const char* modes[] = {"bypass", "fifo", "continuous"};
+  for (const char* mode : modes) {
+    const char* values[] = {mode, "104", "1", "2", "2047"};
+    TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo", values, 5U).ok());
+    TEST_ASSERT_TRUE(profile.fifo.enabled);
+    TEST_ASSERT_EQUAL_STRING(mode, profile_cli::fifoModeName(profile.fifo.mode));
+    assertEnumEqual(Odr::HZ_104, profile.fifo.odr);
+    assertEnumEqual(FifoDecimation::EVERY_1, profile.fifo.gyroDecimation);
+    assertEnumEqual(FifoDecimation::EVERY_2, profile.fifo.accelDecimation);
+    TEST_ASSERT_EQUAL_UINT16(2047, profile.fifo.watermarkWords);
+  }
+  const char* decimations[] = {"off", "1", "2", "3", "4", "8", "16", "32"};
+  for (const char* value : decimations) {
+    TEST_ASSERT_TRUE(setOne(profile, "fifo_g_dec", value).ok());
+    TEST_ASSERT_EQUAL_STRING(value, profile_cli::fifoDecimationName(profile.fifo.gyroDecimation));
+  }
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_g_dec", "1").ok());
+  for (const char* value : decimations) {
+    TEST_ASSERT_TRUE(setOne(profile, "fifo_xl_dec", value).ok());
+    TEST_ASSERT_EQUAL_STRING(value, profile_cli::fifoDecimationName(profile.fifo.accelDecimation));
+  }
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_watermark", "0").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_odr", "52").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "fifo_mode", "bypass").ok());
+  const char* badProfiles[][5] = {
+      {"triggered", "104", "1", "1", "12"},
+      {"continuous", "invalid", "1", "1", "12"},
+      {"continuous", "104", "5", "1", "12"},
+      {"continuous", "104", "1", "64", "12"},
+      {"continuous", "104", "1", "1", "2048"},
+  };
+  for (const auto& values : badProfiles)
+    assertAtomicError(profile, "fifo", values, 5U, Err::INVALID_PARAM);
+  const char* values[] = {"continuous", "104", "1", "1", "12", "extra"};
+  assertAtomicError(profile, "fifo", values, 4U, Err::INVALID_PARAM);
+  assertAtomicError(profile, "fifo", values, 6U, Err::INVALID_PARAM);
+  const char* unsupported[] = {"continuous", "104", "off", "off", "12"};
+  const DeviceProfile before = profile;
+  TEST_ASSERT_FALSE(profile_cli::setField(profile, "fifo", unsupported, 5U).ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(before, profile));
+  TEST_ASSERT_TRUE(setOne(profile, "fifo", "off").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(profile, DeviceProfile{}));
+  TEST_ASSERT_FALSE(setOne(profile, "fifo", "on").ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(profile, DeviceProfile{}));
+  FifoMode mode = FifoMode::FIFO;
+  FifoDecimation decimation = FifoDecimation::EVERY_3;
+  TEST_ASSERT_FALSE(profile_cli::parseFifoMode(nullptr, mode));
+  TEST_ASSERT_FALSE(profile_cli::parseFifoMode("triggered", mode));
+  assertEnumEqual(FifoMode::FIFO, mode);
+  TEST_ASSERT_FALSE(profile_cli::parseFifoDecimation(nullptr, decimation));
+  TEST_ASSERT_FALSE(profile_cli::parseFifoDecimation("5", decimation));
+  assertEnumEqual(FifoDecimation::EVERY_3, decimation);
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoModeName(static_cast<FifoMode>(255)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::fifoDecimationName(static_cast<FifoDecimation>(255)));
+}
+
 }  // namespace
 
 void runProfileCliTests() {
+  RUN_TEST(test_profile_cli_fifo_profile_is_atomic_and_complete);
   RUN_TEST(test_profile_cli_names_cover_every_enum_value);
   RUN_TEST(test_profile_cli_equal_compares_every_profile_field);
   RUN_TEST(test_profile_cli_bool_and_signed_parsers_are_total_and_atomic);

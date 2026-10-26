@@ -155,6 +155,68 @@ with timer prerequisites defined by AN5130.
 **Resolution:** use `STEP_COUNT_DELTA`; with `CTRL10_C.TIMER_EN=1` and
 `WAKE_UP_DUR.TIMER_HR=0`, one LSB is 1.6384 s.
 
+## FIFO Overrun Persistence During Consumption
+
+AN5130 Rev 1 section 8.1.7, p. 79 describes OVER_RUN and says status updates
+synchronously with FIFO reads and writes. It does not guarantee a sticky
+history bit that survives a consuming read. A cleared post-read OVER_RUN and a
+matching pattern therefore cannot by themselves prove that a Continuous burst
+was not overwritten between observations; an overwrite by a whole pattern can
+also leave the expected pattern index.
+
+**Resolution (engineering inference):** the owner must be the sole FIFO
+consumer and must not change interpretation outside the serialized driver.
+For the admitted two motion datasets, one trigger stores at most six words.
+Reserve that complete group from the 2048-word capacity: the conservative
+occupancy floor after a possible overflow is 2042 words before host removal.
+After a burst consuming `N` words, overflow since the pre-status observation
+cannot leave fewer than `2042 - N` unread words: concurrent producer writes
+cannot reduce occupancy and this driver removed only `N` words. Consequently,
+Continuous acquisition rejects post-status occupancy `>= 2042 - N` with
+`OPERATION_INDETERMINATE` and `continuityLost`, even when OVER_RUN is clear and
+the next pattern matches. This deliberately rejects some coherent nearly full
+bursts rather than relying on undocumented flag persistence. It is a bounded
+occupancy proof under the stated owner/schema contract, not a measured silicon
+flag-timing guarantee.
+
+FIFO stop-on-full does not overwrite the buffered words and can return a
+coherent batch. Observing FULL_SMART still marks `continuityLost` conservatively
+because collection may have stopped and future sensor samples may be absent.
+The existing terminal consumed-word count and post-status snapshot preserve
+evidence; no successful batch is published for the rejected Continuous case.
+Physical overrun/flag-clear behavior and the occupancy boundary remain explicit
+HIL qualification cases, **NOT RUN**.
+
+## FIFO ODR Limit Versus Mixed Sensor Rates
+
+Datasheet DocID030071 Rev 3 p. 35 says the internally triggered FIFO ODR must
+not exceed either sensor ODR. AN5130 Rev 1 Figure 32 p. 87 instead derives the
+trigger as `min(max(ODR_XL, ODR_G), ODR_FIFO)`. Its explicit 208 Hz gyro / 104 Hz
+accel example in section 8.5.2 p. 89 uses FIFO 208 Hz with accel decimation 2.
+
+**Resolution:** follow the later, concrete AN5130 trigger and decimator recipe.
+Each enabled dataset must have effective trigger cadence divided by decimation
+no faster than its active sensor's cadence. Compare register ODR cadence classes
+rather than treating rounded labels such as 833/416 as an exact noninteger
+ratio; the hardware classes form the source's nominal successive 2x cadence
+series. Accelerometer 1.6 Hz is not admitted to this FIFO contract. Gyroscope
+sleep is rejected whenever FIFO is enabled, even when its dataset is off,
+because the source does not establish the shared trigger contribution of the
+sleeping gyro's configured ODR. This is a
+conservative production validation policy, not a claim of precise clock phase
+or timestamp accuracy; physical cadence qualification remains NOT RUN.
+
+## FIFO Zero Watermark And Reset Status
+
+AN5130 section 8.6 p. 91 allows threshold 0..2047 and defines WaterM by count
+reaching or exceeding the threshold. Reset register tables nevertheless show
+an initial zero status image.
+
+**Resolution:** watermark zero means the threshold is always reached
+mathematically, never that watermark reporting is disabled. Return the observed
+hardware flag; do not synthesize WaterM immediately after reset or claim its
+first-update timing. Production interrupt routes and STOP_ON_FTH remain off.
+
 ## FIFO Trigger Wording
 
 The `FIFO_MODE` table on datasheet p. 58 says the mode changes when a trigger

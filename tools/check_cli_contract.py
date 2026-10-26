@@ -42,6 +42,7 @@ COMMANDS = [
     "calxl",
     "calg",
     "purge",
+    "fifo",
     "cancel",
     "rreg",
     "wreg",
@@ -54,6 +55,7 @@ PROFILE_FIELDS = [
     "xl_odr", "xl_fs", "xl_power", "xl_lpf2", "xl_slope_hp",
     "xl_6d_lpf", "g_odr", "g_fs", "g_power", "g_lpf1", "g_hpf",
     "g_hpf_mode", "g_sleep", "bdu", "offset_weight", "offset", "fifo",
+    "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark",
     "interrupts",
 ]
 
@@ -68,6 +70,10 @@ OWNER_SAFE_TOKENS = [
     "startProbe",
     "startConfigure",
     "startSample",
+    "startFifoRead",
+    "FifoMotionRecord fifoRecords[FIFO_RECORD_CAPACITY]",
+    "request.stopCollection = count == 3U",
+    "result.token == fifoBufferToken",
     "poll(now",
     "takeResult",
     "cancelActiveJob",
@@ -241,7 +247,11 @@ def main() -> int:
     ):
         fail("newly accepted jobs must not expose stale prior poll evidence")
     for marker in (
-        "count != 2U || !parseUnsigned(tokens[1], 2048",
+        "(count != 2U && count != 3U) || !parseUnsigned(tokens[1], 2048",
+        '(count == 3U && strcmp(tokens[2], "stop") != 0)',
+        "parseUnsigned(tokens[2], FIFO_RECORD_CAPACITY, capacity) || capacity == 0U",
+        'expected fifo <1..2048 words> [1..32 records]',
+        'expected purge <1..2048> [stop]',
         "count != 2U || !parseUnsigned(tokens[1], 0xFF",
         "count != 3U || !parseUnsigned(tokens[1], 0xFF",
         "count != 3U || !parseUnsigned(tokens[1], 0xFF, reg)",

@@ -238,3 +238,64 @@ every transfer-stage failure are covered by the native fault-injection suite.
 Electrical fault recovery, alternate-address hardware, mounting/axis signs,
 and a real multi-device host load remain separate fixture/product validation
 gates.
+
+
+## Motion FIFO Qualification
+
+**Status: NOT RUN.** The motion FIFO software change starts from execution
+baseline `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc`; native behavioral tests
+and prior snapshot HIL logs do not validate the new silicon FIFO path. Use the
+exact final firmware commit and separately authorized hardware fixture. Record
+S2/S3, Arduino/native IDF backend, I2C rate/timeout, address strap, wiring,
+part marking, orientation and complete CLI/raw/logic-analyzer evidence.
+
+1. Establish default snapshot bring-up and readback first. Stage
+   `profile set fifo continuous 104 1 1 24`, then `profile apply`. Verify with a
+   bus trace that FIFO stays in Bypass through complete interpretation readback
+   and settling, and that final FIFO mode write/readback occurs last.
+2. Capture `fifo 96 16` with an empty queue and after accumulation. Verify
+   automatic `0x3E/0x3F` rounding at 32-byte read boundaries, exact destructive
+   count reduction, no reads while EMPTY, wrap and every initial pattern
+   position. Use stationary gravity and controlled rotation to identify sensor
+   axes. Confirm the first complete vector per enabled sensor is discarded.
+3. Repeat gyro-only, accel-only, equal rates and AN5130 mixed 208/104 Hz with
+   decimation 1/2, then every admitted decimation including 3 and 32 together.
+   Verify pattern cycles and cadence with independent capture timing; do not
+   infer time from `FIFO_PATTERN` or present host read time as sample time.
+4. Exercise watermark 0, 1 and 2047 with routes off. Record actual WaterM update
+   behavior, including its first update after reset. Exercise FIFO stop-on-full
+   and Continuous overrun; capture FULL, OVER_RUN, EMPTY and 11-bit count at
+   boundaries, including zero-count overrun. Check the library's conservative
+   ambiguity handling against observed silicon.
+   In Continuous mode, arrange overflow between status and data consumption,
+   including enough overwrite to return the same pattern index. Record whether
+   OVER_RUN clears during the burst; the driver must reject post-read occupancy
+   `>= 2042 - N` for an `N`-word burst even with a cleared flag/matching pattern.
+   Check counts immediately below and at this conservative boundary and retain
+   the trace showing this owner is the sole consumer. Some coherent nearly full
+   Continuous batches are deliberately rejected. In FIFO stop-on-full, verify
+   a coherent batch remains distinguishable from `continuityLost` after
+   FULL_SMART evidence; do not infer uninterrupted collection from valid vectors.
+5. Request small word limits/capacities and partial XYZ boundaries while data
+   continue arriving. Confirm complete-vector-only publication, bounded work,
+   truncation and no hidden continuation/retry. Compare terminal consumed and
+   discarded counts with the analyzer trace and observed next pattern.
+6. While collection is live, request configure with a changed full scale,
+   reset, boot, recover, self-test and power-down. Verify rejection before
+   interpretation writes. Run `purge 2048 stop`; verify bounded drain followed
+   by Bypass/readback and explicit possible residual loss for arrival races.
+   Apply a new profile and prove old-scale data cannot appear under the new
+   generation. For self-test, stop and apply a typed Bypass profile first.
+7. Inject an authorized physical NACK/timeout or disconnect during FIFO
+   consumption, and cancel before/after consumption. Verify no successful batch
+   is published, partial data are not reused, effect/possible-consumption
+   evidence survives, and the owner can explicitly stop/recover/reconfigure
+   before new acquisition. Check another shared-bus device still meets its
+   scheduling deadlines under changing poll budgets.
+8. Run a sustained collection campaign at intended production cadence and bus
+   loading. Account for every reported overrun, truncation, alignment/transition
+   discard and uncertain consumption. Retain final commit/build identity and
+   logs; qualify any claimed lossless interval only from matching evidence.
+
+Do not extend the snapshot-focused `run_hil.py` pass claim to these FIFO cases.
+The manual CLI/analyzer procedure above is a separate physical acceptance gate.

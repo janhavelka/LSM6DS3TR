@@ -76,9 +76,18 @@ The expanded example is an application owner, not an alternate driver layer:
   copies the staged `DeviceProfile`, applies one typed field, validates the
   complete candidate, and commits only on success. All profile fields have an
   explicit CLI representation; unsupported production values such as BDU off,
-  FIFO/interrupt enable, gyro HPF enable, slope/high-pass output, and 6D
+  interrupt enable, gyro HPF enable, slope/high-pass output, and 6D
   filtering are accepted as grammar probes but rejected atomically by the
   production validator. `profile apply` is the ordinary tokened configure job.
+- `fifo <1..2048 words> [1..32 records]` starts typed motion acquisition into
+  static caller storage retained through terminal consumption. It prints complete
+  vectors only after matching success, plus immutable scale/generation/read-time
+  and loss evidence. `purge <1..2048> [stop]` is explicit destructive maintenance;
+  `stop` drains bounded content, selects Bypass, and reports possible residual
+  loss before later configure/recovery. `profile set fifo continuous 104 1 1 24`
+  atomically stages the FIFO mode, ODR, gyro/accel decimation and watermark.
+  FIFO interpretation and protocol remain in the core; no raw FIFO recipes are
+  present in this native application;
 - `stress [count] [quantity] [mode]` and `stress_mix [count]` are fixed-memory
   application coordinators over ordinary driver jobs. They keep only counters,
   first/last failure, pending request identity, sequence/generation evidence,

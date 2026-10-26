@@ -1,8 +1,9 @@
 # FIFO, Interrupts, Timestamp, And Embedded Engines
 
 > Source confidence: vendor fact from the datasheet and AN5130. Library status:
-> chip-only/unsupported except for passive diagnostics and the explicitly
-> destructive bounded FIFO purge.
+> typed internal-motion FIFO acquisition and bounded destructive purge are
+> supported in software; physical qualification is NOT RUN for the new path.
+> Fourth datasets, external datasets, and interrupt routes remain unsupported.
 
 ## FIFO Data Model
 
@@ -57,9 +58,106 @@ AN5130 pp. 80-86.
   `DEC_FIFO_XL = 000`; it packs accel/gyro high bytes in a special layout.
   Setting the bit alone is not a complete recipe. Source: AN5130 p. 93.
 
-Because the stream is untagged and profile-dependent, this library does not
-claim typed FIFO acquisition. `startFifoPurge()` intentionally discards at most
-the caller's bounded word limit and reports overrun/truncation evidence.
+## Supported Motion FIFO Contract
+
+The motion implementation was audited against datasheet DocID030071 Rev 3,
+printed pp. 34-38, 54-58 and 79-81, and AN5130 Rev 1 sections 8.1-8.6,
+printed pp. 74-92. The source extracts and PDFs remain unchanged. Execution
+started from fetched `main` commit
+`362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26.
+
+`FifoProfile` admits only Bypass, FIFO stop-on-full, and Continuous with the
+normal internal trigger and complete 16-bit internal gyro/accel datasets.
+All eight decimator encodings above are represented. Reserved and triggered
+modes, high-byte packing, stop-on-threshold, external/special datasets and
+interrupt routes remain unavailable through the production profile.
+
+The FIFO ODR is 12.5..6660 Hz. Enabled datasets require an active sensor.
+Gyroscope sleep is rejected for every enabled FIFO profile, even with gyro
+batching off, because its contribution to the shared trigger is unproven.
+Accelerometer 1.6 Hz is also not admitted for FIFO. The
+selected effective trigger cadence divided by each dataset's decimation must
+not exceed that sensor's cadence. This conservative library constraint avoids
+promising distinct vectors where the FIFO would repeatedly collect stale
+sensor output. ODR register cadence classes are compared as the nominal 2x
+series, not by dividing rounded labels such as 833/416. The datasheet/AN5130
+mixed-rate conflict is resolved explicitly in the [ambiguity ledger](12_source_ambiguities.md#fifo-odr-limit-versus-mixed-sensor-rates).
+This does not establish sample timestamps or zero phase skew.
+Disabled FIFO profiles use the canonical all-disabled register image. An
+enabled typed Bypass profile can retain a prepared motion schema without
+collecting data.
+
+Pattern generation is bounded by the least common multiple of enabled
+factors: at most 96 trigger ticks for factors 3 and 32. At each tick, gyro XYZ
+precedes accel XYZ when both are due. The largest pattern has 105 words
+(35 complete vectors); a single enabled dataset has a three-word pattern.
+AN5130 example 1 is `Gx Gy Gz Ax Ay Az`, example 2 is
+`Gx Gy Gz Ax Ay Az Gx Gy Gz`. Example 3's motion subset is
+`Gx Gy Gz Ax Ay Az Ax Ay Az`; its magnetometer dataset remains unsupported.
+`FIFO_PATTERN` identifies a word position, never time or sensor freshness.
+
+AN5130 section 8.6, p. 91 defines watermark as count reaching or exceeding
+`FTH[10:0]`. **Watermark zero is always reached; it does not disable the
+watermark.** The returned flag is the observed hardware bit; no immediate
+post-reset WaterM value or first-update time is synthesized. `STOP_ON_FTH` remains zero, so the threshold does not cap capacity
+or halt collection. Routes remain off independently of this status bit.
+
+AN5130 section 4.7.1, p. 27 and section 8.4, p. 88 explicitly enable automatic
+circular rounding when reading `FIFO_DATA_OUT_L/H`: a burst cycles over
+`0x3E,0x3F`, not into timestamp registers. The core uses even-sized bursts of
+at most 32 bytes and never consumes more words than the coherent nonempty
+status observation permits. It never reads data when EMPTY is asserted.
+The existing ambiguity policy maps overrun plus raw zero count to 2048 words;
+a disagreement between decoded count and EMPTY fails visibly.
+
+Before any interpretation-changing writes, configure/reset/boot/recovery,
+self-test and power-down require hardware Bypass. A live non-Bypass mode is
+rejected without changing interpretation, even if a status sample could have
+observed an empty FIFO. This avoids the arrival race between an empty
+observation and a later write. The explicit maintenance request
+`FifoPurgeRequest::stopCollection=true` drains at most the requested bound,
+then selects and verifies Bypass. It reports truncation and
+`residualLossPossible` because arrivals or residual words can be discarded by
+the final Bypass transition. It invalidates verified configuration and retains
+the desired profile for explicit replay. No implicit reconfiguration flush is
+claimed lossless.
+
+The shared configuration engine programs and verifies the complete sensor and
+FIFO interpretation while collection is disabled, observes its settling gate,
+then writes and verifies the selected active mode. The acquisition owner
+rejects the first complete vector from each enabled sensor after activation;
+partial XYZ boundaries are also discarded, never published as vectors.
+Read-only reconciliation cannot create new FIFO provenance for queued data
+from an unknown generation.
+
+`startFifoRead()` returns only complete `FifoMotionRecord` values into a
+caller-owned bounded buffer. Each carries its operation token, configuration
+generation, immutable full scales and host read uptime. Records are usable
+only after taking the matching successful result. Admission clears the buffer;
+failure/cancellation publishes no successful batch and clears scratch records.
+The terminal result retains pre/post status and pattern, confirmed/possible
+consumption, discarded words, truncation, overrun and continuity evidence.
+A consuming callback failure is never retried; it can remove words even when
+no received bytes reach the host. Batches do not synthesize sample timestamps
+or freshness by spacing records at the configured ODR.
+
+Continuous acquisition does not assume OVER_RUN is sticky across data reads.
+Under the sole-consumer contract, a possible overflow followed by an `N`-word
+burst leaves at least `2042 - N` unread words: 2048 capacity minus a conservative
+six-word motion trigger group, minus this burst. A post-status count at or above
+that floor fails `OPERATION_INDETERMINATE`, clears the batch, and marks
+`continuityLost` even if OVER_RUN cleared and the pattern matches. This
+engineering inference deliberately rejects nearly full Continuous batches that
+might otherwise be coherent; it prevents a whole-pattern overwrite from hiding
+behind matching pattern arithmetic. See the [overrun persistence resolution](12_source_ambiguities.md#fifo-overrun-persistence-during-consumption).
+FIFO stop-on-full can return coherent buffered vectors, but FULL_SMART observed
+in either mode conservatively marks global continuity lost. Batch coherence and
+stream continuity remain distinct evidence.
+
+`startFifoPurge()` remains destructive maintenance, not another acquisition
+owner. Host fake tests establish software contracts only; physical FIFO
+rounding, phase, overrun, transition and timing qualification remains **NOT
+RUN**. See [physical qualification cases](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md#motion-fifo-qualification).
 
 ## Interrupt Behavior
 

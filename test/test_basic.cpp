@@ -24,7 +24,12 @@ struct TransactionCeilingTestAccess {
 using namespace LSM6DS3TR;
 using namespace LSM6DS3TRTest;
 
+void lowerFifoTestCeiling(LSM6DS3TR::LSM6DS3TR& driver, uint32_t limit) {
+  TransactionCeilingTestAccess::lowerTransactionLimit(driver, limit);
+}
+
 void runProfileCliTests();
+void runFifoTests();
 
 namespace {
 
@@ -188,7 +193,7 @@ void test_validate_profile_rejects_all_unsupported_or_unsafe_values() {
                           static_cast<uint8_t>(validateProfile(profile).code));
   profile = makeProfile();
   profile.fifo.enabled = true;
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED_PROFILE),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
                           static_cast<uint8_t>(validateProfile(profile).code));
   profile = makeProfile();
   profile.interrupts.enabled = true;
@@ -564,7 +569,7 @@ void test_complete_profile_clears_all_disabled_subsystems() {
   bus.regs[cmd::REG_FIFO_CTRL2] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL3] = 0xFF;
   bus.regs[cmd::REG_FIFO_CTRL4] = 0xFF;
-  bus.regs[cmd::REG_FIFO_CTRL5] = 0xFF;
+  bus.regs[cmd::REG_FIFO_CTRL5] = 0x78; // Bypass with stale ODR, safe to replace.
   bus.regs[cmd::REG_DRDY_PULSE_CFG_G] = 0xFF;
   LSM6DS3TR::LSM6DS3TR driver;
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -626,7 +631,7 @@ void test_configuration_settle_arms_after_readback_with_changing_budgets() {
       (void)driver.poll(bus.nowMs, 255);
       const uint32_t transfers = bus.transferCalls;
       TEST_ASSERT_EQUAL_UINT32(reconcile ? MAX_RECONCILE_TRANSACTIONS
-                                         : MAX_CONFIGURE_TRANSACTIONS,
+                                         : MAX_CONFIGURE_TRANSACTIONS - 2u,
                                transfers);
 
       // The nominal 14 / 12.5 Hz = 1120 ms interval starts only after a
@@ -675,7 +680,7 @@ void test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance()
         profile, OperationTiming{bus.nowMs, std::numeric_limits<uint64_t>::max()},
         token).inProgress());
     TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
-    TEST_ASSERT_EQUAL_UINT8(4u, driver.poll(bus.nowMs, 255).transactionsUsed);
+    TEST_ASSERT_EQUAL_UINT8(5u, driver.poll(bus.nowMs, 255).transactionsUsed);
     const PollResult finalized = driver.poll(bus.nowMs, 0);
     TEST_ASSERT_EQUAL_UINT8(0u, finalized.transactionsUsed);
     if (poweredDown) {
@@ -696,7 +701,7 @@ void test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance()
       assertTerminalFailure(terminal, result, Err::DEADLINE_EXPIRED,
                             OperationState::TIMED_OUT);
     }
-    TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS - 2u, bus.transferCalls);
   }
 }
 
@@ -726,10 +731,10 @@ void test_configure_failure_at_every_transport_stage_has_precise_effect_state() 
     const OperationResult result = take(driver, token);
     assertTerminalFailure(
         terminal, result, Err::I2C_TIMEOUT,
-        stage <= 2u ? OperationState::FAILED : OperationState::INDETERMINATE);
-    TEST_ASSERT_EQUAL(stage > 2u, result.hardwareStateMayHaveChanged);
+        stage <= 3u ? OperationState::FAILED : OperationState::INDETERMINATE);
+    TEST_ASSERT_EQUAL(stage > 3u, result.hardwareStateMayHaveChanged);
     TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(stage <= 2u ? ConfigurationState::UNCONFIGURED
+        static_cast<uint8_t>(stage <= 3u ? ConfigurationState::UNCONFIGURED
                                          : ConfigurationState::UNKNOWN),
         static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
     TEST_ASSERT_EQUAL_UINT32(0u, driver.configGeneration());
@@ -740,7 +745,7 @@ void test_ambiguous_write_effect_is_observable_and_never_retried() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR driver;
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
-  bus.addFault(3, Status::Error(Err::I2C_TIMEOUT, "ambiguous", -88), true);
+  bus.addFault(4, Status::Error(Err::I2C_TIMEOUT, "ambiguous", -88), true);
   OperationToken token;
   TEST_ASSERT_TRUE(
       driver.startConfigure(makeProfile(), timing(bus), token).inProgress());
@@ -748,10 +753,10 @@ void test_ambiguous_write_effect_is_observable_and_never_retried() {
   const OperationResult result = take(driver, token);
   assertTerminalFailure(terminal, result, Err::I2C_TIMEOUT,
                         OperationState::INDETERMINATE);
-  TEST_ASSERT_EQUAL_UINT32(3u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(4u, bus.transferCalls);
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_FUNC_CFG_ACCESS, bus.trace[0].startReg);
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_WHO_AM_I, bus.trace[1].startReg);
-  TEST_ASSERT_TRUE(bus.trace[2].effectApplied);
+  TEST_ASSERT_TRUE(bus.trace[3].effectApplied);
   TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
                           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
@@ -868,7 +873,7 @@ void test_cancel_before_and_after_configuration_effect_is_bus_silent() {
 }
 
 void test_configure_cancellation_is_safe_after_every_transfer_stage() {
-  for (uint32_t completed = 0; completed <= MAX_CONFIGURE_TRANSACTIONS; ++completed) {
+  for (uint32_t completed = 0; completed <= MAX_CONFIGURE_TRANSACTIONS - 2u; ++completed) {
     FakeBus bus;
     LSM6DS3TR::LSM6DS3TR driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -889,7 +894,7 @@ void test_configure_cancellation_is_safe_after_every_transfer_stage() {
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::CANCELLED),
                             static_cast<uint8_t>(result.state));
     TEST_ASSERT_EQUAL_UINT32(completed, result.transactions);
-    if (completed <= 2u) {
+    if (completed <= 3u) {
       TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
       TEST_ASSERT_EQUAL_UINT8(
           static_cast<uint8_t>(ConfigurationState::UNCONFIGURED),
@@ -912,7 +917,7 @@ void test_timeout_after_partial_configuration_exposes_unknown_state() {
                        .startConfigure(makeProfile(),
                                        OperationTiming{bus.nowMs, bus.nowMs + 1u}, token)
                        .inProgress());
-  TEST_ASSERT_EQUAL_UINT8(3u, driver.poll(bus.nowMs, 3).transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(4u, driver.poll(bus.nowMs, 4).transactionsUsed);
   const uint32_t transfers = bus.transferCalls;
   const PollResult terminal = driver.poll(bus.nowMs + 1u, 4);
   TEST_ASSERT_EQUAL_UINT32(transfers, bus.transferCalls);
@@ -1589,7 +1594,7 @@ void test_reset_boot_and_recover_failures_are_bounded_at_every_transfer_stage() 
                               static_cast<uint8_t>(result.status.code));
       TEST_ASSERT_LESS_OR_EQUAL_UINT32(result.transactionLimit,
                                        result.transactions);
-      if (operation == MaintenanceCase::RECOVER && stage <= 2u) {
+      if (operation == MaintenanceCase::RECOVER && stage <= 3u) {
         TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::FAILED),
                                 static_cast<uint8_t>(terminal.state));
         TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
@@ -1636,7 +1641,7 @@ void test_reset_boot_and_recover_completion_poll_boundaries_are_exact() {
                                  ? MAX_RECOVER_TRANSACTIONS
                                  : MAX_RESET_TRANSACTIONS;
       TEST_ASSERT_EQUAL_UINT32(limit, result.transactionLimit);
-      TEST_ASSERT_EQUAL_UINT32(limit, result.transactions);
+      TEST_ASSERT_EQUAL_UINT32(limit - 2u, result.transactions);
       uint32_t commandReads = 0;
       bool commandWritten = false;
       const uint8_t commandMask = operation == MaintenanceCase::BOOT
@@ -1681,7 +1686,7 @@ void test_reset_boot_and_recover_completion_poll_boundaries_are_exact() {
       TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
       TEST_ASSERT_LESS_OR_EQUAL_UINT32(result.transactionLimit,
                                        result.transactions);
-      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 22u : 23u,
+      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 23u : 24u,
                                result.transactions);
       uint32_t commandReads = 0;
       bool commandWritten = false;
@@ -1728,7 +1733,7 @@ void test_reset_and_boot_wait_deadlines_saturate_at_uint64_max() {
                                          std::numeric_limits<uint64_t>::max()},
                          token)
                          .inProgress());
-    for (uint8_t transfer = 0; transfer < 7u; ++transfer) {
+    for (uint8_t transfer = 0; transfer < 8u; ++transfer) {
       TEST_ASSERT_EQUAL_UINT8(1u, driver.poll(bus.nowMs, 1).transactionsUsed);
     }
     const uint32_t transfers = bus.transferCalls;
@@ -2631,7 +2636,7 @@ void test_power_down_is_explicit_fallible_and_partial_failure_is_indeterminate()
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
   bus.clearTrace();
-  bus.addFault(3, Status::Error(Err::I2C_TIMEOUT, "accel power-down ambiguous", -101),
+  bus.addFault(4, Status::Error(Err::I2C_TIMEOUT, "accel power-down ambiguous", -101),
                true);
   OperationToken token;
   TEST_ASSERT_TRUE(driver.startPowerDown(timing(bus), token).inProgress());
@@ -2639,7 +2644,7 @@ void test_power_down_is_explicit_fallible_and_partial_failure_is_indeterminate()
   const OperationResult result = take(driver, token);
   assertTerminalFailure(terminal, result, Err::I2C_TIMEOUT,
                         OperationState::INDETERMINATE);
-  TEST_ASSERT_EQUAL_UINT32(3u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(4u, bus.transferCalls);
   TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
                           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
@@ -3018,7 +3023,7 @@ void test_reconcile_preserves_an_existing_unexpired_settle_gate() {
 
   TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
   const PollResult readback = driver.poll(bus.nowMs, 255);
-  TEST_ASSERT_EQUAL_UINT8(4u, readback.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(5u, readback.transactionsUsed);
   const PollResult settling = driver.poll(bus.nowMs, 0);
   TEST_ASSERT_TRUE(settling.waiting);
   TEST_ASSERT_EQUAL_UINT8(0u, settling.transactionsUsed);
@@ -4197,33 +4202,34 @@ void test_write_transaction_ceiling_rejects_before_effect_or_callback() {
   const DriverDiagnostics before = driver.diagnostics(bus.nowMs);
   OperationToken token;
   TEST_ASSERT_TRUE(driver.startConfigure(makeProfile(), timing(bus), token).inProgress());
-  TransactionCeilingTestAccess::lowerTransactionLimit(driver, 2);
-  const PollResult admitted = driver.poll(bus.nowMs, 2);
+  TransactionCeilingTestAccess::lowerTransactionLimit(driver, 3);
+  const PollResult admitted = driver.poll(bus.nowMs, 3);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
                           static_cast<uint8_t>(admitted.state));
-  TEST_ASSERT_EQUAL_UINT8(2u, admitted.transactionsUsed);
-  TEST_ASSERT_EQUAL_UINT32(2u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT8(3u, admitted.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT32(3u, bus.transferCalls);
   TEST_ASSERT_EQUAL_UINT8(cmd::REG_FUNC_CFG_ACCESS, bus.trace[0].startReg);
   TEST_ASSERT_EQUAL_UINT8(cmd::REG_WHO_AM_I, bus.trace[1].startReg);
+  TEST_ASSERT_EQUAL_UINT8(cmd::REG_FIFO_CTRL5, bus.trace[2].startReg);
 
-  // Bank and identity are proved; the next configure step is its first write.
+  // Bank, identity and FIFO Bypass are proved; the next step is its first write.
   const PollResult terminal = driver.poll(bus.nowMs, 255);
   const OperationResult result = take(driver, token);
   assertTerminalFailure(terminal, result, Err::TRANSACTION_LIMIT_EXCEEDED,
                         OperationState::FAILED);
   TEST_ASSERT_EQUAL_STRING("Operation transaction limit exceeded", result.status.msg);
   TEST_ASSERT_EQUAL_UINT8(0u, terminal.transactionsUsed);
-  TEST_ASSERT_EQUAL_UINT32(2u, result.transactions);
-  TEST_ASSERT_EQUAL_UINT32(2u, result.transactionLimit);
-  TEST_ASSERT_EQUAL_UINT32(2u, bus.transferCalls);
-  TEST_ASSERT_EQUAL_UINT32(2u, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(3u, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(3u, result.transactionLimit);
+  TEST_ASSERT_EQUAL_UINT32(3u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(3u, bus.readCalls);
   TEST_ASSERT_EQUAL_UINT32(0u, bus.writeCalls);
   TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
                           static_cast<uint8_t>(result.configuration.state));
   TEST_ASSERT_EQUAL_UINT32(before.configGeneration, driver.configGeneration());
   const DriverDiagnostics after = driver.diagnostics(bus.nowMs);
-  TEST_ASSERT_EQUAL_UINT32(before.transportSuccesses + 2u, after.transportSuccesses);
+  TEST_ASSERT_EQUAL_UINT32(before.transportSuccesses + 3u, after.transportSuccesses);
   TEST_ASSERT_EQUAL_UINT32(before.transportFailures, after.transportFailures);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(before.lastTransportError.code),
                           static_cast<uint8_t>(after.lastTransportError.code));
@@ -4232,6 +4238,7 @@ void test_write_transaction_ceiling_rejects_before_effect_or_callback() {
 int main() {
   UNITY_BEGIN();
   runProfileCliTests();
+  runFifoTests();
   RUN_TEST(test_status_contract);
   RUN_TEST(test_validate_driver_config_and_address);
   RUN_TEST(test_validate_profile_rejects_all_unsupported_or_unsafe_values);

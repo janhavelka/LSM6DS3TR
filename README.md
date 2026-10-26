@@ -33,10 +33,11 @@ state.
 - Passive transport counters never block access or make recovery decisions.
 - All non-const calls must be serialized. No API is ISR-safe.
 
-The production profile supports polling snapshots. FIFO acquisition and motion
-interrupt routing are intentionally not claimed in version 2. A profile with
-FIFO or interrupts enabled returns `UNSUPPORTED_PROFILE`. The only FIFO
-procedure is an explicitly destructive, bounded purge.
+The production profile supports polling snapshots and bounded typed internal
+accelerometer/gyroscope FIFO acquisition. FIFO defaults remain disabled.
+Fourth datasets, external sensors, triggered FIFO modes and interrupt routing
+remain unsupported. Motion FIFO software is tested independently of physical
+qualification; the new FIFO hardware cases are **NOT RUN**.
 
 ## Installation
 
@@ -209,17 +210,18 @@ Total callback ceilings are part of the public contract:
 | Operation | Maximum transport callbacks |
 | --- | ---: |
 | Probe | 2 |
-| Configure | 68 |
+| Configure | 71 (69 with collection disabled) |
 | Sample | 66 |
-| Reset or boot | 89 |
-| Recover | 88 |
+| Reset or boot | 92 |
+| Recover | 91 |
 | Reconcile | 35 |
-| Power-down | 8 worst case; 6 when already in the main bank |
+| Power-down | 9 worst case; 7 when already in the main bank |
 | Self-test | `maximumSelfTestTransactions(samples)` |
 | Calibration | `maximumCalibrationTransactions(samples)` |
-| FIFO purge | `maximumFifoPurgeTransactions(maxWords)` |
+| FIFO acquisition | `maximumFifoReadTransactions(maxWords)` = `2 * maxWords + 3` |
+| FIFO purge | `maximumFifoPurgeTransactions(maxWords, stopCollection)` = `maxWords + 5` (+2 for stop) |
 
-The three calculation helpers return zero for an invalid requested count.
+The calculation helpers return zero for an invalid requested count.
 Transaction-limit exhaustion is terminal and never causes a hidden retry.
 Each `PollResult` reports callbacks used by that call and cumulatively, the hard
 limit, and the current progress status. During self-test restoration after a
@@ -228,8 +230,8 @@ that fault.
 Ready-checked sampling permits at most 65 STATUS reads; if readiness is still
 absent it fails `DATA_NOT_READY`, preserving the 66th callback for the burst
 when readiness succeeds. Reset and boot permit at most 16 command-bit read
-polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 66 callbacks for full
-profile reapply/readback. Their ceiling also includes the verified main-bank
+polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 68 callbacks for full
+profile reapply/readback and optional FIFO activation. Their ceiling also includes the verified main-bank
 clear, identity validation, gyroscope Power-Down, an explicitly active
 high-performance accelerometer, and command preparation; recovery instead
 includes a main-bank precheck and identity validation before those preparation
@@ -239,7 +241,7 @@ writes.
 
 | Class | APIs | Bounds and intended use |
 | --- | --- | --- |
-| Steady state | `startSample`, `startProbe` | Zero-I2C admission, caller deadline, and per-poll transaction cap. Ready-checked samples may wait and poll status; direct samples are labelled unverified. |
+| Steady state | `startSample`, `startProbe`, `startFifoRead` | Zero-I2C admission, caller deadline, and per-poll transaction cap. Ready-checked samples may wait and poll status; direct samples are labelled unverified. |
 | Runtime multi-step | `startConfigure`, `startReset`, `startBoot`, `startRecover`, `startReconcile`, `startPowerDown` | Progress, deadline, cancellation, partial-effect reporting, and configuration readback share one operation model. Reset/boot contain a bus-silent device-inaccessible gate armed from a fresh post-command clock sample for at least 15 ms, rather than a delay. |
 | Maintenance/diagnostic | `startSelfTest`, `startCalibration`, `startFifoPurge` | Explicit deadline and caller budget. Self-test averages 5..100 samples per phase; calibration accepts 1..1000 samples; purge discards at most 1..2048 FIFO words. These are not ordinary measurement-loop calls. |
 | Advanced single transaction | `diagnosticReadRegister`, `diagnosticReadBlock`, `diagnosticWriteRegister` | Serialized application diagnostics only. Maximum block read is 32 bytes. No call is accepted during a job. Writes are restricted and invalidate configuration provenance. |
@@ -252,7 +254,7 @@ and provenance belong to the application.
 
 `DeviceProfile` is the complete replayable production state supported by this
 version: accelerometer and gyro ODR/full scale/power/filter settings, BDU,
-gyro sleep, user offsets, FIFO-disabled policy, and interrupts-disabled policy.
+gyro sleep, user offsets, typed motion FIFO policy, and interrupts-disabled policy.
 Low-power/normal mode is limited to 208 Hz for both sensors; 1.6 Hz is valid
 only for the accelerometer in low-power/normal mode. Invalid combinations are
 rejected before I2C.
@@ -352,6 +354,105 @@ milli-degrees Celsius. Additional allocation-free helpers expose ODR period,
 settling time, exact sensitivities, raw decoding, calibration validation, and
 bias application.
 
+## Typed Motion FIFO Acquisition
+
+`DeviceProfile::fifo` selects Bypass, FIFO stop-on-full, or Continuous,
+FIFO ODR, separate gyro/accel decimation and a 0..2047-word watermark. Use
+normal internal triggering with full 16-bit XYZ data only. The selected sensor
+must be active. Gyroscope sleep is rejected for every enabled FIFO profile,
+even when gyro batching is off, because the shared trigger under sleep is not
+established by the source. FIFO trigger cadence divided by each decimation
+must not exceed that sensor's cadence. Accelerometer 1.6 Hz is excluded from
+FIFO profiles. Decimation factors are off, 1, 2, 3, 4, 8, 16 and 32; the pure
+`fifoPatternWord()` helper bounds the untagged pattern at 96 trigger ticks and
+105 words, including factor 3. Watermark zero is always reached and never acts
+as a disable switch. See the [source audit](docs/chip-reference/10_fifo_and_embedded_functions.md#supported-motion-fifo-contract).
+
+```cpp
+LSM6DS3TR::DeviceProfile profile{};
+profile.fifo.enabled = true;
+profile.fifo.mode = LSM6DS3TR::FifoMode::CONTINUOUS;
+profile.fifo.odr = LSM6DS3TR::Odr::HZ_104;
+profile.fifo.gyroDecimation = LSM6DS3TR::FifoDecimation::EVERY_1;
+profile.fifo.accelDecimation = LSM6DS3TR::FifoDecimation::EVERY_1;
+profile.fifo.watermarkWords = 24;
+// Configure, poll to completion, and take the successful configure result.
+
+static LSM6DS3TR::FifoMotionRecord records[16];
+LSM6DS3TR::FifoReadRequest request{};
+request.records = records;
+request.capacity = 16;
+request.maxWords = 96;
+status = imu.startFifoRead(request, timing, token);
+// Keep records alive and untouched through the matching takeResult().
+// Use records[0..result.fifoRead.records) only for a matching successful result.
+```
+
+The caller supplies capacity 1..682 records and a maximum of 1..2048 consumed
+words; null pointers, zero/oversized bounds and unverified profiles are rejected
+without I2C. Recompute `timing` from the current owner clock for every operation.
+On acceptance the buffer is cleared and becomes scratch storage until terminal
+consumption. Failure, timeout and cancellation clear unpublished records and
+publish a zero record count. Do not inspect partial scratch data or reuse/free
+storage before taking the result (or explicitly unbinding). Retain copied
+records if they must outlive buffer reuse; their token and immutable generation
+and scales allow interpretation without mutable driver state.
+
+Acquisition snapshots status and the next-word pattern before consuming,
+uses automatic FIFO output rounding in bursts of at most 32 bytes, and checks
+post-consumption evidence. It never reads while EMPTY is asserted, and count/
+EMPTY contradictions fail visibly. It returns complete XYZ vectors only;
+initial partial vectors and the first complete vector of each enabled sensor
+after FIFO activation are discarded. It stops at the word/output bound, reports
+truncation and residual data, and never extends a drain because new data arrive.
+
+`fifoRead` retains before/after status validity, count, pattern, empty/full/
+watermark/overrun flags and host read uptime, confirmed words consumed,
+possible consumption on a failed callback, discarded words and continuity
+loss. A failed read may have removed data even if the callback delivered no
+bytes; the core never retries it. Overrun or pattern discontinuity prevents a
+lossless batch claim. A record's `readUptimeMs` is the host capture observation,
+not sample time. The library neither synthesizes sample timestamps nor claims
+all axes/sensors were sampled simultaneously because BDU is enabled.
+
+Continuous acquisition also rejects an uncertain nearly full burst even if
+OVER_RUN clears during the read and the ending pattern matches. With this driver
+as the sole FIFO consumer, a possible overflow followed by `N` consumed words
+leaves at least `2042 - N` unread words (2048 capacity minus a conservative
+six-word motion group, minus the burst). A post-status count reaching that floor
+returns `OPERATION_INDETERMINATE`, zero records and `continuityLost`. This
+conservative policy can reject a coherent nearly full batch; it never relies on
+a sticky overrun flag. FIFO stop-on-full can return coherent queued vectors,
+while an observed FULL_SMART marks global continuity lost because collection
+may have stopped. All FIFO reads and configuration changes must remain under
+the same serialized owner for this evidence to be meaningful.
+
+Configure keeps FIFO in Bypass while applying/verifying the complete image and
+waiting for settling; active collection is enabled and verified last. Changing
+scale, ODR or any interpretation while hardware FIFO is live is rejected before
+interpretation writes. Reset, boot, recovery, self-test and power-down apply the
+same rule. `startReconcile()` stays read-only and cannot assign a fresh verified
+generation to unknown queued data. Use explicit bounded maintenance first:
+
+```text
+purge 2048 stop
+profile set fifo continuous 104 1 1 24
+profile apply
+fifo 96 16
+```
+
+Stopping collection drains no more than the requested initial bound, then
+selects/verifies Bypass. `residualLossPossible` remains explicit because data
+can arrive between the last status observation and Bypass. This maintenance
+invalidates verified state, retaining the desired profile for an explicit
+configure or recovery. Self-test can run after stopping and applying a typed
+Bypass profile; it restores that profile. Continuous collection is never
+silently interrupted or flushed under a success claim of stream continuity.
+
+Physical qualification is **NOT RUN** for this feature. The
+[motion FIFO qualification procedure](https://github.com/janhavelka/LSM6DS3TR/blob/main/docs/HIL_VALIDATION.md#motion-fifo-qualification)
+covers the silicon behavior that host fault tests cannot establish.
+
 ## Self-Test, Calibration, And FIFO Purge
 
 Self-test and calibration are staged so owner scheduling remains in control.
@@ -406,7 +507,8 @@ transforms and durable calibration policy.
 `startFifoPurge()` first verifies the main register bank, live device identity,
 and the managed IF_INC/BDU prerequisites, then destroys unread FIFO data. Its
 result reports initial unread count/pattern, discarded words, final unread
-count, overrun, and truncation. It performs at most `maxWords + 5` callbacks,
+count, overrun, and truncation. It performs at most `maxWords + 5` callbacks
+(or two more when `stopCollection` is requested),
 retries none, and completes only after the final FIFO status read or a terminal
 failure. The unread count must be zero exactly when `FIFO_EMPTY` is asserted;
 either contradictory status fails visibly, and asserted `FIFO_EMPTY` always
@@ -496,7 +598,8 @@ remain available as evidence while work is active.
 | `selftest [5..100]` | Run both vendor self-test paths with the requested samples per baseline/stimulated phase; the default is 5. The fixture must be stationary. |
 | `calxl [samples [x y z [max_p2p_g]]]` | Run 1..1000 accelerometer samples (default 32) against an expected gravity vector (default `0 0 1`, each component -16..16 g, vector magnitude 0.8..1.2 g) and a positive peak-to-peak limit up to 4 g (default 0.08 g). The CLI derives its absolute deadline from sample count and the verified accelerometer ODR. |
 | `calg [samples [max_p2p_dps]]` | Run 1..1000 gyroscope samples (default 32) with a positive peak-to-peak limit up to 2000 dps (default 3 dps). The CLI derives its absolute deadline from sample count and the verified gyroscope ODR. |
-| `purge <1..2048>`, `rreg <reg>`, `wreg <reg> <value>`, `dump <reg> <1..32>` | Explicit maintenance/diagnostic calls. Purge is destructive. Accepted raw writes invalidate configuration provenance; diagnostics are never normal acquisition policy. |
+| `fifo <1..2048 words> [1..32 records]` | Bounded typed acquisition into persistent CLI storage, raw XYZ with immutable scales/generation/read uptime and complete loss evidence; cached results print records only while their buffer token still matches. |
+| `purge <1..2048> [stop]`, `rreg <reg>`, `wreg <reg> <value>`, `dump <reg> <1..32>` | Explicit maintenance/diagnostic calls. Purge is destructive; `stop` explicitly drains bounded content then selects Bypass, reports possible residual loss, and requires explicit replay. Accepted raw writes invalidate configuration provenance; diagnostics are never normal acquisition policy. |
 | `stress [count] [quantity] [mode]` | Cooperatively run an exact 1..10000 operation count (default 100), validating terminal kind/state/status, nonzero bounded transactions, no hardware-change claim, sample masks/freshness, stable configuration generation, monotonic sequence, and conversion. Quantity defaults to `all`; mode defaults to `ready`, and quantity/mode may be supplied while count is omitted. |
 | `stress_mix [count]` | Run a deterministic non-destructive rotation of probe, reconcile, ready-checked sample, and direct sample. It reports exact success/failure and transport deltas and accepts `cancel`. |
 
@@ -521,7 +624,11 @@ value error leaves the draft unchanged.
 | `g_hpf_mode` | `0.016`, `0.065`, `0.260`, or `1.040`; the register mode is staged while production HPF remains disabled |
 | `offset_weight` | `1` or `16`, selecting the chip's nominal 1 mg/LSB or 16 mg/LSB modes (0.9765625 or 15.625 mg/LSB exactly) |
 | `offset` | Three signed register values, each from -127 through 127 |
-| `xl_slope_hp`, `xl_6d_lpf`, `g_hpf`, `fifo`, `interrupts` | Boolean invariant probes; only `false`/`off`/`0` is a valid version 2 production profile |
+| `xl_slope_hp`, `xl_6d_lpf`, `g_hpf`, `interrupts` | Boolean invariant probes; only `false`/`off`/`0` is a valid version 2 production profile |
+| `fifo` | `off` resets FIFO fields; `<bypass\|fifo\|continuous> <odr> <g_dec> <xl_dec> <watermark>` atomically enables a complete motion profile |
+| `fifo_mode`, `fifo_odr` | `bypass`/`fifo`/`continuous`; FIFO ODR 12.5..6660 Hz; each edit must preserve valid sensor cadence |
+| `fifo_g_dec`, `fifo_xl_dec` | `off`, `1`, `2`, `3`, `4`, `8`, `16`, `32`; at least one enabled dataset |
+| `fifo_watermark` | 0..2047 words; zero is always reached, not disabled |
 | `bdu` | Boolean invariant probe; only `true`/`on`/`1` is valid for managed burst reads |
 
 Because every field edit must leave a valid complete draft, coupled changes
@@ -609,7 +716,7 @@ explicit replacement or restriction:
 | Synchronous raw motion/temperature reads and cached measurement getters | Use `startSample()` in ready-checked or explicitly direct-unverified mode. The terminal `RawSampleResult` carries validity, freshness, scale, sequence, and configuration provenance. |
 | Mutable-state conversion and software bias getters/setters | Use pure `convertSample()` and `applyBias()`. `startCalibration()` returns a candidate bias; the application owns its validation context, persistence, version, and later application. |
 | Driver `READY/DEGRADED/OFFLINE` admission and automatic recovery policy | Use passive `DriverDiagnostics` as evidence. The external owner controls absence, health, retry, backoff, and bus recovery. |
-| FIFO configuration and drain APIs | Production profiles require FIFO bypass. Only the bounded, destructive purge remains; typed FIFO acquisition needs a future replayable profile and decoder. |
+| FIFO configuration and drain APIs | Use typed motion `FifoProfile` and caller-buffer `startFifoRead`; use `startFifoPurge` only for explicit destructive maintenance. Fourth datasets and external sensors remain unsupported. |
 | Interrupt routes, tap/wake/free-fall/6D/tilt/wrist/significant-motion, pedometer and step-counter control/source APIs | Unsupported as version 2 production configuration. Controlled diagnostic reads may aid service work, but production use requires a future typed, fully replayable profile and board electrical contract. |
 | Timestamp control/readout and sensor-hub configuration/output APIs | Unsupported as version 2 production configuration. Do not rebuild these features from raw recipes in an application adapter; add a typed, bounded library profile when a current product needs them. |
 

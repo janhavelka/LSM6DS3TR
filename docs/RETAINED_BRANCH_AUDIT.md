@@ -105,8 +105,23 @@ The [implementation prompt sequence](prompts/README.md), prepared on 2026-10-25,
 turns this item into four ordered software tasks covering motion FIFO,
 fourth-dataset/counter interpretation, supported interrupt routes and filters.
 It records source mechanisms, selected scope, regression acceptance and CI
-requirements. All four are **NOT IMPLEMENTED**; creating prompts changes no
-support claim or physical-validation status.
+requirements. Prompt 01 now supplies the motion-acquisition implementation;
+software closeout is pending the final commit's verification. Prompts 02-04
+remain **NOT IMPLEMENTED**. This is a partial resolution of R2/H4/H7: fourth
+FIFO datasets, counters, routes and filter extensions remain out of scope.
+
+The motion change starts from fetched baseline
+`362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26. It adds typed motion
+profiles and bounded caller-buffer acquisition with generation/scale provenance,
+source-backed pattern interpretation, explicit transition discards, pre/post
+status and consumption/loss evidence. Interpretation-changing procedures reject
+live FIFO and require explicit bounded purge/stop first; read-only reconcile
+cannot label unknown queued data with new provenance. Both CLIs expose the same
+bounded core jobs. Native FIFO fault tests and the existing contract/CI suites
+are the software evidence gate; the exact resolution SHA and final outcomes are
+recorded in the [execution index](prompts/README.md). Hardware is **NOT RUN** for
+this path; [qualification cases](HIL_VALIDATION.md#motion-fifo-qualification)
+remain open independently of the software gate.
 
 Owner: a concrete consuming application plus driver maintainer. If polling
 snapshots satisfy that application, keep the current unsupported-profile
