@@ -175,10 +175,12 @@ existing branch, and let the lead own Git mutations when using subagents.
   validation (37 files / 20 linked documents) and whitespace passed. The generated
   docs directory needed its Windows read-only attributes cleared before the
   clean Doxygen wrapper; no source or check was bypassed.
-- Exact implementation resolution is recorded by the closeout commit following
-  implementation. Exact-final-commit CI must verify that closeout revision;
-  an older green run does not verify it. Native ESP-IDF 5.4.4 S2/S3 builds run
-  in that CI matrix because no exported local SDK is available.
+- Implementation resolution: `10f6898386dfe510254232d0be677643309e40ed`. This closeout
+  records that immutable SHA without changing implementation behavior.
+  Exact-final-commit CI is the final gate: inspect all seven jobs attached to
+  the commit containing this closeout record, including native ESP-IDF 5.4.4
+  S2/S3. The local evidence above does not substitute for that exact revision's
+  CI; no exported local IDF SDK is available.
 - Hardware: **NOT RUN**; repeatable cases are in
   [filter qualification](../HIL_VALIDATION.md#filter-transient-and-qualification-campaign).
 

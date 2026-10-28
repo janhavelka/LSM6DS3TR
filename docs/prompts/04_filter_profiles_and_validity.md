@@ -8,6 +8,9 @@ Historical audit tip: `035eff530e72ea43e4b42b02df0ea2ff05e33383`.
 Execution on 2026-10-28 started from fetched synchronized `10cbe28` after
 reviewing completed 01-03. Scope, source audit, verification and implementation
 resolution are recorded in the [execution record](README.md#prompt-04-execution-record).
+Implementation resolution: `10f6898386dfe510254232d0be677643309e40ed`.
+All 236 native tests and required local builds/checks passed; exact-final-commit
+CI is the separate completion gate recorded in the index.
 Gyro HPF supports explicit unqualified direct reads only; its bounded qualified
 settling rule remains an unresolved source/physical gate. Hardware is **NOT RUN**.
 Read [the complete execution index](README.md), including its exact verification

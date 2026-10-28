@@ -129,7 +129,9 @@ Prompt 04 completes typed accelerometer LPF1/LPF2/HPCF/input, slope/high-pass/
 reference and analog choices; all gyro FTYPE codes; orientation LPF2; complete
 readback/restoration; source-backed timing and bounded reference consumption.
 Samples/FIFO/events carry immutable filter and per-quantity qualification.
-Its implementation resolution and exact software verification are in the
+Implementation resolution: `10f6898386dfe510254232d0be677643309e40ed`. All 236
+native tests, three Arduino targets and local documentation/contract/package
+checks passed. Exact-final-commit CI remains the distinct completion gate in the
 [execution record](prompts/README.md#prompt-04-execution-record).
 Gyro HPF register configuration and explicit direct unqualified reads are
 implemented; **qualified gyro HPF settling remains unresolved** because vendor
