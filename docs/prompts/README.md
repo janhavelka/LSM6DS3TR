@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: prompts 01/02 IMPLEMENTED (software); prompt 03 implementation/verification PENDING; prompt 04 NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompts 01-03 IMPLEMENTED (software); prompt 04 NOT IMPLEMENTED.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -118,9 +118,21 @@ existing branch, and let the lead own Git mutations when using subagents.
   orientation/pedometer/timestamp sections. No readable timestamp-end flag was
   invented. The default 6D path is LPF1 ODR/2; global DRDY mode and embedded LIR
   remain separate concepts.
-- Implementation resolution SHA, final local verification and exact-final-
-  commit CI: **PENDING**. No software acceptance pass is claimed by this record
-  until the lead completes those gates and records the actual evidence.
+- Implementation resolution: `d35165d4d12e8d2a1be6e323326b4df966fac00b`.
+  Local software closeout completed on 2026-10-28. The following documentation
+  commit records that resolution without changing implemented behavior.
+- Final local verification passed: **202/202 native tests**, all three Arduino
+  targets (`esp32s3dev`, `esp32s3hil`, `esp32s2dev`), core timing/version/CLI/IDF/
+  chip-reference guards, three IDF checker tests, 18 HIL-runner tests, runner
+  Python compilation, strict Doxygen, package validation (37 files and 20 linked
+  Markdown documents), and whitespace. Source review added raw-route escape
+  fences and preserved FIFO loss evidence; target builds verified Arduino macro
+  compatibility and the existing-task FreeRTOS ISR notification example.
+- Exact-final-commit CI is the completion gate: inspect all seven jobs attached
+  to the commit containing this closeout record. Native ESP-IDF 5.4.4 S2/S3
+  builds are verified there; no standalone SDK was exported in the local shell.
+  Local tests do not substitute for that exact commit's CI. No release/tag was
+  created; the backward-compatible additions use unreleased 2.3.0 metadata.
 - Hardware: **NOT RUN**; see
   [interrupt/orientation qualification](../HIL_VALIDATION.md#interrupt-and-orientation-qualification).
   Electrical levels, pulse durations, interrupt loss under load and orientation
@@ -132,7 +144,7 @@ existing branch, and let the lead own Git mutations when using subagents.
 | --- | --- | --- | --- | --- |
 | [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: original enable-only profile and purge-only mechanism replaced. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | IMPLEMENTED (software); hardware NOT RUN |
 | [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: typed fourth-source schema and fixed timestamp/pedometer ownership added. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | IMPLEMENTED (software); hardware NOT RUN |
-| [03](03_interrupt_profiles_and_event_evidence.md) | R2: typed global controls, direct source routes and bounded independent event observations. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | Implementation/verification PENDING; hardware NOT RUN |
+| [03](03_interrupt_profiles_and_event_evidence.md) | R2: typed global controls, direct source routes and bounded independent event observations. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | IMPLEMENTED (software); hardware NOT RUN |
 | [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |
 
 Execute in order because the prompts share the profile image, operation engine,

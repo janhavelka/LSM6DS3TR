@@ -120,8 +120,10 @@ closeout commit must also pass all CI jobs; its evidence is described in the
 Prompt 03 starts from the accepted fourth-dataset closeout and supplies typed
 shared electrical controls, supported direct routes, 6D/4D orientation and
 bounded independent source observations with acknowledgement effects. Its
-implementation resolution and local/exact-commit CI acceptance gate remain
-**PENDING** in the [execution record](prompts/README.md#prompt-03-execution-record).
+implementation resolution is `d35165d4d12e8d2a1be6e323326b4df966fac00b`.
+All 202 native tests, three Arduino targets and local documentation/contract/
+package checks passed. The exact final closeout commit must also pass all seven
+CI jobs; see the [execution record](prompts/README.md#prompt-03-execution-record).
 Prompt 04 filter extensions remain **NOT IMPLEMENTED**. Physical fourth-dataset,
 electrical, pulse, interrupt-loss and orientation evidence is **NOT RUN**.
 
