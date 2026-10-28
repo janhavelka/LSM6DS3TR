@@ -680,12 +680,13 @@ public:
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
   Status startReconcile(const OperationTiming& timing, OperationToken& token);
 
-  /// @brief Set and verify both sensor ODRs to power-down.
+  /// @brief Mask interrupt routes, then set and verify both sensor ODRs to power-down.
   /// @note Requires observed FIFO BYPASS before either sensor write.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
   /// @return IN_PROGRESS when accepted, otherwise a zero-I2C admission error.
-  /// @note Success leaves configuration UNCONFIGURED; no other register is claimed.
+  /// @note Success leaves configuration UNCONFIGURED. Only sensor power-down
+  /// and the four masked route registers are proved, not a complete profile.
   Status startPowerDown(const OperationTiming& timing, OperationToken& token);
 
   /// @brief Start bounded built-in self-test and full-profile restoration/readback.
