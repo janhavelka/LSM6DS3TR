@@ -80,12 +80,16 @@ until full profile reapply and readback succeeds. Cancellation remains
 bus-silent and therefore reports unknown provenance instead of performing this
 I2C cleanup.
 
-The public hard callback ceiling is `16 * (samples + 1) + 106`: each of four
+The public hard callback ceiling is `16 * (samples + 1) + 122`: each of four
 phases reserves three readiness checks plus one burst for its discard and
 averaged samples, normal fixed test work uses 20 callbacks, one additional
 callback is reserved for a failed terminal write followed by cleanup, and exact
-profile restoration reserves 85, including the fixed bank-A policy and bounded
-counter resolution/enable stages when restoring a timestamp/step profile.
+profile restoration reserves 93, including fixed bank-A policy, bounded counter
+resolution/enable stages and final route activation. Eight initial route-mask
+callbacks precede temporary settings; the same mask proof is reused for restore.
+The restored profile is the actual pre-test verified profile, including its
+routes, rather than an unapplied staged draft. Maintenance can lose pending
+event evidence and reports that limitation explicitly.
 
 ## Calibration Is Software Bias Estimation, Not A Chip Procedure
 
@@ -105,3 +109,13 @@ fixture assumptions:
 ST design tip DT0105 describes generic one- and three-point accelerometer
 calibration math, but it is not an LSM6DS3TR-C register procedure and does not
 override the production API contract.
+
+## DRDY And Event Effects During Measurement
+
+Calibration performs no configuration writes and preserves selected routes, but
+its output reads can acknowledge corresponding latched DRDY signals. Normal
+samples have the same output-read effect. Terminal acknowledgement masks expose
+confirmed/possible effects; they do not prove that an interrupt was pending.
+Self-test masks and verifies routes before changing sensor/test settings and
+restores them through the shared configure owner. It does not read source
+registers to manufacture a clean event history. Cancellation remains bus-silent.

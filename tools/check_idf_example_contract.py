@@ -16,7 +16,7 @@ COMMANDS = {
     "help", "?", "version", "ver", "status", "diag", "job", "result",
     "bind", "unbind", "cancel", "scan", "addr", "freq", "profile", "cfg",
     "settings", "probe", "configure", "sample", "reset", "boot", "recover",
-    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "fifo", "counterreset", "rreg",
+    "reconcile", "powerdown", "selftest", "calxl", "calg", "purge", "fifo", "counterreset", "events", "rreg",
     "wreg", "dump", "stress", "stress_mix",
 }
 
@@ -26,7 +26,7 @@ PROFILE_FIELDS = {
     "g_sleep", "bdu", "offset_weight", "offset", "fifo",
     "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark",
     "fifo_fourth", "fifo_fourth_dec", "fifo_trigger", "timestamp_resolution",
-    "interrupts",
+    "interrupts", "irq", "irq_polarity", "irq_drive", "irq_drdy", "irq_latch", "irq_combine", "int1", "int2", "orientation",
 }
 
 REQUIRED_IDF_TOKENS = (
@@ -48,6 +48,25 @@ REQUIRED_IDF_TOKENS = (
     "OperationTiming",
     "startFifoRead",
     "startCounterReset",
+    "startEventRead",
+    "EventReadRequest",
+    "profile_cli::eventRequest",
+    "result.events.requestedMask",
+    "result.events.mayHaveAcknowledgedMask",
+    "result.events.acknowledgedMask",
+    "result.events.historyMayBeLost",
+    "printEventObservation",
+    "timestamp_end_status=unavailable",
+    "pad_level=unobserved",
+    "observations=sequential",
+    "expected events [ready|fifo|embedded|orientation|all]",
+    "TaskHandle_t interruptOwnerTask = nullptr",
+    "interruptOwnerTask = xTaskGetCurrentTaskHandle()",
+    "xTaskNotifyFromISR(interruptOwnerTask, 1U, eSetBits, &higherPriorityTaskWoken)",
+    "xTaskNotifyWait(0U, 1U, &notificationBits, 0)",
+    "bool interruptNotificationPending = false",
+    "serviceInterruptNotification(nowMs())",
+
     "result.counters.epoch",
     "result.counters.timestampResetMayHaveOccurred",
     "result.counters.stepResetMayHaveOccurred",
@@ -165,6 +184,18 @@ def main() -> int:
     for stale in ("ArduinoCompat.cpp", "Arduino.h", "Wire.h"):
         if (IDF_MAIN_DIR / stale).exists():
             fail(f"stale compatibility file remains: {stale}")
+
+    irq_hook = re.search(r"void IRAM_ATTR onImuInterrupt\([^)]*\)\s*\{([^}]+)\}", main_text)
+    expected_irq_body = (
+        "if (interruptOwnerTask == nullptr) return; "
+        "BaseType_t higherPriorityTaskWoken = pdFALSE; "
+        "(void)xTaskNotifyFromISR(interruptOwnerTask, 1U, eSetBits, &higherPriorityTaskWoken); "
+        "if (higherPriorityTaskWoken == pdTRUE) portYIELD_FROM_ISR();"
+    )
+    if irq_hook is None or " ".join(irq_hook.group(1).split()) != expected_irq_body:
+        fail("native ISR hook must only publish the application-owned notification")
+    if "gpio_isr_handler_add(" in main_text:
+        fail("native diagnostic example must not attach an unconfigured fixture GPIO")
 
     idf_commands = handled_commands(main_text)
     arduino_commands = handled_commands(arduino_text)

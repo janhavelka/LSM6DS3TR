@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "driver/i2c_master.h"
+#include "esp_attr.h"
 #include "esp_err.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
@@ -64,6 +65,19 @@ bool configureAfterProbe = false;
 PollResult lastPoll{};
 OperationResult lastResult{};
 bool lastResultAvailable = false;
+// Application-owned notification only: no GPIO is attached by this diagnostic
+// example. After choosing and configuring a fixture pin, register this ISR hook
+// with that framework's GPIO API. This example reserves bit 0 of notification
+// index 0 on its existing owner task; do not share that slot with another user.
+// Multiple edges intentionally coalesce; no task, queue or driver ISR is added.
+TaskHandle_t interruptOwnerTask = nullptr;
+bool interruptNotificationPending = false;  // Accessed only by the owner task.
+[[maybe_unused]] void IRAM_ATTR onImuInterrupt(void*) {
+  if (interruptOwnerTask == nullptr) return;
+  BaseType_t higherPriorityTaskWoken = pdFALSE;
+  (void)xTaskNotifyFromISR(interruptOwnerTask, 1U, eSetBits, &higherPriorityTaskWoken);
+  if (higherPriorityTaskWoken == pdTRUE) portYIELD_FROM_ISR();
+}
 char input[INPUT_CAPACITY]{};
 size_t inputLength = 0;
 bool inputOverflow = false;
@@ -274,6 +288,7 @@ const char* jobName(JobKind kind) {
     case JobKind::FIFO_PURGE: return "purge";
     case JobKind::FIFO_READ: return "fifo";
     case JobKind::COUNTER_RESET: return "counterreset";
+    case JobKind::EVENT_READ: return "events";
     default: return "none";
   }
 }
@@ -326,6 +341,17 @@ void printStatus(const Status& status) {
          static_cast<unsigned>(status.code), status.detail, status.msg);
 }
 
+void printInterruptRoutes(const char* label, const char* pin,
+                           const InterruptRoutes& routes) {
+  printf("profile %s %s accel=%s gyro=%s temp=%s watermark=%s full=%s overrun=%s step=%s step_overflow=%s timestamp=%s orientation=%s\n",
+      label, pin, profile_cli::boolName(routes.accelReady),
+      profile_cli::boolName(routes.gyroReady), profile_cli::boolName(routes.temperatureReady),
+      profile_cli::boolName(routes.fifoWatermark), profile_cli::boolName(routes.fifoFull),
+      profile_cli::boolName(routes.fifoOverrun), profile_cli::boolName(routes.stepDetected),
+      profile_cli::boolName(routes.stepOverflow), profile_cli::boolName(routes.timestampEndCounter),
+      profile_cli::boolName(routes.orientation));
+}
+
 void printProfileRecord(const char* label, const DeviceProfile& value) {
   printf(
       "profile %s xl_odr=%s xl_fs_g=%s xl_power=%s xl_lpf2=%s "
@@ -367,6 +393,16 @@ void printProfileRecord(const char* label, const DeviceProfile& value) {
       profile_cli::fifoDecimationName(value.fifo.fourthDecimation),
       profile_cli::fifoTriggerName(value.fifo.trigger),
       profile_cli::timestampResolutionName(value.fifo.timestampResolution));
+  printf("profile %s irq_polarity=%s irq_drive=%s irq_drdy=%s irq_latch=%s irq_combine=%s orientation=%s orientation_threshold_deg=%s\n",
+      label, profile_cli::interruptPolarityName(value.interrupts.polarity),
+      profile_cli::interruptDriveName(value.interrupts.drive),
+      profile_cli::dataReadyModeName(value.interrupts.dataReadyMode),
+      profile_cli::boolName(value.interrupts.latchEvents),
+      profile_cli::boolName(value.interrupts.int2OnInt1),
+      profile_cli::orientationModeName(value.interrupts.orientation.mode),
+      profile_cli::orientationThresholdName(value.interrupts.orientation.threshold));
+  printInterruptRoutes(label, "int1", value.interrupts.int1);
+  printInterruptRoutes(label, "int2", value.interrupts.int2);
 }
 
 void printProfiles(uint64_t now) {
@@ -397,7 +433,7 @@ void printProfiles(uint64_t now) {
              : "no",
          static_cast<unsigned>(verifiedStatus.code), verifiedStatus.msg);
   if (verifiedStatus.ok()) printProfileRecord("verified", verified);
-  puts("profile locked if_inc=on bdu=on byte_order=little fifo_sources=motion_or_typed_fourth interrupts=off");
+  puts("profile locked if_inc=on bdu=on byte_order=little fifo_sources=motion_or_typed_fourth interrupts=typed");
 }
 
 bool ownerMutationBlocked() {
@@ -488,6 +524,12 @@ void printAxes(const char* label, const Axes& axes) {
   printf("  %s x=%.6f y=%.6f z=%.6f\n", label, axes.x, axes.y, axes.z);
 }
 
+void printEventObservation(const char* name, const EventObservation& observation) {
+  printf("  event_source %s valid=%s raw=0x%02X read_ms=%" PRIu64 "\n",
+      name, observation.valid ? "yes" : "no", static_cast<unsigned>(observation.raw),
+      observation.readUptimeMs);
+}
+
 void printTerminalResult(const OperationResult& result) {
   printf("result token=%" PRIu64
          " kind=%s state=%s transactions=%" PRIu32 "/%" PRIu32
@@ -505,6 +547,12 @@ void printTerminalResult(const OperationResult& result) {
       result.counters.stepResetMayHaveOccurred ? "yes" : "no",
       result.counters.stepResetConfirmed ? "yes" : "no",
       result.registerBankMayBeUnknown ? "yes" : "no");
+
+  printf("  event_effects requested=0x%02X read=0x%02X ack_possible=0x%02X ack_confirmed=0x%02X history_may_be_lost=%s\n",
+      static_cast<unsigned>(result.events.requestedMask), static_cast<unsigned>(result.events.readMask),
+      static_cast<unsigned>(result.events.mayHaveAcknowledgedMask),
+      static_cast<unsigned>(result.events.acknowledgedMask),
+      result.events.historyMayBeLost ? "yes" : "no");
 
   if (result.kind == JobKind::PROBE) {
     printf("  address=0x%02X who_am_i=0x%02X\n", result.probe.address,
@@ -552,6 +600,21 @@ void printTerminalResult(const OperationResult& result) {
            result.calibration.bias.z, result.calibration.peakToPeak.x,
            result.calibration.peakToPeak.y, result.calibration.peakToPeak.z,
            result.calibration.samples);
+  } else if (result.kind == JobKind::EVENT_READ) {
+    const EventReadResult& events = result.events;
+    printf("  events token=%" PRIu64 " generation=%lu ready_mask=0x%02X fifo_watermark=%s fifo_full=%s fifo_overrun=%s step=%s step_overflow=%s\n",
+        events.token.value, static_cast<unsigned long>(events.configGeneration),
+        static_cast<unsigned>(events.dataReadyMask), events.fifoWatermark ? "yes" : "no",
+        events.fifoFull ? "yes" : "no", events.fifoOverrun ? "yes" : "no",
+        events.stepDetected ? "yes" : "no", events.stepOverflow ? "yes" : "no");
+    printEventObservation("ready", events.ready);
+    printEventObservation("fifo", events.fifo);
+    printEventObservation("embedded", events.embedded);
+    printEventObservation("orientation", events.orientation);
+    printf("  orientation detected=%s xl=%s xh=%s yl=%s yh=%s zl=%s zh=%s timestamp_routed=%s timestamp_end_status=unavailable pad_level=unobserved observations=sequential\n",
+        events.orientationDetected ? "yes" : "no", events.xLow ? "yes" : "no",
+        events.xHigh ? "yes" : "no", events.yLow ? "yes" : "no", events.yHigh ? "yes" : "no",
+        events.zLow ? "yes" : "no", events.zHigh ? "yes" : "no", events.timestampRouted ? "yes" : "no");
   } else if (result.kind == JobKind::FIFO_READ) {
     const FifoReadResult& batch = result.fifoRead;
     printf("  fifo records=%u consumed=%u possible=%u discarded=%u truncated=%s overrun=%s pattern_discontinuity=%s continuity_lost=%s\n",
@@ -861,6 +924,25 @@ void serviceOperation(uint64_t now) {
   }
 }
 
+// The ISR never calls any driver API. The existing serialized owner starts
+// and polls the typed event job; latched source reads may acknowledge events.
+void serviceInterruptNotification(uint64_t now) {
+  uint32_t notificationBits = 0;
+  if (xTaskNotifyWait(0U, 1U, &notificationBits, 0) == pdTRUE &&
+      (notificationBits & 1U) != 0U) interruptNotificationPending = true;
+  if (!interruptNotificationPending || device.operationActive() ||
+      device.resultPending() || pendingToken.valid() || session.kind != SessionKind::NONE) return;
+  interruptNotificationPending = false;
+  DeviceProfile verified{};
+  const Status status = device.getVerifiedProfile(verified, now);
+  if (!status.ok()) { printStatus(status); return; }
+  EventReadRequest request{};
+  (void)profile_cli::eventRequest("all", verified, request);
+  puts("irq notification coalesced; source reads may acknowledge latches; no pin level or cause inferred");
+  OperationToken token{};
+  (void)acceptedStart(device.startEventRead(request, timing(now, 5000), token), token);
+}
+
 bool parseUnsigned(const char* text, uint32_t maximum, uint32_t& out) {
   if (text == nullptr || *text == '\0') return false;
   char* end = nullptr;
@@ -895,7 +977,7 @@ void printHelp() {
   puts("Values: g_odr=pd|12.5|26|52|104|208|416|833|1660|3330|6660");
   puts("Values: xl_fs=2|4|8|16 g_fs=125|250|500|1000|2000 xl_power/g_power=hp|lp");
   puts("Values: offset_weight=1|16; offset components=-127..127");
-  puts("Invariant probes: xl_slope_hp xl_6d_lpf g_hpf bdu interrupts");
+  puts("Invariant probes: xl_slope_hp xl_6d_lpf g_hpf bdu");
   puts("FIFO profile: profile set fifo <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <0..2047>");
   puts("FIFO fields: fifo_mode fifo_odr fifo_g_dec fifo_xl_dec fifo_watermark; decimation=off|1|2|3|4|8|16|32");
   puts("FIFO off: profile set fifo off; watermark 0 is always reached, not disabled.");
@@ -903,6 +985,12 @@ void printHelp() {
   puts("Fourth fields: fifo_fourth_dec fifo_trigger timestamp_resolution; step triggers all enabled datasets, not regular ODR.");
   puts("Temperature FIFO records may repeat; buffered data has no TDA freshness proof. Counter ticks/steps are raw and wraps are unexpanded.");
   puts("Counter reset: counterreset <timestamp|steps|both>; requires verified timestamp_step profile in bypass. This changes counter epochs.");
+  puts("Interrupt electrical: profile set irq <high|low> <push_pull|open_drain> <latched|pulsed> <latch_events> <combine>");
+  puts("Interrupt fields: irq_polarity irq_drive irq_drdy irq_latch irq_combine; interrupts off resets all routes/electrical choices.");
+  puts("Routes: profile set int1|int2 <accel|gyro|temp|watermark|full|overrun|step|step_overflow|timestamp|orientation> <0|1>; physical pin/source pairs are validated.");
+  puts("Orientation: profile set orientation <6d|4d> <80|70|60|50> <int1|int2|both> | orientation off");
+  puts("Events: events [ready|fifo|embedded|orientation|all]; all selects configured engines. Latched source reads may acknowledge events; status reads do not.");
+  puts("Timestamp end has no readable status bit; external GPIO evidence is separate. Acknowledge explicitly with counterreset timestamp (also resets the timer).");
   puts("Booleans: 0/1, off/on, or false/true; unsupported production values are rejected.");
   puts("Stress: stress [1..10000] [all|accel|gyro|temp] [ready|direct]");
   puts("Stress: stress_mix [1..10000] (probe/reconcile/ready/direct, non-destructive)");
@@ -1444,6 +1532,23 @@ void handleCommand(char* line) {
                             timing(now, calibrationTimeoutMs(request, verified)),
                             token),
                         token);
+  } else if (strcmp(command, "events") == 0) {
+    if (count > 2U) {
+      puts("expected events [ready|fifo|embedded|orientation|all]");
+      return;
+    }
+    if (!requireOwnerIdle("events")) return;
+    DeviceProfile verified{};
+    const Status status = device.getVerifiedProfile(verified, now);
+    if (!status.ok()) { printStatus(status); return; }
+    EventReadRequest request{};
+    if (!profile_cli::eventRequest(count == 2U ? tokens[1] : "all", verified, request)) {
+      puts("expected events [ready|fifo|embedded|orientation|all]");
+      return;
+    }
+    puts("event read requested; routed latched sources may be acknowledged; observations are sequential");
+    OperationToken token{};
+    (void)acceptedStart(device.startEventRead(request, timing(now, 5000), token), token);
   } else if (strcmp(command, "counterreset") == 0) {
     if (count != 2U || (strcmp(tokens[1], "timestamp") != 0 &&
         strcmp(tokens[1], "steps") != 0 && strcmp(tokens[1], "both") != 0)) {
@@ -1637,6 +1742,7 @@ void cliLoop() {
   while (true) {
     serviceInput();
     serviceOperation(nowMs());
+    serviceInterruptNotification(nowMs());
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
@@ -1644,6 +1750,7 @@ void cliLoop() {
 }  // namespace
 
 extern "C" void app_main(void) {
+  interruptOwnerTask = xTaskGetCurrentTaskHandle();
   setvbuf(stdin, nullptr, _IONBF, 0);
   setvbuf(stdout, nullptr, _IONBF, 0);
   const int stdinFlags = fcntl(STDIN_FILENO, F_GETFL, 0);

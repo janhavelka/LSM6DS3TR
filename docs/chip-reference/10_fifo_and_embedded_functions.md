@@ -4,8 +4,9 @@
 > typed internal-motion FIFO acquisition and bounded destructive purge are
 > supported in software; physical qualification is NOT RUN for the new path.
 > Temperature and timestamp/step fourth datasets are supported in software.
-> External datasets and interrupt routes remain unsupported. Physical
-> fourth-dataset, trigger and counter qualification is NOT RUN.
+> External datasets remain unsupported. Typed interrupt routes and 6D/4D source
+> observation are supported in software; their physical electrical, pulse and
+> orientation qualification is NOT RUN.
 
 ## FIFO Data Model
 
@@ -71,8 +72,9 @@ started from fetched `main` commit
 `FifoProfile` admits only Bypass, FIFO stop-on-full, and Continuous with
 complete 16-bit internal gyro/accel datasets and an optional fourth dataset.
 All eight decimator encodings above are represented. Reserved and triggered
-modes, high-byte packing, stop-on-threshold, external datasets and
-interrupt routes remain unavailable through the production profile.
+modes, high-byte packing, stop-on-threshold and external datasets remain
+unavailable through the production profile. Typed interrupt routes have their
+own validated profile ownership.
 
 For internal triggering the FIFO ODR is 12.5..6660 Hz. Enabled motion datasets
 require their active sensor; a fourth-only schema still requires its documented
@@ -106,7 +108,8 @@ AN5130 section 8.6, p. 91 defines watermark as count reaching or exceeding
 `FTH[10:0]`. **Watermark zero is always reached; it does not disable the
 watermark.** The returned flag is the observed hardware bit; no immediate
 post-reset WaterM value or first-update time is synthesized. `STOP_ON_FTH` remains zero, so the threshold does not cap capacity
-or halt collection. Routes remain off independently of this status bit.
+or halt collection. A typed FIFO interrupt route may expose this observed status;
+the watermark bit itself does not enable a route.
 
 AN5130 section 4.7.1, p. 27 and section 8.4, p. 88 explicitly enable automatic
 circular rounding when reading `FIFO_DATA_OUT_L/H`: a burst cycles over
@@ -308,3 +311,25 @@ cadence, pedometer policy, counter wrap and step-event behavior are **NOT RUN**.
 
 Source: datasheet sensor-hub registers pp. 69, 76-85, 99-104; AN5130
 pp. 58-73.
+
+## Typed Route And Counter Acknowledgement Integration
+
+The existing FIFO/counter profile supplies dependencies for typed watermark,
+full, overrun, step-detected, step-overflow and timestamp-end routes. A route
+never implicitly enables its source engine. Step-event FIFO collection remains
+separate from MCU route selection and from unsupported trigger-switched modes.
+
+`startEventRead` observes FIFO status without draining words and FUNC_SRC1
+without resetting counters. Global LIR plus the corresponding route makes
+step-source reads acknowledge the latched request. Without that latch/route
+combination, source flags are short-lived observations rather than recoverable
+history. The result retains each callback's own host time and effect evidence.
+
+Timestamp end-counter has no readable source flag in FUNC_SRC1 or FUNC_SRC2.
+AN5130 p. 57 describes a latched INT1 indication near `0xFF0000` at 25 us or
+`0xFFFF00` at 6.4 ms. A raw timestamp near those values cannot prove the actual
+pad state or recover missed wraps. The explicit timestamp reset writes `0xAA`
+to `TIMESTAMP2`, acknowledges that indication and resets the raw timer; its
+counter epoch and possible/confirmed effect remain visible. The existing reset
+API requires the known timestamp/step Bypass profile. Event reads and reconcile
+never perform that acknowledgement implicitly.

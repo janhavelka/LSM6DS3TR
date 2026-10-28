@@ -36,3 +36,28 @@
 - `SDO/SA0` has no pull-up in the default two-interface configuration; its pull-up is enabled in 3-wire SPI. `SDx`/`SCx` auxiliary-bus pull-ups are controlled by `MASTER_CONFIG.PULL_UP_EN`. Source: datasheet, pp. 47-48, 69.
 - `INT1` and `INT2` are forced low by default. `CS` has an internal pull-up enabled by default; setting `CTRL4_C.I2C_disable=1` disables that pull-up together with the I2C interface. Source: datasheet, pp. 47-48, 64.
 - Internal 30..50 kohm pull-ups on NC pins 10 and 11 are enabled by default. The vendor disable sequence is `0x00 <- 0x80`, `0x05 <- 0x01`, `0x00 <- 0x00`; it accesses undocumented controls and is therefore board/diagnostic guidance, not a production-profile recipe. Source: datasheet, pp. 47-48.
+
+## Typed Interrupt Integration
+
+`InterruptProfile` configures sensor-side INT1/INT2 behavior only. Polarity
+(`CTRL3_C.H_LACTIVE`) and push-pull/open-drain (`PP_OD`) are shared by both pads;
+the library does not invent independent per-pin electrical settings. Appropriate
+pull resistors, MCU voltage compatibility, GPIO setup, ISR attachment and
+notification scheduling remain the application's responsibility. Verify the
+selected electrical policy with the actual board and a logic analyzer before
+claiming qualification. New electrical and pulse tests are **NOT RUN**.
+
+`CTRL4_C.INT2_on_INT1` combines enabled INT2 signals onto INT1 in logic OR.
+Direct route restrictions still apply: temperature and step overflow belong to
+INT2; step detect and timestamp end-counter belong to INT1. Combining does not
+move those ownership bits or provide a timestamp route on INT2. Source:
+datasheet pp. 59-60, 63-64, 92-93; AN5130 pp. 33-35.
+
+No public API is ISR-safe. The ESP32 example ISR hook only notifies the existing
+owner task through a reserved FreeRTOS task-notification bit. The owner uses a
+zero-timeout check and one bounded pending flag, then starts/polls
+`startEventRead` outside ISR context. The application must reserve that bit and
+provide the existing owner task handle before attaching its ISR. Multiple edges
+may coalesce; this is notification, not event counting. No new task or queue is
+created. The examples leave the hook unconnected and configure no GPIO or
+interrupt by default. An event source observation is not a pad-level read.

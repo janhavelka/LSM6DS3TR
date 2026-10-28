@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Typed shared INT1/INT2 electrical controls, supported per-pin DRDY/FIFO/step/
+  timestamp routes and 6D/4D orientation profiles with exact thresholds.
+- Bounded `startEventRead` with independent raw source observations, generation,
+  host read times and explicit partial-read/acknowledgement evidence. Both CLIs
+  expose atomic route/orientation edits and effectful event reads; external ISR
+  notification examples keep all driver calls in the owner task.
 - Typed mutually exclusive temperature and timestamp/step FIFO fourth datasets,
   shared internal/step-event collection triggers and 6.4 ms/25 us timer policy.
   Complete records retain raw counters, generation, counter epoch and truthful
@@ -26,10 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Matching Arduino/native ESP-IDF FIFO/profile commands, bounded behavioral FIFO
   fault regressions, precise support checks and repeatable physical qualification
   cases. New FIFO hardware qualification is **NOT RUN**; external sources,
-  interrupt routes and other omitted features stay unsupported.
+  unrelated event engines and other omitted features stay unsupported.
 
 ### Changed
 
+- Mask and verify routes before dependency changes, then activate and verify
+  selected routes after full profile readback and settling. Maintenance restores
+  the verified route profile and reports possible event-history loss. Power-down
+  verifies routes and sensors off; raw nonzero route-mask writes are rejected.
+- Keep DRDY pulse mode separate from global embedded-event latching. Timestamp
+  end-counter has no readable source flag; explicit reset acknowledgement breaks
+  its counter epoch. Physical electrical/pulse/loss/orientation tests are NOT RUN.
 - Extended the single untagged pattern/decoder to three datasets (at most 96
   trigger ticks and 393 words) and reserved the complete enabled trigger group
   in the Continuous occupancy proof. Counter source/resolution/lifecycle changes

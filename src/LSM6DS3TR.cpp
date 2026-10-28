@@ -17,13 +17,16 @@ constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
 constexpr uint64_t CLOCK_QUANTIZATION_MARGIN_MS = 1;
-constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 106;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 122;
 // Datasheet pp.97/103/104: fixed bank-A pedometer policy, modified only in
 // proved sensor power-down. No sensor-hub or general embedded-bank API.
 constexpr uint8_t PEDOMETER_REGISTERS[] = {0x0F, 0x14, 0x15};
 constexpr uint8_t PEDOMETER_VALUES[] = {0x10, 0x6E, 0x00};
 constexpr uint8_t COUNTER_ENABLE = 0x34;  // FUNC_EN | PEDO_EN | TIMER_EN.
 constexpr uint8_t PEDOMETER_RESET = 0x02;
+// Datasheet pp.59/60/92/93: source routes are masked before dependencies change.
+constexpr uint8_t ROUTE_REGISTERS[] = {
+    cmd::REG_INT1_CTRL, cmd::REG_INT2_CTRL, cmd::REG_MD1_CFG, cmd::REG_MD2_CFG};
 constexpr float SELF_TEST_ACCEL_MIN_G = 0.090f;
 constexpr float SELF_TEST_ACCEL_MAX_G = 1.700f;
 constexpr float SELF_TEST_GYRO_MIN_DPS = 150.0f;
@@ -283,6 +286,59 @@ bool counterProfile(const DeviceProfile& profile) {
          profile.fifo.fourthDataset == FifoFourthDataset::TIMESTAMP_STEP;
 }
 
+bool orientationEnabled(const DeviceProfile& profile) {
+  return profile.interrupts.enabled &&
+         profile.interrupts.orientation.mode != OrientationMode::OFF;
+}
+
+bool anyRoutes(const InterruptRoutes& routes) {
+  return routes.accelReady || routes.gyroReady || routes.temperatureReady ||
+      routes.fifoWatermark || routes.fifoFull || routes.fifoOverrun ||
+      routes.stepDetected || routes.stepOverflow || routes.timestampEndCounter ||
+      routes.orientation;
+}
+
+uint8_t buildDataRoutes(const InterruptRoutes& routes, bool int2) {
+  return static_cast<uint8_t>((routes.accelReady ? 0x01U : 0U) |
+      (routes.gyroReady ? 0x02U : 0U) | (routes.temperatureReady ? 0x04U : 0U) |
+      (routes.fifoWatermark ? 0x08U : 0U) | (routes.fifoOverrun ? 0x10U : 0U) |
+      (routes.fifoFull ? 0x20U : 0U) |
+      (int2 && routes.stepOverflow ? 0x40U : 0U) |
+      (!int2 && routes.stepDetected ? 0x80U : 0U));
+}
+
+uint8_t buildEventRoutes(const InterruptRoutes& routes) {
+  return static_cast<uint8_t>((routes.timestampEndCounter ? 0x01U : 0U) |
+                              (routes.orientation ? 0x04U : 0U));
+}
+
+uint8_t routeValue(const DeviceProfile& profile, uint8_t index) {
+  if (!profile.interrupts.enabled) return 0U;
+  switch (index) {
+    case 0: return buildDataRoutes(profile.interrupts.int1, false);
+    case 1: return buildDataRoutes(profile.interrupts.int2, true);
+    case 2: return buildEventRoutes(profile.interrupts.int1);
+    default: return buildEventRoutes(profile.interrupts.int2);
+  }
+}
+
+bool routeRegister(uint8_t reg) {
+  for (uint8_t candidate : ROUTE_REGISTERS)
+    if (reg == candidate) return true;
+  return false;
+}
+
+uint8_t buildTapConfig(const DeviceProfile& profile) {
+  return static_cast<uint8_t>((orientationEnabled(profile) ? 0x80U : 0U) |
+      (profile.interrupts.enabled && profile.interrupts.latchEvents ? cmd::MASK_LIR : 0U));
+}
+
+uint8_t buildOrientationThreshold(const DeviceProfile& profile) {
+  if (!orientationEnabled(profile)) return 0U;
+  return static_cast<uint8_t>((static_cast<uint8_t>(profile.interrupts.orientation.threshold) << 5U) |
+      (profile.interrupts.orientation.mode == OrientationMode::FOUR_D ? 0x80U : 0U));
+}
+
 uint8_t buildCounterControl(const DeviceProfile& profile) {
   return counterProfile(profile) ? COUNTER_ENABLE : 0U;
 }
@@ -336,11 +392,17 @@ uint8_t buildCtrl2(const DeviceProfile& profile) {
 
 uint8_t buildCtrl3(const DeviceProfile& profile) {
   return static_cast<uint8_t>(cmd::MASK_IF_INC |
-                              (profile.blockDataUpdate ? cmd::MASK_BDU : 0U));
+      (profile.blockDataUpdate ? cmd::MASK_BDU : 0U) |
+      (profile.interrupts.enabled && profile.interrupts.polarity == InterruptPolarity::ACTIVE_LOW
+           ? cmd::MASK_H_LACTIVE : 0U) |
+      (profile.interrupts.enabled && profile.interrupts.drive == InterruptDrive::OPEN_DRAIN_PAD
+           ? cmd::MASK_PP_OD : 0U));
 }
 
 uint8_t buildCtrl4(const DeviceProfile& profile) {
   return static_cast<uint8_t>((profile.gyroSleepEnabled ? cmd::MASK_SLEEP_G : 0U) |
+      (profile.interrupts.enabled && profile.interrupts.int2OnInt1
+           ? cmd::MASK_INT2_ON_INT1 : 0U) |
                               (profile.gyroFilter.lpf1Enabled
                                    ? cmd::MASK_LPF1_SEL_G
                                    : 0U));
@@ -474,9 +536,47 @@ Status validateProfile(const DeviceProfile& profile) {
         Err::UNSUPPORTED_PROFILE,
         "Slope/high-pass output and 6D filtering are not production sample profiles");
   }
-  if (profile.interrupts.enabled) {
-    return Status::Error(Err::UNSUPPORTED_PROFILE,
-                         "Interrupt routing is not an enabled profile");
+  const InterruptProfile& interrupts = profile.interrupts;
+  if (static_cast<uint8_t>(interrupts.polarity) > 1U ||
+      static_cast<uint8_t>(interrupts.drive) > 1U ||
+      static_cast<uint8_t>(interrupts.dataReadyMode) > 1U ||
+      static_cast<uint8_t>(interrupts.orientation.mode) > 2U ||
+      static_cast<uint8_t>(interrupts.orientation.threshold) > 3U) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid interrupt electrical or orientation choice");
+  }
+  if (!interrupts.enabled &&
+      (interrupts.polarity != InterruptPolarity::ACTIVE_HIGH ||
+       interrupts.drive != InterruptDrive::PUSH_PULL ||
+       interrupts.dataReadyMode != DataReadyMode::LATCHED || interrupts.latchEvents ||
+       interrupts.int2OnInt1 || anyRoutes(interrupts.int1) || anyRoutes(interrupts.int2) ||
+       interrupts.orientation.mode != OrientationMode::OFF ||
+       interrupts.orientation.threshold != OrientationThreshold::DEG_80)) {
+    return Status::Error(Err::INVALID_CONFIG, "Disabled interrupts require canonical defaults");
+  }
+  if (interrupts.int1.temperatureReady || interrupts.int1.stepOverflow ||
+      interrupts.int2.stepDetected || interrupts.int2.timestampEndCounter) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE, "Source has no direct route on this pin");
+  }
+  const InterruptRoutes routes[] = {interrupts.int1, interrupts.int2};
+  for (const InterruptRoutes& route : routes) {
+    if ((route.accelReady && profile.accelOdr == Odr::POWER_DOWN) ||
+        (route.gyroReady && (profile.gyroOdr == Odr::POWER_DOWN || profile.gyroSleepEnabled)) ||
+        (route.temperatureReady && profile.accelOdr == Odr::POWER_DOWN &&
+                                   profile.gyroOdr == Odr::POWER_DOWN) ||
+        ((route.fifoWatermark || route.fifoFull || route.fifoOverrun) && !fifoCollecting(profile)) ||
+        ((route.stepDetected || route.stepOverflow || route.timestampEndCounter) &&
+         !counterProfile(profile)) ||
+        (route.orientation && interrupts.orientation.mode == OrientationMode::OFF)) {
+      return Status::Error(Err::INVALID_CONFIG, "Interrupt route requires its configured source");
+    }
+  }
+  if (interrupts.orientation.mode != OrientationMode::OFF) {
+    if (!interrupts.enabled || profile.accelOdr == Odr::POWER_DOWN ||
+        (!interrupts.int1.orientation && !interrupts.int2.orientation)) {
+      return Status::Error(Err::INVALID_CONFIG, "Orientation requires active accel and a route");
+    }
+  } else if (interrupts.orientation.threshold != OrientationThreshold::DEG_80) {
+    return Status::Error(Err::INVALID_CONFIG, "Disabled orientation requires default threshold");
   }
   const FifoProfile& fifo = profile.fifo;
   if (fifo.mode != FifoMode::BYPASS && fifo.mode != FifoMode::FIFO &&
@@ -891,6 +991,9 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   _workingResult.startedUptimeMs = timing.nowMs;
   _counterSetupStep = 0;
   _timestampResetNeeded = false;
+  _routeMaskStep = 0;
+  _routeEnableStep = 0;
+  _workingResult.events.configGeneration = _configGeneration;
   return inProgressStatus();
 }
 
@@ -1190,11 +1293,15 @@ void LSM6DS3TR::_prepareManagedImage(const DeviceProfile& profile) {
       static_cast<uint8_t>((static_cast<uint8_t>(profile.fifo.gyroDecimation) << 3U) |
                            static_cast<uint8_t>(profile.fifo.accelDecimation)),
       static_cast<uint8_t>(static_cast<uint8_t>(profile.fifo.fourthDecimation) << 3U),
-      buildFifoCtrl5(profile), 0, 0, 0,
+      buildFifoCtrl5(profile),
+      static_cast<uint8_t>(profile.interrupts.enabled &&
+          profile.interrupts.dataReadyMode == DataReadyMode::PULSED ? cmd::MASK_DRDY_PULSED : 0U),
+      routeValue(profile, 0), routeValue(profile, 1),
       buildCtrl1(profile), buildCtrl2(profile), buildCtrl3(profile),
       buildCtrl4(profile), 0, buildCtrl6(profile), buildCtrl7(profile),
-      buildCtrl8(profile), 0, buildCounterControl(profile), 0, 0, 0, 0, 0,
-      buildTimerResolution(profile), 0, 0, 0,
+      buildCtrl8(profile), 0, buildCounterControl(profile), 0,
+      buildTapConfig(profile), buildOrientationThreshold(profile), 0, 0,
+      buildTimerResolution(profile), 0, routeValue(profile, 2), routeValue(profile, 3),
       static_cast<uint8_t>(profile.accelUserOffset.x),
       static_cast<uint8_t>(profile.accelUserOffset.y),
       static_cast<uint8_t>(profile.accelUserOffset.z)};
@@ -1216,6 +1323,25 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
                          "Operation transaction limit exceeded");
   }
   uint8_t tx = reg;
+  uint8_t acknowledge = 0;
+  const InterruptProfile& interrupts = _verifiedProfile.interrupts;
+  const uint16_t end = static_cast<uint16_t>(reg) + static_cast<uint16_t>(length);
+  if (interrupts.enabled && interrupts.latchEvents) {
+    if (reg <= cmd::REG_D6D_SRC && end > cmd::REG_D6D_SRC &&
+        (interrupts.int1.orientation || interrupts.int2.orientation))
+      acknowledge |= EVENT_ORIENTATION;
+    if (reg <= cmd::REG_FUNC_SRC1 && end > cmd::REG_FUNC_SRC1 &&
+        (interrupts.int1.stepDetected || interrupts.int2.stepOverflow))
+      acknowledge |= EVENT_EMBEDDED;
+  }
+  const uint8_t outputHighBytes[] = {cmd::REG_OUT_TEMP_H, cmd::REG_OUTX_H_G,
+      cmd::REG_OUTY_H_G, cmd::REG_OUTZ_H_G, cmd::REG_OUTX_H_XL,
+      cmd::REG_OUTY_H_XL, cmd::REG_OUTZ_H_XL};
+  for (uint8_t high : outputHighBytes)
+    if (reg <= high && end > high) acknowledge |= EVENT_DATA_READY;
+  _workingResult.events.mayHaveAcknowledgedMask |= acknowledge;
+  if (_job == JobKind::EVENT_READ && acknowledge != 0U)
+    _hardwareStateMayHaveChanged = true;
   _transactionUsed = true;
   _operationTransactions = saturatingIncrement(_operationTransactions);
   Status status = normalizeTransport(_driverConfig.i2cWriteRead(
@@ -1223,9 +1349,11 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
       _driverConfig.i2cTimeoutMs, _driverConfig.i2cUser));
   if (status.ok()) {
     _transportSuccesses = saturatingIncrement(_transportSuccesses);
+    _workingResult.events.acknowledgedMask |= acknowledge;
     if (reg == cmd::REG_FUNC_CFG_ACCESS)
       _bankMayBeUnknown = (data[0] & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U;
   } else {
+    if (acknowledge != 0U) _workingResult.events.historyMayBeLost = true;
     _transportFailures = saturatingIncrement(_transportFailures);
     _lastTransportError = status;
     _lastTransportErrorUptimeMs = nowMs;
@@ -1245,6 +1373,7 @@ Status LSM6DS3TR::_writeByte(uint8_t reg, uint8_t value, uint64_t nowMs) {
   if (!_hardwareStateMayHaveChanged && _job != JobKind::COUNTER_RESET)
     _breakCounterContinuity();
   if (reg == cmd::REG_FUNC_CFG_ACCESS) _bankMayBeUnknown = true;
+  _workingResult.events.historyMayBeLost = true;
   _hardwareStateMayHaveChanged = true;
   _configurationMayBeUnknown = true;
   _transactionUsed = true;
@@ -1284,6 +1413,120 @@ void LSM6DS3TR::_invalidateConfiguration() {
 void LSM6DS3TR::_breakCounterContinuity() {
   _counterEpoch = saturatingIncrement64(_counterEpoch);
   _counterContinuityLost = true;
+}
+
+Status LSM6DS3TR::startEventRead(const EventReadRequest& request,
+                                const OperationTiming& timing, OperationToken& token) {
+  token = {};
+  const Status admission = _checkStart(timing);
+  if (!admission.ok()) return admission;
+  const uint8_t requested = static_cast<uint8_t>(
+      (request.dataReady ? EVENT_DATA_READY : 0U) | (request.fifo ? EVENT_FIFO : 0U) |
+      (request.embedded ? EVENT_EMBEDDED : 0U) | (request.orientation ? EVENT_ORIENTATION : 0U));
+  if (requested == 0U)
+    return Status::Error(Err::INVALID_PARAM, "Select at least one event source group");
+  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (!ready.ok()) return ready;
+  if ((request.fifo && !_verifiedProfile.fifo.enabled) ||
+      (request.embedded && !counterProfile(_verifiedProfile)) ||
+      (request.orientation && !orientationEnabled(_verifiedProfile)))
+    return Status::Error(Err::UNSUPPORTED_PROFILE, "Event source requires its configured engine");
+  const Status status = _start(JobKind::EVENT_READ, timing, token);
+  if (status.inProgress()) {
+    _operationTransactionLimit = MAX_EVENT_READ_TRANSACTIONS;
+    _workingResult.events.requestedMask = requested;
+    _workingResult.events.timestampRouted = _verifiedProfile.interrupts.enabled &&
+        _verifiedProfile.interrupts.int1.timestampEndCounter;
+  }
+  return status;
+}
+
+Status LSM6DS3TR::_stepEventRead(uint64_t nowMs) {
+  EventReadResult& events = _workingResult.events;
+  if (_step < 2U) {
+    uint8_t value = 0;
+    const uint8_t reg = _step == 0U ? cmd::REG_FUNC_CFG_ACCESS : cmd::REG_WHO_AM_I;
+    const Status status = _read(reg, &value, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((_step == 0U && (value & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) ||
+        (_step == 1U && value != cmd::WHO_AM_I_VALUE)) {
+      _invalidateConfiguration();
+      return Status::Error(_step == 0U ? Err::CONFIGURATION_UNKNOWN : Err::CHIP_ID_MISMATCH,
+                           "Event read bank or identity mismatch", value);
+    }
+    if (_step == 1U)
+      _workingResult.probe = {static_cast<uint8_t>(_driverConfig.address), value};
+    ++_step;
+    return inProgressStatus();
+  }
+  const uint8_t groups[] = {EVENT_DATA_READY, EVENT_FIFO, EVENT_EMBEDDED, EVENT_ORIENTATION};
+  const uint8_t registers[] = {cmd::REG_STATUS_REG, cmd::REG_FIFO_STATUS2,
+                              cmd::REG_FUNC_SRC1, cmd::REG_D6D_SRC};
+  while (_step < 6U && (events.requestedMask & groups[_step - 2U]) == 0U) ++_step;
+  if (_step == 6U) return _finish(Status::Ok(), OperationState::SUCCEEDED);
+  const uint8_t index = static_cast<uint8_t>(_step - 2U);
+  uint8_t raw = 0;
+  const Status status = _read(registers[index], &raw, 1, nowMs);
+  if (!status.ok()) return status;
+  EventObservation* observations[] = {&events.ready, &events.fifo, &events.embedded,
+                                      &events.orientation};
+  *observations[index] = EventObservation{nowMs, raw, true};
+  events.readMask |= groups[index];
+  if (index == 0U) {
+    events.dataReadyMask = static_cast<uint8_t>(
+        ((raw & cmd::MASK_XLDA) != 0U && _verifiedProfile.accelOdr != Odr::POWER_DOWN
+             ? SAMPLE_ACCELERATION : 0U) |
+        ((raw & cmd::MASK_GDA) != 0U && _verifiedProfile.gyroOdr != Odr::POWER_DOWN &&
+             !_verifiedProfile.gyroSleepEnabled ? SAMPLE_ANGULAR_RATE : 0U) |
+        ((raw & cmd::MASK_TDA) != 0U && (_verifiedProfile.accelOdr != Odr::POWER_DOWN ||
+             _verifiedProfile.gyroOdr != Odr::POWER_DOWN) ? SAMPLE_TEMPERATURE : 0U));
+  } else if (index == 1U) {
+    events.fifoWatermark = (raw & cmd::MASK_FIFO_WATERM) != 0U;
+    events.fifoOverrun = (raw & cmd::MASK_FIFO_OVER_RUN) != 0U;
+    events.fifoFull = (raw & cmd::MASK_FIFO_FULL_SMART) != 0U;
+    if (events.fifoOverrun ||
+        (events.fifoFull && _verifiedProfile.fifo.mode == FifoMode::FIFO)) {
+      // Preserve observed stream loss even if a later status no longer exposes
+      // it. Observation does not itself consume FIFO words or reset counters.
+      _fifoContinuityLost = true;
+      _breakCounterContinuity();
+      events.historyMayBeLost = true;
+    }
+  } else if (index == 2U) {
+    events.stepDetected = (raw & cmd::MASK_STEP_DETECTED) != 0U;
+    events.stepOverflow = (raw & cmd::MASK_STEP_OVERFLOW) != 0U;
+  } else {
+    events.orientationDetected = (raw & 0x40U) != 0U;
+    events.xLow = (raw & 0x01U) != 0U;
+    events.xHigh = (raw & 0x02U) != 0U;
+    events.yLow = (raw & 0x04U) != 0U;
+    events.yHigh = (raw & 0x08U) != 0U;
+    const bool sixD = _verifiedProfile.interrupts.orientation.mode == OrientationMode::SIX_D;
+    events.zLow = sixD && (raw & 0x10U) != 0U;
+    events.zHigh = sixD && (raw & 0x20U) != 0U;
+  }
+  ++_step;
+  return inProgressStatus();
+}
+
+Status LSM6DS3TR::_stepMaskRoutes(uint64_t nowMs) {
+  if (_routeMaskStep >= 8U) return Status::Ok();
+  const uint8_t index = static_cast<uint8_t>(_routeMaskStep % 4U);
+  const uint8_t reg = ROUTE_REGISTERS[index];
+  Status status = Status::Ok();
+  if (_routeMaskStep < 4U) {
+    status = _writeByte(reg, 0, nowMs);
+  } else {
+    uint8_t observed = 0;
+    status = _read(reg, &observed, 1, nowMs);
+    if (status.ok() && observed != 0U) {
+      _recordMismatch(reg, 0, observed);
+      status = Status::Error(Err::CONFIGURATION_MISMATCH, "Route mask readback mismatch", reg);
+    }
+  }
+  if (!status.ok()) return status;
+  ++_routeMaskStep;
+  return inProgressStatus();
 }
 
 Status LSM6DS3TR::startCounterReset(const CounterResetRequest& request,
@@ -1458,6 +1701,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
   const DeviceProfile& target = _job == JobKind::SELF_TEST
                                     ? _selfTestRestoreProfile : _desiredProfile;
   const bool activateFifo = !reconcileOnly && fifoCollecting(target);
+  const bool activateRoutes = !reconcileOnly && target.interrupts.enabled;
+  const bool deferCommit = activateFifo || activateRoutes;
   if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
        (reconcileOnly && _job == JobKind::RECONCILE)) &&
       _substep == 0U) {
@@ -1499,7 +1744,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     return inProgressStatus();
   }
 
-  if (!reconcileOnly && counterProfile(target) && _counterSetupStep < 16U)
+  if (!reconcileOnly && counterProfile(target) && _counterSetupStep == 0U)
     return _stepCounterSetup(target, nowMs);
   if (!reconcileOnly && !counterProfile(target) && _counterSetupStep == 0U) {
     // Disabling a counter profile can also change TIMER_HR. Observe the actual
@@ -1511,6 +1756,9 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     _counterSetupStep = 16;
     return inProgressStatus();
   }
+  if (!reconcileOnly && _routeMaskStep < 8U) return _stepMaskRoutes(nowMs);
+  if (!reconcileOnly && counterProfile(target) && _counterSetupStep < 16U)
+    return _stepCounterSetup(target, nowMs);
 
   if (reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
     uint8_t observed = 0;
@@ -1534,7 +1782,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
 
   if (!reconcileOnly && _step < MANAGED_REGISTER_COUNT) {
     const uint8_t index = static_cast<uint8_t>(_step);
-    const uint8_t value = _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
+    const uint8_t value = routeRegister(_managedRegisters[index]) ||
+                         _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
                          _managedRegisters[index] == cmd::REG_FIFO_CTRL5
                               ? static_cast<uint8_t>(_managedValues[index] &
                                                      ~cmd::MASK_FIFO_MODE)
@@ -1548,7 +1797,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
 
   if (!reconcileOnly && _step < CONFIGURE_SETTLE_ARM) {
     const uint8_t index = static_cast<uint8_t>(_step - MANAGED_REGISTER_COUNT);
-    const uint8_t expected = _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
+    const uint8_t expected = routeRegister(_managedRegisters[index]) ||
+                            _managedRegisters[index] == cmd::REG_CTRL10_C ? 0U :
                             _managedRegisters[index] == cmd::REG_FIFO_CTRL5
                                  ? static_cast<uint8_t>(_managedValues[index] &
                                                         ~cmd::MASK_FIFO_MODE)
@@ -1619,7 +1869,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     _mismatchRegister = 0;
     _mismatchExpected = 0;
     _mismatchObserved = 0;
-    if (!activateFifo) {
+    if (!deferCommit) {
       _verifiedProfile = target;
       _hasVerifiedProfile = true;
       if (!reconcileOnly) {
@@ -1648,11 +1898,11 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
         settleMs = saturatingAdd(settleMs, CLOCK_QUANTIZATION_MARGIN_MS);
       }
       _validAfterUptimeMs = saturatingAdd(nowMs, settleMs);
-      _configurationState = activateFifo ? ConfigurationState::APPLYING
+      _configurationState = deferCommit ? ConfigurationState::APPLYING
                             : settleMs == 0U ? ConfigurationState::KNOWN
                                              : ConfigurationState::SETTLING;
     }
-    _configurationMayBeUnknown = activateFifo;
+    _configurationMayBeUnknown = deferCommit;
     _step = CONFIGURE_SETTLE_WAIT;
     if (settleMs != 0U) {
       _waiting = true;
@@ -1664,6 +1914,11 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       nowMs < _validAfterUptimeMs) {
     _waiting = true;
     return inProgressStatus();
+  }
+  if (_step == CONFIGURE_SETTLE_WAIT && !activateFifo) {
+    _step = CONFIGURE_COMMIT;
+    // Keep this transition CPU-only even when the caller gives zero budget.
+    if (activateRoutes) return inProgressStatus();
   }
   if (activateFifo) {
     if (_step == CONFIGURE_SETTLE_WAIT) {
@@ -1690,13 +1945,34 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
       _step = CONFIGURE_COMMIT;
       return inProgressStatus();
     }
+  }
+  if (activateRoutes && _routeEnableStep < 8U) {
+    const uint8_t index = static_cast<uint8_t>(_routeEnableStep % 4U);
+    const uint8_t reg = ROUTE_REGISTERS[index];
+    const uint8_t expected = routeValue(target, index);
+    Status status = Status::Ok();
+    if (_routeEnableStep < 4U) {
+      status = _writeByte(reg, expected, nowMs);
+    } else {
+      uint8_t observed = 0;
+      status = _read(reg, &observed, 1, nowMs);
+      if (status.ok() && observed != expected) {
+        _recordMismatch(reg, expected, observed);
+        status = Status::Error(Err::CONFIGURATION_MISMATCH, "Route activation mismatch", reg);
+      }
+    }
+    if (!status.ok()) return status;
+    ++_routeEnableStep;
+    return inProgressStatus();
+  }
+  if (deferCommit) {
     _verifiedProfile = target;
     _hasVerifiedProfile = true;
     _configGeneration = saturatingIncrement(_configGeneration);
     _configurationMayBeUnknown = false;
-    _fifoDiscardMask = static_cast<uint8_t>(
+    _fifoDiscardMask = activateFifo ? static_cast<uint8_t>(
         (target.fifo.gyroDecimation != FifoDecimation::OFF ? SAMPLE_ANGULAR_RATE : 0U) |
-        (target.fifo.accelDecimation != FifoDecimation::OFF ? SAMPLE_ACCELERATION : 0U));
+        (target.fifo.accelDecimation != FifoDecimation::OFF ? SAMPLE_ACCELERATION : 0U)) : 0U;
     _fifoContinuityLost = false;
   }
   _configurationState = ConfigurationState::KNOWN;
@@ -1785,6 +2061,7 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_stepResetBoot(uint64_t nowMs, bool boot, bool recovery) {
+  if (_substep == 3U && _routeMaskStep < 8U) return _stepMaskRoutes(nowMs);
   if (_substep == 0U) {
     if (recovery) {
       uint8_t access = 0;
@@ -1986,6 +2263,7 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
     return inProgressStatus();
   }
   if (_step == 4U) {
+    if (_routeMaskStep < 8U) return _stepMaskRoutes(nowMs);
     const Status status = _writeByte(cmd::REG_CTRL1_XL, ctrl1, nowMs);
     if (!status.ok()) return status;
     ++_step;
@@ -2028,6 +2306,17 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
+  if (_routeMaskStep < 8U) {
+    const Status status = _stepMaskRoutes(nowMs);
+    if (!status.ok() && !status.inProgress()) {
+      // A failed mask is not retried through restoration. No temporary test
+      // profile has been applied; explicit later configure/recovery owns repair.
+      _primaryStatus = status;
+      _workingResult.selfTest.primaryStatus = status;
+      _workingResult.selfTest.restorationStatus = status;
+    }
+    return status;
+  }
   auto beginRestore = [this]() {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _substep = 100;
@@ -2824,6 +3113,11 @@ Status LSM6DS3TR::_stepFifoPurge(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
+  if (_job == JobKind::EVENT_READ) {
+    _workingResult.events.token = status.ok() ? _token : OperationToken{};
+    if (!status.ok() && _workingResult.events.mayHaveAcknowledgedMask != 0U)
+      _workingResult.events.historyMayBeLost = true;
+  }
   if (_job == JobKind::FIFO_READ) {
     FifoReadResult& result = _workingResult.fifoRead;
     if (!status.ok()) {
@@ -2928,6 +3222,7 @@ PollResult LSM6DS3TR::_pollOne(uint64_t nowMs) {
     case JobKind::FIFO_PURGE: status = _stepFifoPurge(nowMs); break;
     case JobKind::FIFO_READ: status = _stepFifoRead(nowMs); break;
     case JobKind::COUNTER_RESET: status = _stepCounterReset(nowMs); break;
+    case JobKind::EVENT_READ: status = _stepEventRead(nowMs); break;
     case JobKind::NONE: break;
   }
   if (_active && !status.ok() && !status.inProgress()) _fail(status);
@@ -3029,11 +3324,17 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
                                       ? _selfTestRestoreProfile : _desiredProfile;
     const bool counterWorkPending = _job != JobKind::RECONCILE &&
         _counterSetupStep < 19U && (counterProfile(target) || _timestampResetNeeded);
+    const bool routeWorkPending = _job != JobKind::RECONCILE &&
+        target.interrupts.enabled && _routeEnableStep < 8U;
     const bool configurationCompute =
         (_step == CONFIGURE_SETTLE_ARM && !counterWorkPending) ||
-        _step == CONFIGURE_SETTLE_WAIT || _step == CONFIGURE_COMMIT;
+        _step == CONFIGURE_SETTLE_WAIT ||
+        (_step == CONFIGURE_COMMIT && !routeWorkPending);
     bool safeComputeStep = false;
-    if ((_job == JobKind::CONFIGURE || _job == JobKind::RECONCILE) &&
+    if (_job == JobKind::EVENT_READ &&
+        _workingResult.events.readMask == _workingResult.events.requestedMask) {
+      safeComputeStep = true;
+    } else if ((_job == JobKind::CONFIGURE || _job == JobKind::RECONCILE) &&
         configurationCompute) {
       safeComputeStep = true;
     } else if ((_job == JobKind::RESET || _job == JobKind::BOOT ||
@@ -3232,6 +3533,15 @@ bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
 }
 
 bool LSM6DS3TR::_safeDiagnosticWrite(uint8_t reg, uint8_t value) {
+  // Nonzero routes belong to the typed dependency-checked profile. In
+  // particular, raw masks cannot enable boot/tap/tilt/step-delta sources.
+  if (routeRegister(reg)) return value == 0U;
+  // Additional pad-route controls outside INTx_CTRL/MDx_CFG: datasheet
+  // Tables 43/58/78. These engines remain outside the production contract.
+  if ((reg == cmd::REG_DRDY_PULSE_CFG_G && (value & cmd::MASK_INT2_WRIST_TILT) != 0U) ||
+      (reg == cmd::REG_CTRL4_C && (value & (1U << cmd::BIT_DEN_DRDY_INT1)) != 0U) ||
+      (reg == cmd::REG_MASTER_CONFIG && (value & 0x80U) != 0U))
+    return false;
   if (reg == cmd::REG_TIMESTAMP2) return value == cmd::TIMESTAMP_RESET_VALUE;
   uint8_t writableMask = 0;
   if (!diagnosticWritableMask(reg, writableMask) ||

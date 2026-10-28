@@ -196,12 +196,76 @@ struct FifoProfile {
   TimestampResolution timestampResolution = TimestampResolution::MS_6_4;  ///< Timer policy.
 };
 
-/// @brief Interrupt policy represented by the production profile.
-///
-/// Interrupt routing is intentionally disabled until a complete electrical,
-/// route, latch, threshold, and duration profile is provided by a product.
+/// @brief Shared active level of both interrupt pads.
+enum class InterruptPolarity : uint8_t {
+  ACTIVE_HIGH = 0,  ///< Active-high signaling.
+  ACTIVE_LOW        ///< Active-low signaling.
+};
+
+/// @brief Shared electrical output driver of both interrupt pads.
+enum class InterruptDrive : uint8_t {
+  PUSH_PULL = 0,  ///< Push-pull pad drive.
+  OPEN_DRAIN_PAD  ///< Open-drain; application supplies appropriate pull resistors.
+};
+
+/// @brief Motion data-ready pad behavior, separate from embedded event latching.
+enum class DataReadyMode : uint8_t {
+  LATCHED = 0,  ///< Pad remains asserted until the corresponding output is read.
+  PULSED        ///< 75 us motion DRDY pad pulses; status flags remain latched.
+};
+
+/// @brief Supported accelerometer orientation engine dimensions.
+enum class OrientationMode : uint8_t {
+  OFF = 0,  ///< Orientation engine has no production owner.
+  SIX_D,    ///< Recognize X/Y/Z positive and negative orientation conditions.
+  FOUR_D    ///< Recognize X/Y conditions; Z detection is disabled.
+};
+
+/// @brief Exact silicon orientation thresholds, valid at every accel full scale.
+enum class OrientationThreshold : uint8_t {
+  DEG_80 = 0,  ///< 80 degrees, register code 00.
+  DEG_70,      ///< 70 degrees, register code 01.
+  DEG_60,      ///< 60 degrees, register code 10.
+  DEG_50       ///< 50 degrees, register code 11.
+};
+
+/// @brief Typed source requests for one physical interrupt pin.
+/// @note Validation rejects impossible pin/source pairs rather than translating
+/// them into another route. INT2 combining does not change direct pin support.
+struct InterruptRoutes {
+  bool accelReady = false;  ///< Accel DRDY on either pin; requires active accel.
+  bool gyroReady = false;  ///< Gyro DRDY on either pin; requires active nonsleeping gyro.
+  bool temperatureReady = false;  ///< Direct INT2 only; requires an active sensor.
+  bool fifoWatermark = false;  ///< Either pin; requires a collecting typed FIFO.
+  bool fifoFull = false;  ///< Either pin; FIFO_FULL_SMART, not an exact occupancy claim.
+  bool fifoOverrun = false;  ///< Either pin; no sticky loss-history guarantee.
+  bool stepDetected = false;  ///< Direct INT1 only; requires the fixed pedometer profile.
+  bool stepOverflow = false;  ///< Direct INT2 only; requires the fixed pedometer profile.
+  bool timestampEndCounter = false;  ///< Direct INT1 only; no readable event-status flag.
+  bool orientation = false;  ///< Either pin; requires the typed 6D/4D profile.
+};
+
+/// @brief Orientation detector with source-backed LPF1 ODR/2 input.
+/// @note Detection uses two consecutive samples; no minimum 26 Hz ODR is imposed
+/// on this basic engine. LOW_PASS_ON_6D remains unsupported until filter support.
+struct OrientationProfile {
+  OrientationMode mode = OrientationMode::OFF;  ///< Active accel and a route required when on.
+  OrientationThreshold threshold = OrientationThreshold::DEG_80;  ///< Exact degree choice.
+};
+
+/// @brief Replayable shared electrical, source routing and 6D/4D policy.
+/// @note Disabled profiles require the canonical defaults. GPIO configuration,
+/// interrupts and scheduling remain application responsibilities; no API is ISR-safe.
 struct InterruptProfile {
-  bool enabled = false;  ///< Must remain false in version 2 production profiles.
+  bool enabled = false;  ///< Admit the complete typed policy instead of canonical disabled state.
+  InterruptPolarity polarity = InterruptPolarity::ACTIVE_HIGH;  ///< Shared pad active level.
+  InterruptDrive drive = InterruptDrive::PUSH_PULL;  ///< Shared pad electrical driver.
+  DataReadyMode dataReadyMode = DataReadyMode::LATCHED;  ///< Motion DRDY pad behavior.
+  bool latchEvents = false;  ///< Global LIR; source latching also requires its route.
+  bool int2OnInt1 = false;  ///< Combine enabled INT2 signals onto INT1; INT2 routes remain real.
+  InterruptRoutes int1 = {};  ///< Direct INT1 source choices.
+  InterruptRoutes int2 = {};  ///< Direct INT2 source choices.
+  OrientationProfile orientation = {};  ///< Complete supported orientation policy.
 };
 
 /// @brief Complete replayable state owned by the production driver.
@@ -219,7 +283,7 @@ struct DeviceProfile {
   AccelOffsetWeight accelOffsetWeight = AccelOffsetWeight::MG_1;  ///< Offset scale.
   AccelUserOffset accelUserOffset = {};  ///< Signed hardware offset values.
   FifoProfile fifo = {};  ///< Typed motion FIFO policy; default is disabled.
-  InterruptProfile interrupts = {};  ///< Interrupt policy; version 2 requires disabled.
+  InterruptProfile interrupts = {};  ///< Typed interrupt policy; default disables all routes.
 };
 
 /// @brief Quality limits for bounded bias calibration.

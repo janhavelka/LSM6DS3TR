@@ -212,12 +212,16 @@ The driver follows one fixed-memory, owner-scheduled operation model:
 - Successful power-down leaves configuration `UNCONFIGURED`; it retains the
   desired runtime profile only for an explicit later configure or recovery.
   It is admissible from any bound idle configuration state, writes and verifies
-  exact zero CTRL1_XL/CTRL2_G values, and proves no other register state.
+  exact zero CTRL1_XL/CTRL2_G values after masking/verifying all four route
+  registers, and proves no other register state.
 - Internal motion FIFO acquisition uses typed `FifoProfile`, bounded
   `startFifoRead`, caller-owned records, and immutable interpretation provenance.
   Typed temperature or timestamp/step fourth datasets and internal/step-event
   collection triggers share this owner. External datasets, trigger-switched
-  modes, packing, stop-on-threshold and interrupt routing remain unsupported.
+  modes, packing, stop-on-threshold and unrelated event engines remain unsupported.
+  Typed shared INT1/INT2 controls, supported per-pin routes and bounded 6D/4D
+  source observation share the existing profile/operation owners. GPIOs and ISR
+  notification remain application-owned; no API is ISR-safe.
   Counter reads preserve raw widths, resolution, epoch and loss evidence;
   explicit counter reset is bounded and effectful. The bounded FIFO purge is explicitly
   destructive; stopping collection reports possible residual loss.
@@ -240,9 +244,10 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   bus recovery remain application responsibilities.
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
-  and reserve the complete 87-callback profile reapply/readback/activation budget.
-  Configure uses at most 90 callbacks (72 for active motion-only FIFO), reset/boot 111,
-  recovery 110, power-down 9, explicit counter reset 7, and FIFO purge `maxWords + 5` (two additional
+  and reserve the complete 95-callback profile reapply/readback/activation budget.
+  Configure uses at most 106 callbacks (80 for active motion-only FIFO with routes
+  disabled), reset/boot 127, recovery 126, power-down 17, explicit counter reset 7,
+  event-source observation 6, and FIFO purge `maxWords + 5` (two additional
   callbacks when explicitly stopping collection). FIFO acquisition reserves
   `2 * maxWords + 3` callbacks; all validate identity before their first destructive device
   action after bank selection is proved.
@@ -250,7 +255,7 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   sample. Self-test gates by its active sensor ODR period rounded up to
   milliseconds (20 ms accelerometer, 5 ms gyroscope); calibration gates by the
   configured ODR period rounded up to milliseconds. Self-test reserves
-  `16 * (samples + 1) + 106` callbacks, including bounded failure cleanup and
+  `16 * (samples + 1) + 122` callbacks, including bounded failure cleanup and
   full profile restoration.
 
 ---

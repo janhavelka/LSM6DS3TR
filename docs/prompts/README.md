@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: prompts 01/02 IMPLEMENTED (software); prompts 03/04 NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompts 01/02 IMPLEMENTED (software); prompt 03 implementation/verification PENDING; prompt 04 NOT IMPLEMENTED.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -96,13 +96,43 @@ existing branch, and let the lead own Git mutations when using subagents.
 - Hardware: **NOT RUN**; repeatable new cases are in
   [fourth-dataset qualification](../HIL_VALIDATION.md#fourth-dataset-and-counter-qualification).
 
+## Prompt 03 execution record
+
+- Execution started: 2026-10-27; actual workspace is
+  `C:\Users\HonzovoSpectre\Documents\Projects\LSM6DS3TR`.
+- Fetched execution baseline: clean `main` and `origin/main` at
+  `5b3d6bc1a6d8fe5831e537ba1bc92cef65dad5d5`.
+- Prerequisites: motion FIFO implementation
+  `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06` and closeout
+  `bce83376aa01d0e9836f9175a9993e93128956e5`; fourth-dataset/counter implementation
+  `f7c2d5d87a505d428a379b6628c447b62ec5a1b8` and closeout
+  `5b3d6bc1a6d8fe5831e537ba1bc92cef65dad5d5`. The latter exact revision passed
+  all seven CI jobs, including native ESP-IDF S2/S3 builds.
+- Scope: typed shared pad controls, supported direct source routes, complete
+  6D/4D orientation and bounded event observation/acknowledgement evidence.
+  Timestamp acknowledgement retains the existing explicit reset/epoch owner.
+  External datasets, unrelated event routes and 6D LPF2/filter extensions remain
+  unsupported or assigned to prompt 04.
+- Source audit before coding: route/dependency/clear matrix in maintained topic
+  06, based on visually inspected datasheet register tables and AN5130
+  orientation/pedometer/timestamp sections. No readable timestamp-end flag was
+  invented. The default 6D path is LPF1 ODR/2; global DRDY mode and embedded LIR
+  remain separate concepts.
+- Implementation resolution SHA, final local verification and exact-final-
+  commit CI: **PENDING**. No software acceptance pass is claimed by this record
+  until the lead completes those gates and records the actual evidence.
+- Hardware: **NOT RUN**; see
+  [interrupt/orientation qualification](../HIL_VALIDATION.md#interrupt-and-orientation-qualification).
+  Electrical levels, pulse durations, interrupt loss under load and orientation
+  response remain distinct physical gates.
+
 ## Coverage and execution order
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |
 | --- | --- | --- | --- | --- |
 | [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: original enable-only profile and purge-only mechanism replaced. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | IMPLEMENTED (software); hardware NOT RUN |
 | [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: typed fourth-source schema and fixed timestamp/pedometer ownership added. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | IMPLEMENTED (software); hardware NOT RUN |
-| [03](03_interrupt_profiles_and_event_evidence.md) | R2: `InterruptProfile` is only an enable flag; managed routes are zero; no typed event-source result. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | NOT IMPLEMENTED |
+| [03](03_interrupt_profiles_and_event_evidence.md) | R2: typed global controls, direct source routes and bounded independent event observations. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | Implementation/verification PENDING; hardware NOT RUN |
 | [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |
 
 Execute in order because the prompts share the profile image, operation engine,

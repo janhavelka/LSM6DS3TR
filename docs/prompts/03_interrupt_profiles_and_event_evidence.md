@@ -1,9 +1,17 @@
 # 03 - Interrupt profiles and event evidence
 
-**Status: NOT IMPLEMENTED.** Execute in
+**Status: implementation/verification PENDING; hardware NOT RUN.** Original execution instructions follow for
 `C:\Users\Honza\Documents\Projects\LSM6DS3TR`.
 Preparation baseline: `e262bf22f3d0cf035fbbca10f45b3e0752bf2bac`.
 Historical audit tip: `035eff530e72ea43e4b42b02df0ea2ff05e33383`.
+Execution started on 2026-10-27 from fetched, synchronized baseline
+`5b3d6bc1a6d8fe5831e537ba1bc92cef65dad5d5`, after completed motion-FIFO and
+fourth-dataset/counter implementations. Their resolution SHAs and this task's
+source audit, software acceptance evidence and final resolution are recorded
+in the [execution record](README.md#prompt-03-execution-record). Current
+implementation/final verification is **PENDING**; physical qualification is
+**NOT RUN**.
+
 Read [the complete execution index](README.md), whose source, architecture,
 Git/CI commands and closeout rules apply. **Requires completed 01 and 02**;
 record their resolution SHAs and inspect the actual current source.

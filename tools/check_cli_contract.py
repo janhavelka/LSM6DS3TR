@@ -44,6 +44,7 @@ COMMANDS = [
     "purge",
     "fifo",
     "counterreset",
+    "events",
     "cancel",
     "rreg",
     "wreg",
@@ -58,7 +59,7 @@ PROFILE_FIELDS = [
     "g_hpf_mode", "g_sleep", "bdu", "offset_weight", "offset", "fifo",
     "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark",
     "fifo_fourth", "fifo_fourth_dec", "fifo_trigger", "timestamp_resolution",
-    "interrupts",
+    "interrupts", "irq", "irq_polarity", "irq_drive", "irq_drdy", "irq_latch", "irq_combine", "int1", "int2", "orientation",
 ]
 
 OWNER_SAFE_TOKENS = [
@@ -74,6 +75,25 @@ OWNER_SAFE_TOKENS = [
     "startSample",
     "startFifoRead",
     "startCounterReset",
+    "startEventRead",
+    "EventReadRequest",
+    "profile_cli::eventRequest",
+    "result.events.requestedMask",
+    "result.events.mayHaveAcknowledgedMask",
+    "result.events.acknowledgedMask",
+    "result.events.historyMayBeLost",
+    "printEventObservation",
+    "timestamp_end_status=unavailable",
+    "pad_level=unobserved",
+    "observations=sequential",
+    "expected events [ready|fifo|embedded|orientation|all]",
+    "TaskHandle_t interruptOwnerTask = nullptr",
+    "interruptOwnerTask = xTaskGetCurrentTaskHandle()",
+    "xTaskNotifyFromISR(interruptOwnerTask, 1U, eSetBits, &higherPriorityTaskWoken)",
+    "xTaskNotifyWait(0U, 1U, &notificationBits, 0)",
+    "bool interruptNotificationPending = false",
+    "serviceInterruptNotification(nowMs())",
+
     "result.counters.epoch",
     "result.counters.timestampResetMayHaveOccurred",
     "result.counters.stepResetMayHaveOccurred",
@@ -143,6 +163,12 @@ PROFILE_HELPER_TOKENS = [
     "parseSigned",
     "parseGyroHpfMode",
     "inline bool equal",
+    "equalRoutes",
+    "parseInterruptPolarity",
+    "parseInterruptDrive",
+    "parseOrientationMode",
+    "parseOrientationThreshold",
+    "inline bool eventRequest",
 ]
 
 FORBIDDEN_V1_TOKENS = [
@@ -185,6 +211,17 @@ def main() -> int:
     for token in PROFILE_HELPER_TOKENS:
         if token not in helper:
             fail(f"profile helper safety token '{token}' is missing")
+    irq_hook = re.search(r"void IRAM_ATTR onImuInterrupt\([^)]*\)\s*\{([^}]+)\}", text)
+    expected_irq_body = (
+        "if (interruptOwnerTask == nullptr) return; "
+        "BaseType_t higherPriorityTaskWoken = pdFALSE; "
+        "(void)xTaskNotifyFromISR(interruptOwnerTask, 1U, eSetBits, &higherPriorityTaskWoken); "
+        "if (higherPriorityTaskWoken == pdTRUE) portYIELD_FROM_ISR();"
+    )
+    if irq_hook is None or " ".join(irq_hook.group(1).split()) != expected_irq_body:
+        fail("ISR hook must only publish the application-owned notification")
+    if "attachInterrupt(" in text:
+        fail("diagnostic example must not attach an unconfigured fixture GPIO")
     for token in FORBIDDEN_V1_TOKENS:
         if token in text:
             fail(f"removed v1 API token remains: {token}")

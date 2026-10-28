@@ -72,7 +72,8 @@ enum class JobKind : uint8_t {
   CALIBRATION,  ///< Bounded bias candidate measurement.
   FIFO_PURGE,   ///< Bounded destructive FIFO data removal.
   FIFO_READ,    ///< Bounded typed FIFO acquisition into caller storage.
-  COUNTER_RESET ///< Explicit timestamp/step reset in a verified Bypass profile.
+  COUNTER_RESET, ///< Explicit timestamp/step reset in a verified Bypass profile.
+  EVENT_READ    ///< Bounded supported event-source observations and explicit read-clear effects.
 };
 
 /// @brief Lifecycle state reported for an operation.
@@ -335,6 +336,64 @@ struct FifoReadResult {
   bool continuityLost = false;  ///< Loss/uncertainty since activation; never a timestamp/freshness claim.
 };
 
+/// @name Event source groups (not pin routes or arbitrary register masks)
+///@{
+static constexpr uint8_t EVENT_DATA_READY = 1U;  ///< STATUS_REG, nonclearing.
+static constexpr uint8_t EVENT_FIFO = 2U;  ///< FIFO_STATUS2, nonconsuming.
+static constexpr uint8_t EVENT_EMBEDDED = 4U;  ///< FUNC_SRC1, supported step causes only.
+static constexpr uint8_t EVENT_ORIENTATION = 8U;  ///< D6D_SRC, 6D/4D request and directions.
+///@}
+
+/// @brief Select supported source groups; each selected group uses one callback.
+/// @note Embedded/orientation reads may acknowledge routed latched sources.
+/// Timestamp end has no readable source flag; use application pin evidence and
+/// the existing explicit timestamp CounterResetRequest for acknowledgement.
+struct EventReadRequest {
+  bool dataReady = true;  ///< Observe STATUS_REG without reading sensor outputs.
+  bool fifo = false;  ///< Requires a typed FIFO profile; consumes no queued data.
+  bool embedded = false;  ///< Requires the fixed timestamp/step counter profile.
+  bool orientation = false;  ///< Requires an enabled typed 6D/4D profile.
+};
+
+/// @brief One independent source-register observation, never a simultaneous snapshot.
+struct EventObservation {
+  uint64_t readUptimeMs = 0;  ///< Owner time associated with this specific successful read.
+  uint8_t raw = 0;  ///< Unmodified source byte, including uninterpreted bits.
+  bool valid = false;  ///< This observation's callback succeeded.
+};
+
+/// @brief Event evidence and acknowledgement effects retained even on failure.
+/// @note A token is published only for complete successful observation. Partial
+/// valid observations remain evidence, not a successful event batch. Raw source
+/// bits do not measure a pad level or prove that missed pulses were recovered.
+struct EventReadResult {
+  OperationToken token = {};  ///< Nonzero only for a successful EVENT_READ result.
+  uint32_t configGeneration = 0;  ///< Verified interpretation at event-read admission.
+  EventObservation ready = {};  ///< Independent data-ready status observation.
+  EventObservation fifo = {};  ///< Independent FIFO status observation.
+  EventObservation embedded = {};  ///< Independent step event-source observation.
+  EventObservation orientation = {};  ///< Independent 6D/4D source observation.
+  uint8_t requestedMask = 0;  ///< Selected EVENT_* groups.
+  uint8_t readMask = 0;  ///< Groups with successful callbacks; retained on partial failure.
+  uint8_t mayHaveAcknowledgedMask = 0;  ///< Attempted reads with source/output clearing semantics.
+  uint8_t acknowledgedMask = 0;  ///< Successful reads with those semantics, not proof an event existed.
+  uint8_t dataReadyMask = 0;  ///< Supported active sensor SAMPLE_* ready flags.
+  bool fifoWatermark = false;  ///< Observed WaterM.
+  bool fifoOverrun = false;  ///< Observed OVER_RUN; not persistent history.
+  bool fifoFull = false;  ///< Observed FIFO_FULL_SMART.
+  bool stepDetected = false;  ///< Observed supported STEP_DETECTED flag.
+  bool stepOverflow = false;  ///< Observed supported STEP_OVERFLOW flag.
+  bool orientationDetected = false;  ///< Observed D6D_IA request.
+  bool xLow = false;  ///< Observed XL orientation bit, not a unique orientation claim.
+  bool xHigh = false;  ///< Observed XH orientation bit.
+  bool yLow = false;  ///< Observed YL orientation bit.
+  bool yHigh = false;  ///< Observed YH orientation bit.
+  bool zLow = false;  ///< Observed ZL bit; not decoded as a 4D cause.
+  bool zHigh = false;  ///< Observed ZH bit; not decoded as a 4D cause.
+  bool timestampRouted = false;  ///< Configuration fact only; no timestamp status bit exists.
+  bool historyMayBeLost = false;  ///< Observed loss, maintenance or ambiguous acknowledgement.
+};
+
 /// @brief One terminal result. The caller must take it exactly once.
 struct OperationResult {
   OperationToken token = {};  ///< Correlation identity assigned at admission.
@@ -355,6 +414,7 @@ struct OperationResult {
   FifoReadResult fifoRead = {};  ///< Typed batch and destructive-read evidence for FIFO_READ.
   CounterResult counters = {};  ///< Raw-counter epoch and explicit/required reset effects.
   bool registerBankMayBeUnknown = false;  ///< Embedded-bank restoration was not proved.
+  EventReadResult events = {};  ///< Independent source observations and acknowledgement effects.
 };
 
 /// @brief Result of one poll call.
@@ -388,13 +448,14 @@ struct DriverDiagnostics {
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 90;  ///< Includes fixed bank policy and counters.
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 106;  ///< Includes route masking and final activation.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 111;  ///< Reset/boot with counter/FIFO restoration.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 110;  ///< Recovery with counter/FIFO restoration.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 127;  ///< Reset/boot with counter/FIFO/route restoration.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 126;  ///< Recovery with counter/FIFO/route restoration.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
-static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 9;  ///< Includes FIFO bypass guard.
+static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 17;  ///< Includes route masking and FIFO guard.
 static constexpr uint32_t MAX_COUNTER_RESET_TRANSACTIONS = 7;  ///< Identity, Bypass, reset/clear verification.
+static constexpr uint32_t MAX_EVENT_READ_TRANSACTIONS = 6;  ///< Bank, identity and four source groups.
 ///@}
 
 /// @name Fixed transport buffer ceilings
@@ -679,6 +740,17 @@ public:
   Status startCounterReset(const CounterResetRequest& request,
                            const OperationTiming& timing, OperationToken& token);
 
+  /// @brief Observe selected supported sources through the bounded operation engine.
+  /// @param request Source groups; at least one must be selected.
+  /// @param timing One immutable absolute owner-clock deadline.
+  /// @param token Accepted correlation token, otherwise zero.
+  /// @return IN_PROGRESS, or a bus-silent validation/admission error.
+  /// @note Requires a known settled profile. Routed latched sources are
+  /// acknowledged by their source read, with possible effects visible on error.
+  /// Timestamp end acknowledgement is the explicit timestamp counter reset.
+  Status startEventRead(const EventReadRequest& request, const OperationTiming& timing,
+                        OperationToken& token);
+
   /// @brief Advance one operation without exceeding a callback budget.
   /// @param nowMs Current time in the operation's caller-owned monotonic domain.
   /// @param maxTransactions Maximum callbacks allowed in this invocation; zero
@@ -781,6 +853,8 @@ private:
   Status _stepFifoRead(uint64_t nowMs);
   Status _stepCounterReset(uint64_t nowMs);
   Status _stepCounterSetup(const DeviceProfile& target, uint64_t nowMs);
+  Status _stepEventRead(uint64_t nowMs);
+  Status _stepMaskRoutes(uint64_t nowMs);
   void _breakCounterContinuity();
   void _clearFifoOutput();
   Status _finish(const Status& status, OperationState state);
@@ -841,6 +915,8 @@ private:
   uint8_t _counterSetupStep = 0;
   bool _timestampResetNeeded = false;
   CounterResetRequest _counterResetRequest = {};
+  uint8_t _routeMaskStep = 0;
+  uint8_t _routeEnableStep = 0;
   uint8_t _managedRegisters[MANAGED_REGISTER_COUNT] = {};
   uint8_t _managedValues[MANAGED_REGISTER_COUNT] = {};
   uint8_t _mismatchRegister = 0;

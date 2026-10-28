@@ -142,3 +142,18 @@ validated DRDY/FIFO policy. Source: AN5130 section 4.4, p. 25.
 settling paths. Its FIFO invalid markers (`0x7FFF`, `0x7FFE`, `0x7FFD`) apply
 when FIFO is active; they are not ordinary raw sensor values. Source: AN5130,
 p. 24.
+
+## Orientation Input In The Supported Interrupt Profile
+
+Datasheet Figure 8, p. 34 sends the LPF1 ODR/2 branch directly to the 6D/4D
+selector when `LOW_PASS_ON_6D=0`. This is before host composite-filter selection;
+enabling the host LPF2 path does not implicitly filter orientation through LPF2.
+The supported `OrientationProfile` uses that default branch. `lowPassOn6d=true`
+remains rejected until prompt 04 supplies complete filter/settling ownership.
+
+AN5130 pp. 38-39 requires two consecutive samples to recognize an orientation
+change. The basic engine requires active accel but does not inherit the 26 Hz
+minimum of the separate embedded pedometer engine. Route activation follows
+complete configuration readback and the existing output-validity gate. That
+software gate is not evidence of physical orientation response or missed-pulse
+behavior; those qualification cases remain **NOT RUN**.

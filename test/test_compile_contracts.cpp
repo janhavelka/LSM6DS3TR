@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #define DISABLED 0x4C534D36
+#define OPEN_DRAIN 0x10
 #include "LSM6DS3TR/Config.h"
 
 #ifndef DISABLED
@@ -13,7 +14,12 @@
 
 static_assert(DISABLED == 0x4C534D36,
               "Including Config.h must preserve an application macro value");
+static_assert(OPEN_DRAIN == 0x10,
+              "Including Config.h must preserve the Arduino GPIO macro");
+static_assert(static_cast<uint8_t>(LSM6DS3TR::InterruptDrive::OPEN_DRAIN_PAD) == 1U,
+              "Interrupt pad mode must remain usable beside Arduino macros");
 #undef DISABLED
+#undef OPEN_DRAIN
 
 #include "LSM6DS3TR/LSM6DS3TR.h"
 
@@ -62,17 +68,18 @@ static_assert(sizeof(Status) <= 16u,
               "Status grew beyond the public fixed-memory contract");
 static_assert(sizeof(DriverConfig) <= 40u,
               "DriverConfig grew beyond the public fixed-memory contract");
-static_assert(sizeof(DeviceProfile) <= 32u,
+static_assert(sizeof(DeviceProfile) <= 64u,
               "DeviceProfile grew beyond the public fixed-memory contract");
 static_assert(sizeof(RawSampleResult) <= 48u,
               "RawSampleResult grew beyond the owner payload contract");
 static_assert(sizeof(PollResult) <= 32u,
               "PollResult grew beyond the owner polling contract");
-// Native x64 measurements: fourth records56 bytes, OperationResult392 bytes,
-// driver1288 bytes. A fourth record adds raw counter/temperature payload and
-// immutable epoch/resolution evidence. Driver growth is bounded counter/bank
-// state and effect evidence in its existing working/terminal results; no queue
-// or stored schema array is introduced.
+// Native x64 measurements: profile58 bytes, event observations16 bytes,
+// event result104 bytes, OperationResult496 bytes and driver1576 bytes.
+// Typed per-pin routes and fixed orientation policy extend the profile. Four
+// independent source observations and explicit acknowledgement evidence extend
+// each existing result; the driver adds bounded route/event progress only.
+// Caller-owned FIFO records remain56 bytes. No queue or schema array is added.
 static_assert(sizeof(FifoMotionRecord) <= 56u,
               "A caller-owned FIFO record must remain at most 56 bytes");
 static_assert(sizeof(FifoReadRequest) <= 16u,
@@ -81,9 +88,15 @@ static_assert(sizeof(FifoReadResult) <= 64u,
               "FIFO evidence must remain bounded independently of batch size");
 static_assert(std::is_trivially_copyable<FifoMotionRecord>::value,
               "FIFO records must remain fixed-memory value types");
-static_assert(sizeof(OperationResult) <= 400u,
+static_assert(sizeof(EventObservation) <= 16u,
+              "An event observation stores one byte and its independent owner time");
+static_assert(sizeof(EventReadResult) <= 104u,
+              "Event evidence must remain fixed independently of event rate");
+static_assert(std::is_trivially_copyable<EventReadResult>::value,
+              "Event evidence must remain a fixed-memory value type");
+static_assert(sizeof(OperationResult) <= 512u,
               "OperationResult grew beyond its fixed-memory maintenance bound");
-static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1312u,
+static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1600u,
               "Driver state grew beyond its fixed-memory bound");
 static_assert(MAX_TRANSPORT_WRITE_BYTES == 33u,
               "External owners depend on the bounded write callback size");

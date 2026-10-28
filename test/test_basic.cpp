@@ -31,6 +31,7 @@ void lowerFifoTestCeiling(LSM6DS3TR::LSM6DS3TR& driver, uint32_t limit) {
 void runProfileCliTests();
 void runFifoTests();
 void runFifoFourthTests();
+void runInterruptTests();
 
 namespace {
 
@@ -198,8 +199,7 @@ void test_validate_profile_rejects_all_unsupported_or_unsafe_values() {
                           static_cast<uint8_t>(validateProfile(profile).code));
   profile = makeProfile();
   profile.interrupts.enabled = true;
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED_PROFILE),
-                          static_cast<uint8_t>(validateProfile(profile).code));
+  TEST_ASSERT_TRUE(validateProfile(profile).ok());
   profile = makeProfile();
   profile.accelOdr = Odr::HZ_1_6;
   profile.accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
@@ -630,9 +630,10 @@ void test_configuration_settle_arms_after_readback_with_changing_budgets() {
       const uint32_t generation = driver.configGeneration();
       TEST_ASSERT_EQUAL_UINT8(12u, driver.poll(bus.nowMs, 12).transactionsUsed);
       (void)driver.poll(bus.nowMs, 255);
+      if (!reconcile) (void)driver.poll(bus.nowMs, 255);
       const uint32_t transfers = bus.transferCalls;
       TEST_ASSERT_EQUAL_UINT32(reconcile ? MAX_RECONCILE_TRANSACTIONS
-                                         : 70u,
+                                         : 78u,
                                transfers);
 
       // The nominal 14 / 12.5 Hz = 1120 ms interval starts only after a
@@ -681,7 +682,7 @@ void test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance()
         profile, OperationTiming{bus.nowMs, std::numeric_limits<uint64_t>::max()},
         token).inProgress());
     TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
-    TEST_ASSERT_EQUAL_UINT8(6u, driver.poll(bus.nowMs, 255).transactionsUsed);
+    TEST_ASSERT_EQUAL_UINT8(14u, driver.poll(bus.nowMs, 255).transactionsUsed);
     const PollResult finalized = driver.poll(bus.nowMs, 0);
     TEST_ASSERT_EQUAL_UINT8(0u, finalized.transactionsUsed);
     if (poweredDown) {
@@ -702,7 +703,7 @@ void test_configuration_settle_saturates_and_zero_settle_needs_no_time_advance()
       assertTerminalFailure(terminal, result, Err::DEADLINE_EXPIRED,
                             OperationState::TIMED_OUT);
     }
-    TEST_ASSERT_EQUAL_UINT32(70u, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT32(78u, bus.transferCalls);
   }
 }
 
@@ -874,7 +875,7 @@ void test_cancel_before_and_after_configuration_effect_is_bus_silent() {
 }
 
 void test_configure_cancellation_is_safe_after_every_transfer_stage() {
-  for (uint32_t completed = 0; completed <= 70u; ++completed) {
+  for (uint32_t completed = 0; completed <= 78u; ++completed) {
     FakeBus bus;
     LSM6DS3TR::LSM6DS3TR driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -1642,7 +1643,7 @@ void test_reset_boot_and_recover_completion_poll_boundaries_are_exact() {
                                  ? MAX_RECOVER_TRANSACTIONS
                                  : MAX_RESET_TRANSACTIONS;
       TEST_ASSERT_EQUAL_UINT32(limit, result.transactionLimit);
-      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 90u : 91u,
+      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 98u : 99u,
                                result.transactions);
       uint32_t commandReads = 0;
       bool commandWritten = false;
@@ -1688,7 +1689,7 @@ void test_reset_boot_and_recover_completion_poll_boundaries_are_exact() {
       TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
       TEST_ASSERT_LESS_OR_EQUAL_UINT32(result.transactionLimit,
                                        result.transactions);
-      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 23u : 24u,
+      TEST_ASSERT_EQUAL_UINT32(operation == MaintenanceCase::RECOVER ? 31u : 32u,
                                result.transactions);
       uint32_t commandReads = 0;
       bool commandWritten = false;
@@ -1735,7 +1736,7 @@ void test_reset_and_boot_wait_deadlines_saturate_at_uint64_max() {
                                          std::numeric_limits<uint64_t>::max()},
                          token)
                          .inProgress());
-    for (uint8_t transfer = 0; transfer < 8u; ++transfer) {
+    for (uint8_t transfer = 0; transfer < 16u; ++transfer) {
       TEST_ASSERT_EQUAL_UINT8(1u, driver.poll(bus.nowMs, 1).transactionsUsed);
     }
     const uint32_t transfers = bus.transferCalls;
@@ -1968,8 +1969,8 @@ void test_self_test_preserves_primary_and_restoration_failures() {
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
   bus.clearTrace();
-  bus.addFault(1, Status::Error(Err::I2C_NACK_DATA, "primary", -201));
-  bus.addFault(2, Status::Error(Err::I2C_TIMEOUT, "restore", -202));
+  bus.addFault(9, Status::Error(Err::I2C_NACK_DATA, "primary", -201));
+  bus.addFault(10, Status::Error(Err::I2C_TIMEOUT, "restore", -202));
   OperationToken token;
   TEST_ASSERT_TRUE(
       driver.startSelfTest(SelfTestRequest{5}, timing(bus), token).inProgress());
@@ -1996,13 +1997,14 @@ void test_self_test_restoration_deadline_preserves_primary_failure() {
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
   bus.clearTrace();
-  bus.addFault(1, Status::Error(Err::I2C_NACK_DATA, "primary", -301));
+  bus.addFault(9, Status::Error(Err::I2C_NACK_DATA, "primary", -301));
   const uint64_t deadline = bus.nowMs + 100U;
   OperationToken token;
   TEST_ASSERT_TRUE(driver
                         .startSelfTest(SelfTestRequest{5},
                                       OperationTiming{bus.nowMs, deadline}, token)
                        .inProgress());
+  TEST_ASSERT_EQUAL_UINT8(8u, driver.poll(bus.nowMs, 8).transactionsUsed);
   const PollResult restoring = driver.poll(bus.nowMs, 1);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
                           static_cast<uint8_t>(restoring.state));
@@ -2588,8 +2590,12 @@ void test_diagnostic_sync_writes_invalidate_and_reconcile_exact_addresses() {
       cmd::REG_SENSOR_SYNC_RES_RATIO, 0x02U, bus.nowMs).ok());
   TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
       cmd::REG_DRDY_PULSE_CFG_G, 0x80U, bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+      static_cast<uint8_t>(driver.diagnosticWriteRegister(
+          cmd::REG_DRDY_PULSE_CFG_G, cmd::MASK_INT2_WRIST_TILT, bus.nowMs).code));
+  TEST_ASSERT_EQUAL_UINT32(3U, bus.transferCalls);
   TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(
-      cmd::REG_DRDY_PULSE_CFG_G, cmd::MASK_INT2_WRIST_TILT, bus.nowMs).ok());
+      cmd::REG_DRDY_PULSE_CFG_G, 0, bus.nowMs).ok());
   TEST_ASSERT_EQUAL_UINT32(4U, bus.transferCalls);
   TEST_ASSERT_EQUAL_HEX8(cmd::REG_SENSOR_SYNC_TIME_FRAME,
                          bus.trace[0].startReg);
@@ -2638,7 +2644,7 @@ void test_power_down_is_explicit_fallible_and_partial_failure_is_indeterminate()
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
   bus.clearTrace();
-  bus.addFault(4, Status::Error(Err::I2C_TIMEOUT, "accel power-down ambiguous", -101),
+  bus.addFault(12, Status::Error(Err::I2C_TIMEOUT, "accel power-down ambiguous", -101),
                true);
   OperationToken token;
   TEST_ASSERT_TRUE(driver.startPowerDown(timing(bus), token).inProgress());
@@ -2646,7 +2652,7 @@ void test_power_down_is_explicit_fallible_and_partial_failure_is_indeterminate()
   const OperationResult result = take(driver, token);
   assertTerminalFailure(terminal, result, Err::I2C_TIMEOUT,
                         OperationState::INDETERMINATE);
-  TEST_ASSERT_EQUAL_UINT32(4u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(12u, bus.transferCalls);
   TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
                           static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
@@ -3025,7 +3031,7 @@ void test_reconcile_preserves_an_existing_unexpired_settle_gate() {
 
   TEST_ASSERT_EQUAL_UINT8(64u, driver.poll(bus.nowMs, 255).transactionsUsed);
   const PollResult readback = driver.poll(bus.nowMs, 255);
-  TEST_ASSERT_EQUAL_UINT8(6u, readback.transactionsUsed);
+  TEST_ASSERT_EQUAL_UINT8(14u, readback.transactionsUsed);
   const PollResult settling = driver.poll(bus.nowMs, 0);
   TEST_ASSERT_TRUE(settling.waiting);
   TEST_ASSERT_EQUAL_UINT8(0u, settling.transactionsUsed);
@@ -3523,17 +3529,18 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
   TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
   (void)configure(driver, bus);
   bus.clearTrace();
-  bus.addFault(1, Status::Error(Err::I2C_TIMEOUT, "primary boundary", -701));
+  bus.addFault(9, Status::Error(Err::I2C_TIMEOUT, "primary boundary", -701));
   TEST_ASSERT_TRUE(
       driver.startSelfTest(SelfTestRequest{5}, timing(bus), token).inProgress());
+  TEST_ASSERT_EQUAL_UINT8(8u, driver.poll(bus.nowMs, 8).transactionsUsed);
   const PollResult failure = driver.poll(bus.nowMs, 8);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::ACTIVE),
                           static_cast<uint8_t>(failure.state));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
                           static_cast<uint8_t>(failure.status.code));
   TEST_ASSERT_EQUAL_UINT8(1u, failure.transactionsUsed);
-  TEST_ASSERT_EQUAL_UINT16(1u, failure.transactions);
-  TEST_ASSERT_EQUAL_UINT32(1u, bus.transferCalls);
+  TEST_ASSERT_EQUAL_UINT16(9u, failure.transactions);
+  TEST_ASSERT_EQUAL_UINT32(9u, bus.transferCalls);
   TEST_ASSERT_EQUAL_UINT16(maximumSelfTestTransactions(5),
                            failure.transactionLimit);
   const PollResult terminal = runToTerminal(driver, bus);
@@ -3591,8 +3598,8 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
 
 void test_maximum_transaction_helpers_cover_exact_boundaries() {
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(4));
-  TEST_ASSERT_EQUAL_UINT32(202u, maximumSelfTestTransactions(5));
-  TEST_ASSERT_EQUAL_UINT32(1722u, maximumSelfTestTransactions(100));
+  TEST_ASSERT_EQUAL_UINT32(218u, maximumSelfTestTransactions(5));
+  TEST_ASSERT_EQUAL_UINT32(1738u, maximumSelfTestTransactions(100));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(101));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumCalibrationTransactions(0));
   TEST_ASSERT_EQUAL_UINT32(4u, maximumCalibrationTransactions(1));
@@ -4069,12 +4076,12 @@ void test_self_test_transaction_ceiling_covers_distributed_readiness_waits() {
     TEST_ASSERT_TRUE(result.selfTest.primaryStatus.ok());
     TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
     TEST_ASSERT_EQUAL_UINT32(12u * (samples + 1u), bus.statusReadIndex);
-    TEST_ASSERT_EQUAL_UINT32(16u * (samples + 1u) + 87u, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(16u * (samples + 1u) + 95u, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(bus.transferCalls, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(maximumSelfTestTransactions(samples),
                              result.transactionLimit);
-    // This default profile omits 18 counter-restoration callbacks and one cleanup callback.
-    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 19u, result.transactions);
+    // This default profile omits 18 counter, 8 route activation and 1 cleanup callback.
+    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 27u, result.transactions);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
                             static_cast<uint8_t>(
                                 driver.configurationState(bus.nowMs)));
@@ -4093,7 +4100,7 @@ void test_self_test_transaction_ceiling_reserves_failed_shutdown_cleanup() {
     // Fail the final gyro power-down after all four worst-case sample phases.
     // Cleanup repeats that write, then disables stimulus and restores all 33
     // managed registers, consuming the extra reserved callback exactly.
-    const uint32_t failedShutdown = 16u * (samples + 1u) + 19u;
+    const uint32_t failedShutdown = 16u * (samples + 1u) + 27u;
     bus.addFault(failedShutdown,
                  Status::Error(Err::I2C_TIMEOUT, "final self-test shutdown"));
     OperationToken token;
@@ -4109,11 +4116,11 @@ void test_self_test_transaction_ceiling_reserves_failed_shutdown_cleanup() {
                             static_cast<uint8_t>(result.selfTest.primaryStatus.code));
     TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
     TEST_ASSERT_EQUAL_UINT32(12u * (samples + 1u), bus.statusReadIndex);
-    TEST_ASSERT_EQUAL_UINT32(16u * (samples + 1u) + 88u, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(16u * (samples + 1u) + 96u, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(bus.transferCalls, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(maximumSelfTestTransactions(samples),
                              result.transactionLimit);
-    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 18u, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 26u, result.transactions);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
                             static_cast<uint8_t>(
                                 driver.configurationState(bus.nowMs)));
@@ -4244,6 +4251,7 @@ int main() {
   runProfileCliTests();
   runFifoTests();
   runFifoFourthTests();
+  runInterruptTests();
   RUN_TEST(test_status_contract);
   RUN_TEST(test_validate_driver_config_and_address);
   RUN_TEST(test_validate_profile_rejects_all_unsupported_or_unsafe_values);

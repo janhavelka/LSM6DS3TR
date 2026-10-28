@@ -7,7 +7,7 @@
  * the complete resulting profile passes the production driver's validation.
  * It covers every DeviceProfile field: supported ODR/range/power/filter/sleep
  * and offset values, inactive gyro HPF mode bits, and the invariant fields
- * that production validation deliberately keeps at BDU-on, interrupt-off,
+ * that production validation deliberately keeps at BDU-on,
  * and unsupported-filter-off values.
  *
  * @note Boolean grammar is 0/1, off/on, or false/true. Parsing an unsupported
@@ -168,6 +168,59 @@ inline const char* fifoRecordKindName(FifoRecordKind value) {
   }
 }
 
+inline const char* interruptPolarityName(InterruptPolarity value) {
+  switch (value) {
+    case InterruptPolarity::ACTIVE_HIGH: return "high";
+    case InterruptPolarity::ACTIVE_LOW: return "low";
+    default: return "invalid";
+  }
+}
+
+inline const char* interruptDriveName(InterruptDrive value) {
+  switch (value) {
+    case InterruptDrive::PUSH_PULL: return "push_pull";
+    case InterruptDrive::OPEN_DRAIN_PAD: return "open_drain";
+    default: return "invalid";
+  }
+}
+
+inline const char* dataReadyModeName(DataReadyMode value) {
+  switch (value) {
+    case DataReadyMode::LATCHED: return "latched";
+    case DataReadyMode::PULSED: return "pulsed";
+    default: return "invalid";
+  }
+}
+
+inline const char* orientationModeName(OrientationMode value) {
+  switch (value) {
+    case OrientationMode::OFF: return "off";
+    case OrientationMode::SIX_D: return "6d";
+    case OrientationMode::FOUR_D: return "4d";
+    default: return "invalid";
+  }
+}
+
+inline const char* orientationThresholdName(OrientationThreshold value) {
+  switch (value) {
+    case OrientationThreshold::DEG_80: return "80";
+    case OrientationThreshold::DEG_70: return "70";
+    case OrientationThreshold::DEG_60: return "60";
+    case OrientationThreshold::DEG_50: return "50";
+    default: return "invalid";
+  }
+}
+
+inline bool equalRoutes(const InterruptRoutes& lhs, const InterruptRoutes& rhs) {
+  return lhs.accelReady == rhs.accelReady && lhs.gyroReady == rhs.gyroReady &&
+         lhs.temperatureReady == rhs.temperatureReady &&
+         lhs.fifoWatermark == rhs.fifoWatermark && lhs.fifoFull == rhs.fifoFull &&
+         lhs.fifoOverrun == rhs.fifoOverrun && lhs.stepDetected == rhs.stepDetected &&
+         lhs.stepOverflow == rhs.stepOverflow &&
+         lhs.timestampEndCounter == rhs.timestampEndCounter &&
+         lhs.orientation == rhs.orientation;
+}
+
 inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
   return lhs.accelOdr == rhs.accelOdr &&
          lhs.accelFullScale == rhs.accelFullScale &&
@@ -197,7 +250,16 @@ inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
          lhs.fifo.trigger == rhs.fifo.trigger &&
          lhs.fifo.timestampResolution == rhs.fifo.timestampResolution &&
          lhs.fifo.watermarkWords == rhs.fifo.watermarkWords &&
-         lhs.interrupts.enabled == rhs.interrupts.enabled;
+         lhs.interrupts.enabled == rhs.interrupts.enabled &&
+         lhs.interrupts.polarity == rhs.interrupts.polarity &&
+         lhs.interrupts.drive == rhs.interrupts.drive &&
+         lhs.interrupts.dataReadyMode == rhs.interrupts.dataReadyMode &&
+         lhs.interrupts.latchEvents == rhs.interrupts.latchEvents &&
+         lhs.interrupts.int2OnInt1 == rhs.interrupts.int2OnInt1 &&
+         equalRoutes(lhs.interrupts.int1, rhs.interrupts.int1) &&
+         equalRoutes(lhs.interrupts.int2, rhs.interrupts.int2) &&
+         lhs.interrupts.orientation.mode == rhs.interrupts.orientation.mode &&
+         lhs.interrupts.orientation.threshold == rhs.interrupts.orientation.threshold;
 }
 
 inline bool parseBool(const char* text, bool& value) {
@@ -356,6 +418,90 @@ inline bool parseTimestampResolution(const char* text, TimestampResolution& valu
   return true;
 }
 
+inline bool parseInterruptPolarity(const char* text, InterruptPolarity& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "high") == 0) value = InterruptPolarity::ACTIVE_HIGH;
+  else if (std::strcmp(text, "low") == 0) value = InterruptPolarity::ACTIVE_LOW;
+  else return false;
+  return true;
+}
+
+inline bool parseInterruptDrive(const char* text, InterruptDrive& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "push_pull") == 0) value = InterruptDrive::PUSH_PULL;
+  else if (std::strcmp(text, "open_drain") == 0) value = InterruptDrive::OPEN_DRAIN_PAD;
+  else return false;
+  return true;
+}
+
+inline bool parseDataReadyMode(const char* text, DataReadyMode& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "latched") == 0) value = DataReadyMode::LATCHED;
+  else if (std::strcmp(text, "pulsed") == 0) value = DataReadyMode::PULSED;
+  else return false;
+  return true;
+}
+
+inline bool parseOrientationMode(const char* text, OrientationMode& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "off") == 0) value = OrientationMode::OFF;
+  else if (std::strcmp(text, "6d") == 0) value = OrientationMode::SIX_D;
+  else if (std::strcmp(text, "4d") == 0) value = OrientationMode::FOUR_D;
+  else return false;
+  return true;
+}
+
+inline bool parseOrientationThreshold(const char* text, OrientationThreshold& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "80") == 0) value = OrientationThreshold::DEG_80;
+  else if (std::strcmp(text, "70") == 0) value = OrientationThreshold::DEG_70;
+  else if (std::strcmp(text, "60") == 0) value = OrientationThreshold::DEG_60;
+  else if (std::strcmp(text, "50") == 0) value = OrientationThreshold::DEG_50;
+  else return false;
+  return true;
+}
+
+inline bool setRoute(InterruptRoutes& routes, const char* source, const char* text) {
+  if (source == nullptr) return false;
+  bool value = false;
+  if (!parseBool(text, value)) return false;
+  if (std::strcmp(source, "accel") == 0) routes.accelReady = value;
+  else if (std::strcmp(source, "gyro") == 0) routes.gyroReady = value;
+  else if (std::strcmp(source, "temp") == 0) routes.temperatureReady = value;
+  else if (std::strcmp(source, "watermark") == 0) routes.fifoWatermark = value;
+  else if (std::strcmp(source, "full") == 0) routes.fifoFull = value;
+  else if (std::strcmp(source, "overrun") == 0) routes.fifoOverrun = value;
+  else if (std::strcmp(source, "step") == 0) routes.stepDetected = value;
+  else if (std::strcmp(source, "step_overflow") == 0) routes.stepOverflow = value;
+  else if (std::strcmp(source, "timestamp") == 0) routes.timestampEndCounter = value;
+  else if (std::strcmp(source, "orientation") == 0) routes.orientation = value;
+  else return false;
+  return true;
+}
+
+// "all" means every configured observation group, not every chip engine.
+// There is no readable timestamp-end status bit; GPIO evidence is external.
+inline bool eventRequest(const char* selection, const DeviceProfile& profile,
+                          EventReadRequest& out) {
+  if (selection == nullptr) return false;
+  EventReadRequest candidate{};
+  candidate.dataReady = false;
+  if (std::strcmp(selection, "ready") == 0) candidate.dataReady = true;
+  else if (std::strcmp(selection, "fifo") == 0) candidate.fifo = true;
+  else if (std::strcmp(selection, "embedded") == 0) candidate.embedded = true;
+  else if (std::strcmp(selection, "orientation") == 0) candidate.orientation = true;
+  else if (std::strcmp(selection, "all") == 0) {
+    candidate.dataReady = true;
+    candidate.fifo = profile.fifo.enabled;
+    candidate.embedded = profile.fifo.enabled &&
+        profile.fifo.fourthDataset == FifoFourthDataset::TIMESTAMP_STEP;
+    candidate.orientation = profile.interrupts.enabled &&
+        profile.interrupts.orientation.mode != OrientationMode::OFF;
+  } else return false;
+  out = candidate;
+  return true;
+}
+
 /**
  * @brief Apply one typed field update atomically to a valid profile draft.
  * @param profile Current valid draft; unchanged on any error.
@@ -494,6 +640,53 @@ inline Status setField(DeviceProfile& profile, const char* field,
   } else if (std::strcmp(field, "interrupts") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.interrupts.enabled))
       return invalidValue("interrupts expects 0|1");
+    if (!candidate.interrupts.enabled) candidate.interrupts = {};
+  } else if (std::strcmp(field, "irq") == 0) {
+    if (valueCount != 5U ||
+        !parseInterruptPolarity(values[0], candidate.interrupts.polarity) ||
+        !parseInterruptDrive(values[1], candidate.interrupts.drive) ||
+        !parseDataReadyMode(values[2], candidate.interrupts.dataReadyMode) ||
+        !parseBool(values[3], candidate.interrupts.latchEvents) ||
+        !parseBool(values[4], candidate.interrupts.int2OnInt1))
+      return invalidValue("irq expects <high|low> <push_pull|open_drain> <latched|pulsed> <latch_events> <combine>");
+    candidate.interrupts.enabled = true;
+  } else if (std::strcmp(field, "irq_polarity") == 0) {
+    if (valueCount != 1U || !parseInterruptPolarity(values[0], candidate.interrupts.polarity))
+      return invalidValue("irq_polarity expects high|low");
+  } else if (std::strcmp(field, "irq_drive") == 0) {
+    if (valueCount != 1U || !parseInterruptDrive(values[0], candidate.interrupts.drive))
+      return invalidValue("irq_drive expects push_pull|open_drain");
+  } else if (std::strcmp(field, "irq_drdy") == 0) {
+    if (valueCount != 1U || !parseDataReadyMode(values[0], candidate.interrupts.dataReadyMode))
+      return invalidValue("irq_drdy expects latched|pulsed");
+  } else if (std::strcmp(field, "irq_latch") == 0) {
+    if (valueCount != 1U || !parseBool(values[0], candidate.interrupts.latchEvents))
+      return invalidValue("irq_latch expects 0|1");
+  } else if (std::strcmp(field, "irq_combine") == 0) {
+    if (valueCount != 1U || !parseBool(values[0], candidate.interrupts.int2OnInt1))
+      return invalidValue("irq_combine expects 0|1");
+  } else if (std::strcmp(field, "int1") == 0 || std::strcmp(field, "int2") == 0) {
+    InterruptRoutes& routes = std::strcmp(field, "int1") == 0
+                                  ? candidate.interrupts.int1 : candidate.interrupts.int2;
+    if (valueCount != 2U || !setRoute(routes, values[0], values[1]))
+      return invalidValue("int1|int2 expects <accel|gyro|temp|watermark|full|overrun|step|step_overflow|timestamp|orientation> <0|1>");
+  } else if (std::strcmp(field, "orientation") == 0) {
+    if (valueCount == 1U && std::strcmp(values[0], "off") == 0) {
+      candidate.interrupts.orientation = {};
+      candidate.interrupts.int1.orientation = false;
+      candidate.interrupts.int2.orientation = false;
+    } else {
+      if (valueCount != 3U ||
+          !parseOrientationMode(values[0], candidate.interrupts.orientation.mode) ||
+          candidate.interrupts.orientation.mode == OrientationMode::OFF ||
+          !parseOrientationThreshold(values[1], candidate.interrupts.orientation.threshold) ||
+          (std::strcmp(values[2], "int1") != 0 && std::strcmp(values[2], "int2") != 0 &&
+           std::strcmp(values[2], "both") != 0))
+        return invalidValue("orientation expects off or <6d|4d> <80|70|60|50> <int1|int2|both>");
+      candidate.interrupts.enabled = true;
+      candidate.interrupts.int1.orientation = std::strcmp(values[2], "int2") != 0;
+      candidate.interrupts.int2.orientation = std::strcmp(values[2], "int1") != 0;
+    }
   } else {
     return invalidValue("Unknown profile field");
   }

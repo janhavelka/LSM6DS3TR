@@ -109,3 +109,26 @@ These anchors keep the compact notes connected to the wider user register map wi
 | `0x60` | `MASTER_CMD_CODE` | Sensor-hub master command code. | Datasheet, p. 94 |
 | `0x61` | `SENS_SYNC_SPI_ERROR_CODE` | Sensor-sync SPI error code. | Datasheet, p. 94 |
 | `0x66..0x6B` | `OUT_MAG_RAW_X_L`, `OUT_MAG_RAW_X_H`, `OUT_MAG_RAW_Y_L`, `OUT_MAG_RAW_Y_H`, `OUT_MAG_RAW_Z_L`, `OUT_MAG_RAW_Z_H` | External magnetometer raw output words exposed through the sensor-hub path. | Datasheet, pp. 94-95 |
+
+## Supported Interrupt Field Ownership
+
+| Register | Owned supported fields | Source |
+|---|---|---|
+| `CTRL3_C` | `H_LACTIVE[5]`, `PP_OD[4]`, composed with the existing BDU/IF_INC policy | Datasheet p. 63 |
+| `CTRL4_C` | `INT2_on_INT1[5]`, composed with gyro sleep, LPF1 and DRDY-mask fields | Datasheet p. 64 |
+| `DRDY_PULSE_CFG_G` | `DRDY_PULSED[7]`; wrist-tilt bit stays zero | Datasheet p. 59 |
+| `INT1_CTRL` | DRDY_XL/G, FTH, FIFO_OVR, FULL_FLAG, STEP_DETECTOR (`0xBB`) | Datasheet p. 59 |
+| `INT2_CTRL` | DRDY_XL/G/TEMP, FTH, FIFO_OVR, FULL_FLAG, STEP_COUNT_OV (`0x7F`) | Datasheet p. 60 |
+| `TAP_CFG` | `INTERRUPTS_ENABLE[7]` for orientation and global `LIR[0]` | Datasheet p. 88 |
+| `TAP_THS_6D` | `D4D_EN[7]`, `SIXD_THS[6:5]`; tap threshold stays zero | Datasheet p. 89; ambiguity ledger |
+| `MD1_CFG` / `MD2_CFG` | INT1 timer/6D (`0x05`), INT2 6D (`0x04`) | Datasheet pp. 92-93 |
+
+These stable bits enter the existing managed image and complete readback.
+Mutable source flags and timestamp/step reset commands do not enter equality
+checks. Nonzero raw diagnostic writes to any of the four route registers are
+rejected; typed profiles cannot be bypassed by supplying unsupported masks.
+The dedicated wrist-tilt route (`DRDY_PULSE_CFG_G[0]`), DEN-DRDY route
+(`CTRL4_C[4]`) and sensor-hub Master-DRDY route (`MASTER_CONFIG[7]`) are also
+rejected by raw diagnostics. Their definitions are in datasheet Tables 43,
+58 and 78-79, pp. 59, 64 and 69-70. This preserves supported motion DRDY pulse
+control in bit 7 and INT2 combining in CTRL4_C bit 5.

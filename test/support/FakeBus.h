@@ -66,6 +66,16 @@ struct FakeBus {
   uint32_t stepResetAssertions = 0;
   uint32_t bankWritesWhileSensorsActive = 0;
   uint32_t fifoFourthTriggers = 0;
+  // Independent event inputs and physical latch rules from AN5130 pp.39/52.
+  uint32_t eventArrivalCall = 0;
+  uint8_t arrivingOrientation = 0;
+  uint8_t arrivingEmbedded = 0;
+  uint8_t arrivingReady = 0;
+  uint32_t orientationSourceReads = 0;
+  uint32_t embeddedSourceReads = 0;
+  uint32_t orientationAcknowledgements = 0;
+  uint32_t embeddedAcknowledgements = 0;
+  bool timestampEndAsserted = false;
   uint32_t notReadyStatusReads = 0;
   uint32_t selfTestNotReadyStatusReads = 0;
   uint32_t notReadyPeriod = 0;
@@ -121,6 +131,7 @@ struct FakeBus {
     bankA[0x14] = 0x6E;
     timestampTicks = 0;
     stepCount = 0;
+    timestampEndAsserted = false;
     fifoFourthTriggers = 0;
     fifoUnreadWords = 0;
     fifoHead = 0;
@@ -142,6 +153,50 @@ struct FakeBus {
     regs[cmd::REG_TIMESTAMP2] = static_cast<uint8_t>(timestampTicks >> 16U);
     regs[0x4B] = static_cast<uint8_t>(stepCount);
     regs[0x4C] = static_cast<uint8_t>(stepCount >> 8U);
+  }
+
+  void setEventSources(uint8_t orientation, uint8_t embedded,
+                        uint8_t ready = 0x07U) {
+    regs[0x1D] = orientation;
+    regs[0x53] = embedded;
+    regs[0x1E] = ready;
+  }
+
+  void injectEventArrival() {
+    if (eventArrivalCall != 0U && eventArrivalCall == transferCalls) {
+      regs[0x1D] |= arrivingOrientation;
+      regs[0x53] |= arrivingEmbedded;
+      regs[0x1E] |= arrivingReady;
+      eventArrivalCall = 0;
+    }
+  }
+
+  bool applySourceReadEffects(uint8_t startReg, size_t length) {
+    if ((regs[0x01] & 0xA0U) != 0U) return false;
+    bool effect = false;
+    const bool latch = (regs[0x58] & 0x01U) != 0U;
+    for (size_t index = 0; index < length; ++index) {
+      const uint8_t reg = static_cast<uint8_t>(startReg + index);
+      if (reg == 0x1DU) {
+        ++orientationSourceReads;
+        if (latch && ((regs[0x5E] | regs[0x5F]) & 0x04U) != 0U) {
+          regs[0x1D] &= static_cast<uint8_t>(~0x40U);
+          ++orientationAcknowledgements;
+          effect = true;
+        }
+      } else if (reg == 0x53U) {
+        ++embeddedSourceReads;
+        uint8_t clear = 0;
+        if (latch && (regs[0x0D] & 0x80U) != 0U) clear |= 0x10U;
+        if (latch && (regs[0x0E] & 0x40U) != 0U) clear |= 0x08U;
+        if (clear != 0U) {
+          regs[0x53] &= static_cast<uint8_t>(~clear);
+          ++embeddedAcknowledgements;
+          effect = true;
+        }
+      }
+    }
+    return effect;
   }
 
   // Explicit physical inputs, independent of the production decoder. Disabling
@@ -359,6 +414,7 @@ struct FakeBus {
       }
       if (reg == cmd::REG_TIMESTAMP2 && value == 0xAAU) {
         ++timestampResetWrites;
+        timestampEndAsserted = false;
         setCounters(0, stepCount);
         continue;
       }
@@ -493,6 +549,7 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     FakeBus::finishTransfer(transfer, fault->status);
     return fault->status;
   }
+  bus.injectEventArrival();
 
   if (startReg == cmd::REG_FIFO_DATA_OUT_L && rxLength >= 2U) {
     // AN5130 sections 4.7.1 and 8.4: FIFO output addresses round from
@@ -586,12 +643,13 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     }
   }
 
+  const bool sourceEffect = bus.applySourceReadEffects(startReg, rxLength);
   if (fault != nullptr) {
     FakeBus::finishTransfer(transfer, fault->status, true);
     return fault->status;
   }
   const Status status = Status::Ok();
-  FakeBus::finishTransfer(transfer, status);
+  FakeBus::finishTransfer(transfer, status, sourceEffect);
   return status;
 }
 

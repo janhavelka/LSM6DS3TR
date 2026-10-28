@@ -550,7 +550,8 @@ void test_fourth_configure_fault_cancel_and_deadline_cover_every_transfer() {
     Driver driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
     total = fourthConfigure(driver, bus, profile).transactions;
-    TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, total);
+    // This counter profile has no enabled interrupt routes (no final eight callbacks).
+    TEST_ASSERT_EQUAL_UINT32(98U, total);
   }
   for (uint32_t stopped = 0; stopped < total; ++stopped) {
     for (uint8_t mode = 0; mode < 4; ++mode) {
@@ -766,7 +767,7 @@ void test_counter_reset_boot_and_recovery_restore_all_owned_controls() {
     TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
     const uint32_t ceiling = operation == 2 ? MAX_RECOVER_TRANSACTIONS : MAX_RESET_TRANSACTIONS;
     TEST_ASSERT_EQUAL_UINT32(ceiling, result.transactionLimit);
-    TEST_ASSERT_EQUAL_UINT32(operation == 1 ? ceiling - 1U : ceiling, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(operation == 1 ? 118U : operation == 2 ? 118U : 119U, result.transactions);
     TEST_ASSERT_EQUAL_HEX8(0x34, bus.regs[cmd::REG_CTRL10_C]);
     TEST_ASSERT_EQUAL_HEX8(0x10, bus.regs[cmd::REG_WAKE_UP_DUR]);
     TEST_ASSERT_EQUAL_HEX8(0x80, bus.regs[cmd::REG_FIFO_CTRL2]);
@@ -791,15 +792,15 @@ void test_counter_self_test_restores_profile_without_implicit_resets() {
     bus.clearTrace();
     bus.notReadyPeriod = 3;
     if (failShutdown)
-      bus.addFault(16U * 6U + 19U, Status::Error(Err::I2C_TIMEOUT, "shutdown counter restore"));
+      bus.addFault(16U * 6U + 27U, Status::Error(Err::I2C_TIMEOUT, "shutdown counter restore"));
     OperationToken token;
     TEST_ASSERT_TRUE(driver.startSelfTest({5}, fourthTiming(bus), token).inProgress());
     fourthRun(driver, bus);
     const OperationResult result = fourthTake(driver, token);
     TEST_ASSERT_EQUAL(!failShutdown, result.status.ok());
     TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
-    TEST_ASSERT_EQUAL_UINT32(16U * 6U + (failShutdown ? 105U : 104U), result.transactions);
-    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 106U, result.transactionLimit);
+    TEST_ASSERT_EQUAL_UINT32(16U * 6U + (failShutdown ? 113U : 112U), result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 122U, result.transactionLimit);
     TEST_ASSERT_EQUAL_HEX32(0x123456, bus.timestampTicks);
     TEST_ASSERT_EQUAL_HEX16(0x789A, bus.stepCount);
     TEST_ASSERT_EQUAL_UINT32(resets, bus.timestampResetWrites);
@@ -882,9 +883,9 @@ void test_counter_diagnostics_and_rebinding_preserve_distinct_epochs() {
 }
 
 void test_counter_self_test_restoration_fault_cancel_deadline_cover_every_transfer() {
-  // Four sample phases reserve3 readiness checks plus1 burst for each of the
-  // five averages and one discard;20 recipe writes precede restoration.
-  static constexpr uint32_t RESTORE_START = 16U * 6U + 20U;
+  // Four sample phases reserve three readiness checks plus one burst for each of the
+  // five averages and one discard; eight mask callbacks and 20 recipe writes precede restoration.
+  static constexpr uint32_t RESTORE_START = 16U * 6U + 28U;
   static constexpr uint32_t RESTORE_END = RESTORE_START + 16U + 66U + 2U;
   for (uint32_t stopped = RESTORE_START; stopped < RESTORE_END; ++stopped) {
     for (uint8_t mode = 0; mode < 4; ++mode) {

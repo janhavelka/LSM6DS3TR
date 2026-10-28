@@ -259,3 +259,29 @@ product-page quality table currently labels the package 2.5 x 3 x 0.86 mm.
 
 **Resolution:** use the original datasheet package drawing and tolerances for
 mechanical/PCB work; do not derive a footprint from either rounded web label.
+
+## Timestamp End-Counter Has No Readable Event Flag
+
+Datasheet pp. 86 and 92-93 defines FUNC_SRC1/2 and routes: INT1_TIMER is a route
+in MD1_CFG, not a status bit. AN5130 p. 57 describes its near-saturation pad
+request and clears it only by writing `0xAA` to TIMESTAMP2, which also resets
+the timer. Neither document assigns a readable timestamp-end source flag.
+
+**Resolution:** `EventReadResult::timestampRouted` reports configuration only.
+Do not infer a latched pad from raw counter proximity or repurpose an unrelated
+FUNC_SRC bit. Acknowledgement uses explicit counter reset with epoch/effect
+evidence. Physical pad/timing qualification remains **NOT RUN**.
+
+## Conditional Source Latching And Orientation Direction Bits
+
+AN5130 pp. 39 and 52 makes orientation/step latching conditional on both LIR
+and the corresponding source route. Without routing, those source flags remain
+pulsed even if LIR is set. The orientation text guarantees clearing the request
+on a source read, but does not explicitly guarantee all directional bits clear.
+
+**Resolution:** decode only supported source bits, retain raw bytes and separate
+possible/confirmed acknowledgement effects from the decoded cause. Direction
+bits do not manufacture a unique orientation when raw flags disagree. No event
+read claims simultaneous sources, measured pin level, or recoverability of every
+missed nonlatched pulse. The independent fake clears the request rather than
+assuming undocumented zero directional bytes; physical behavior is **NOT RUN**.

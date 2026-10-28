@@ -355,3 +355,64 @@ snapshot or motion-only evidence does not qualify this extension.
    changes and explicit maintenance/replay. Qualify only the cadence, counter,
    event and continuity claims demonstrated by matching logs; electrical
    interrupt routing remains a later prompt and is not qualified here.
+
+## Interrupt And Orientation Qualification
+
+**Status: NOT RUN.** Prompt 03 execution starts on 2026-10-27 from synchronized
+`5b3d6bc1a6d8fe5831e537ba1bc92cef65dad5d5`, after the motion and fourth-dataset
+software acceptance records. Use only a separately authorized fixture. Retain
+exact final commit/build identity, S2/S3/backend, sensor address, complete
+profile, supply/pull-resistor wiring and raw CLI/logic-analyzer logs. Successful
+register readback and historical snapshot campaigns do not qualify these cases.
+
+1. Exercise shared active-high/active-low and push-pull/open-drain policies with
+   correctly chosen external pulls. Measure both pads and supply levels. Test
+   direct INT1/INT2 routing and INT2-on-INT1 combining; show the real source bits
+   remain in their respective route registers. Do not configure unsupported
+   direct pin/source pairs or infer electrical levels from an event result.
+2. Route accel and gyro DRDY independently and together. Compare latched output
+   clearing with 75 us pulsed motion DRDY. Verify STATUS observation alone does
+   not acknowledge the output. Route temperature on INT2 and log its actual
+   cadence separately. Use the platform ISR hook only to set its reserved
+   task-notification bit on the existing owner task. Verify bit ownership and
+   zero-timeout consumption, including coalesced edges and a pending busy owner;
+   all driver APIs and I2C run from the serialized owner task. No additional
+   task, queue or GPIO attachment is implicit in this example.
+3. Route FIFO watermark/full/overrun on each supported pad. Exercise threshold
+   zero, ordinary thresholds, stop-on-full and Continuous loss. Correlate pad
+   transitions with independently read FIFO status and existing acquisition loss
+   evidence. Reading event status must not drain FIFO, acknowledge unrelated
+   sources or silently reconfigure the collection profile.
+4. Under the fixed pedometer profile, exercise step detected on INT1 and step
+   overflow on INT2. Compare nonlatched source duration (1/26 Hz) with pad pulse
+   duration (about 75 us), and routed/global-LIR read-to-clear behavior. Capture
+   several events between reads and under owner loading; qualify only the loss
+   behavior actually observed. Raw step wrap is not an expanded total.
+5. Route timestamp end-counter on INT1 and observe its near-saturation request
+   for both supported resolutions where practical. No event-source register
+   contains a timer-end flag. After explicit bounded stop/reconfigure to the
+   known timestamp/step Bypass profile, use `counterreset timestamp`; verify
+   `TIMESTAMP2=0xAA`, the acknowledgement/reset effect and new counter epoch.
+   Do not treat raw threshold proximity as proof of the pad's latched state.
+6. Enable 6D/4D with each exact threshold and supported route/latch combination.
+   Rotate through positive/negative X/Y/Z positions with independent references.
+   Check two-sample recognition, 4D suppression of Z, one-ODR nonlatched requests
+   and routed latched acknowledgement. The supported source path is LPF1 ODR/2;
+   the optional 6D LPF2 path remains unsupported until prompt 04. Preserve raw
+   direction bytes after read-clear rather than requiring undocumented zeros.
+7. Generate simultaneous causes and events between the four independent source
+   callbacks. Check raw/time/valid fields, read mask and confirmed/possible
+   acknowledgement effects. Inject an authorized NACK/timeout, cancel or expire
+   the deadline around each source read and route phase. No internal retry or
+   successful event token may conceal an incomplete or ambiguous observation.
+8. Verify route masking before configure, reset/boot/recovery and self-test
+   dependencies change, and final route restoration after full readback/settling.
+   Check actual verified-profile restoration, power-down routes/ODRs off,
+   calibration preserving routes and sample/calibration DRDY acknowledgements.
+   Leave a source pending before final route activation and distinguish a
+   reasserted old request from a newly generated event. Record event-history
+   uncertainty and missed pending pulses honestly.
+9. Run the intended application ISR/owner-load campaign on S2 and S3, retaining
+   pulse counts, event counts, known losses, deadlines and scheduling data.
+   Qualify interrupt loss, electrical behavior and orientation response only from
+   matching logs; no current automated software pass claims this physical gate.

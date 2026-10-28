@@ -24,11 +24,14 @@
 | FIFO internal and step-event collection triggers | supported in software; hardware NOT RUN | step events require timestamp/step source and trigger all enabled datasets; decimation counts events, with no regular motion ODR claim |
 | FIFO external sensor datasets | unsupported | no sensor-hub topology or external schema |
 | FIFO triggered modes, high-byte packing, stop-on-threshold | unsupported | mode-switch triggers remain unsupported; supported collection triggers do not enable those modes |
-| INT1/INT2 electrical/routing/threshold/event profiles | unsupported | needs electrical, latch, threshold, duration, and route ownership |
+| INT1/INT2 electrical and supported source routes | supported in software; hardware NOT RUN | typed shared polarity/drive, motion DRDY mode, global embedded LIR, supported direct pin/source pairs and bounded route masking/activation |
+| Bounded source-event observation and acknowledgement evidence | supported in software; hardware NOT RUN | `startEventRead`, separate raw/time/valid observations and effect masks; no simultaneous snapshot or measured pad claim |
+| 6D/4D orientation | supported in software; hardware NOT RUN | active accel, exact 80/70/60/50 degree threshold, routed engine and LPF1 ODR/2 input; 6D LPF2 remains unsupported until filter qualification |
 | Pedometer fixed policy for timestamp/step FIFO | supported in software; hardware NOT RUN | accelerometer at least 26 Hz; fixed bank-A policy with powered-down write/readback and main-bank restoration; explicit bounded counter reset |
 | Significant motion, relative/absolute tilt | unsupported | chip facts retained; no typed production profile |
-| Tap, wake-up, free-fall, activity/inactivity, 4D/6D | unsupported | chip facts retained; no typed production profile |
-| Timestamp/pedometer counter lifetime | supported in software; hardware NOT RUN | raw modular counters with explicit epoch/continuity/reset evidence; ordinary reads/reconcile do not reset; no missed-wrap inference or interrupt routes |
+| Tap, wake-up, free-fall, activity/inactivity | unsupported | chip facts retained; no typed production profile |
+| Timestamp/pedometer counter lifetime | supported in software; hardware NOT RUN | raw modular counters with explicit epoch/continuity/reset evidence; ordinary reads/reconcile do not reset; no missed-wrap inference; typed INT1 end-counter route with explicit reset acknowledgement |
+| Step-delta batching, boot notification, unsupported event routes | unsupported | typed route policy rejects these sources; raw nonzero route masks are not an escape |
 | Sensor hub, pass-through, hard/soft-iron correction | unsupported | no external-sensor topology or bounded scheduler contract |
 | DEN and sensor synchronization | unsupported | no product timing/electrical contract |
 

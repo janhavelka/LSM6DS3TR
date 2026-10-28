@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 
 #include "../examples/common/ProfileCli.h"
 #include "support/FakeBus.h"
@@ -738,8 +739,7 @@ void test_profile_cli_set_field_rejects_every_bad_token_atomically() {
 }
 
 void test_profile_cli_set_field_rejects_all_production_invariants_atomically() {
-  const char* fields[] = {"xl_slope_hp", "xl_6d_lpf", "g_hpf",
-                          "interrupts"};
+  const char* fields[] = {"xl_slope_hp", "xl_6d_lpf", "g_hpf"};
   const char* trueTokens[] = {"1", "on", "true"};
   for (const char* field : fields) {
     for (const char* token : trueTokens) {
@@ -1136,9 +1136,198 @@ void test_profile_cli_fourth_dataset_rejects_bad_arity_and_tokens() {
   TEST_ASSERT_TRUE(profile_cli::equal(before, profile));
 }
 
+
+void test_profile_cli_interrupt_enum_parsers_are_total_and_atomic() {
+  for (uint8_t index = 0; index < 2; ++index) {
+    InterruptPolarity polarity = InterruptPolarity::ACTIVE_HIGH;
+    const char* polarityText = index == 0 ? "high" : "low";
+    TEST_ASSERT_TRUE(profile_cli::parseInterruptPolarity(polarityText, polarity));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(polarity));
+    TEST_ASSERT_EQUAL_STRING(polarityText, profile_cli::interruptPolarityName(polarity));
+    TEST_ASSERT_FALSE(profile_cli::parseInterruptPolarity("invalid", polarity));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(polarity));
+    TEST_ASSERT_FALSE(profile_cli::parseInterruptPolarity(nullptr, polarity));
+
+    InterruptDrive drive = InterruptDrive::PUSH_PULL;
+    const char* driveText = index == 0 ? "push_pull" : "open_drain";
+    TEST_ASSERT_TRUE(profile_cli::parseInterruptDrive(driveText, drive));
+    TEST_ASSERT_EQUAL_STRING(driveText, profile_cli::interruptDriveName(drive));
+    TEST_ASSERT_FALSE(profile_cli::parseInterruptDrive("invalid", drive));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(drive));
+
+    DataReadyMode drdy = DataReadyMode::LATCHED;
+    const char* drdyText = index == 0 ? "latched" : "pulsed";
+    TEST_ASSERT_TRUE(profile_cli::parseDataReadyMode(drdyText, drdy));
+    TEST_ASSERT_EQUAL_STRING(drdyText, profile_cli::dataReadyModeName(drdy));
+    TEST_ASSERT_FALSE(profile_cli::parseDataReadyMode("invalid", drdy));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(drdy));
+  }
+  const char* modes[] = {"off", "6d", "4d"};
+  for (uint8_t index = 0; index < 3; ++index) {
+    OrientationMode mode = OrientationMode::OFF;
+    TEST_ASSERT_TRUE(profile_cli::parseOrientationMode(modes[index], mode));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(mode));
+    TEST_ASSERT_EQUAL_STRING(modes[index], profile_cli::orientationModeName(mode));
+    TEST_ASSERT_FALSE(profile_cli::parseOrientationMode("invalid", mode));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(mode));
+  }
+  const char* thresholds[] = {"80", "70", "60", "50"};
+  for (uint8_t index = 0; index < 4; ++index) {
+    OrientationThreshold threshold = OrientationThreshold::DEG_80;
+    TEST_ASSERT_TRUE(profile_cli::parseOrientationThreshold(thresholds[index], threshold));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(threshold));
+    TEST_ASSERT_EQUAL_STRING(thresholds[index], profile_cli::orientationThresholdName(threshold));
+    TEST_ASSERT_FALSE(profile_cli::parseOrientationThreshold("55", threshold));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(threshold));
+  }
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::interruptPolarityName(static_cast<InterruptPolarity>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::interruptDriveName(static_cast<InterruptDrive>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::dataReadyModeName(static_cast<DataReadyMode>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::orientationModeName(static_cast<OrientationMode>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::orientationThresholdName(static_cast<OrientationThreshold>(9)));
+}
+
+void test_profile_cli_interrupt_equality_covers_all_owned_fields() {
+  DeviceProfile baseline;
+  DeviceProfile value = baseline;
+  value.interrupts.polarity = InterruptPolarity::ACTIVE_LOW; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.drive = InterruptDrive::OPEN_DRAIN_PAD; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.dataReadyMode = DataReadyMode::PULSED; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.latchEvents = true; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.int2OnInt1 = true; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.orientation.mode = OrientationMode::SIX_D; assertDifferent(baseline, value);
+  value = baseline; value.interrupts.orientation.threshold = OrientationThreshold::DEG_50; assertDifferent(baseline, value);
+  bool InterruptRoutes::* const fields[] = {
+      &InterruptRoutes::accelReady, &InterruptRoutes::gyroReady, &InterruptRoutes::temperatureReady,
+      &InterruptRoutes::fifoWatermark, &InterruptRoutes::fifoFull, &InterruptRoutes::fifoOverrun,
+      &InterruptRoutes::stepDetected, &InterruptRoutes::stepOverflow,
+      &InterruptRoutes::timestampEndCounter, &InterruptRoutes::orientation};
+  for (const auto field : fields) {
+    value = baseline; value.interrupts.int1.*field = true; assertDifferent(baseline, value);
+    value = baseline; value.interrupts.int2.*field = true; assertDifferent(baseline, value);
+  }
+}
+
+void test_profile_cli_interrupt_routes_and_orientation_are_atomic_and_bus_silent() {
+  LSM6DS3TRTest::FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+  DeviceProfile profile;
+  profile.fifo.enabled = true;
+  profile.fifo.mode = FifoMode::CONTINUOUS;
+  profile.fifo.odr = Odr::HZ_104;
+  profile.fifo.gyroDecimation = FifoDecimation::EVERY_1;
+  profile.fifo.accelDecimation = FifoDecimation::EVERY_1;
+  profile.fifo.fourthDataset = FifoFourthDataset::TIMESTAMP_STEP;
+  profile.fifo.fourthDecimation = FifoDecimation::EVERY_1;
+  assertValid(profile);
+  const char* irq[] = {"low", "open_drain", "pulsed", "on", "on"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "irq", irq, 5U).ok());
+  TEST_ASSERT_TRUE(profile.interrupts.enabled);
+  const char* orientation[] = {"4d", "50", "both"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "orientation", orientation, 3U).ok());
+  assertEnumEqual(OrientationMode::FOUR_D, profile.interrupts.orientation.mode);
+  assertEnumEqual(OrientationThreshold::DEG_50, profile.interrupts.orientation.threshold);
+  TEST_ASSERT_TRUE(profile.interrupts.int1.orientation);
+  TEST_ASSERT_TRUE(profile.interrupts.int2.orientation);
+  const char* sources[] = {"accel", "gyro", "temp", "watermark", "full", "overrun", "step", "step_overflow", "timestamp", "orientation"};
+  const bool int1Valid[] = {true, true, false, true, true, true, true, false, true, true};
+  const bool int2Valid[] = {true, true, true, true, true, true, false, true, false, true};
+  for (uint8_t pin = 0; pin < 2U; ++pin) {
+    for (uint8_t source = 0; source < 10U; ++source) {
+      DeviceProfile candidate = profile;
+      const DeviceProfile before = candidate;
+      const char* values[] = {sources[source], "true"};
+      const Status status = profile_cli::setField(candidate, pin == 0 ? "int1" : "int2", values, 2U);
+      if ((pin == 0 ? int1Valid : int2Valid)[source]) TEST_ASSERT_TRUE(status.ok());
+      else {
+        TEST_ASSERT_FALSE(status.ok());
+        TEST_ASSERT_TRUE(profile_cli::equal(before, candidate));
+      }
+    }
+  }
+  const char* noOrientation[] = {"off"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "orientation", noOrientation, 1U).ok());
+  TEST_ASSERT_FALSE(profile.interrupts.int1.orientation);
+  TEST_ASSERT_FALSE(profile.interrupts.int2.orientation);
+  assertEnumEqual(OrientationMode::OFF, profile.interrupts.orientation.mode);
+  assertEnumEqual(OrientationThreshold::DEG_80, profile.interrupts.orientation.threshold);
+  TEST_ASSERT_TRUE(setOne(profile, "interrupts", "off").ok());
+  const DeviceProfile reference;
+  TEST_ASSERT_TRUE(profile_cli::equalRoutes(reference.interrupts.int1, profile.interrupts.int1));
+  TEST_ASSERT_TRUE(profile_cli::equalRoutes(reference.interrupts.int2, profile.interrupts.int2));
+  TEST_ASSERT_FALSE(profile.interrupts.enabled);
+  TEST_ASSERT_EQUAL_UINT32(0, bus.transferCalls);
+}
+
+void test_profile_cli_interrupt_invalid_edits_preserve_the_draft() {
+  DeviceProfile profile;
+  const char* irq[] = {"high", "push_pull", "latched", "off", "off", "extra"};
+  const size_t counts[] = {0, 1, 2, 3, 4, 6};
+  for (size_t count : counts) assertAtomicError(profile, "irq", irq, count, Err::INVALID_PARAM);
+  const char* orientation[] = {"6d", "70", "int1", "extra"};
+  for (size_t count : {0U, 2U, 4U})
+    assertAtomicError(profile, "orientation", orientation, count, Err::INVALID_PARAM);
+  const char* badOrientation[][3] = {{"6d", "70", "int3"}, {"6d", "55", "int1"}, {"tilt", "70", "both"}};
+  for (const auto& values : badOrientation)
+    assertAtomicError(profile, "orientation", values, 3U, Err::INVALID_PARAM);
+  const char* fields[] = {"irq_polarity", "irq_drive", "irq_drdy", "irq_latch", "irq_combine"};
+  for (const char* field : fields) {
+    assertAtomicError(profile, field, irq, 0U, Err::INVALID_PARAM);
+    assertAtomicError(profile, field, irq, 2U, Err::INVALID_PARAM);
+    const char* invalid[] = {"invalid"};
+    assertAtomicError(profile, field, invalid, 1U, Err::INVALID_PARAM);
+  }
+  const char* unknown[] = {"boot", "true"};
+  assertAtomicError(profile, "int1", unknown, 2U, Err::INVALID_PARAM);
+  TEST_ASSERT_TRUE(setOne(profile, "interrupts", "on").ok());
+  const DeviceProfile before = profile;
+  const char* unsupported[] = {"temp", "true"};
+  TEST_ASSERT_FALSE(profile_cli::setField(profile, "int1", unsupported, 2U).ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(before, profile));
+  TEST_ASSERT_TRUE(setOne(profile, "irq_polarity", "low").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "irq_drive", "open_drain").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "irq_drdy", "pulsed").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "irq_latch", "on").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "irq_combine", "on").ok());
+}
+
+void test_profile_cli_event_selection_uses_only_configured_engines() {
+  DeviceProfile profile;
+  EventReadRequest request{};
+  TEST_ASSERT_TRUE(profile_cli::eventRequest("all", profile, request));
+  TEST_ASSERT_TRUE(request.dataReady);
+  TEST_ASSERT_FALSE(request.fifo);
+  TEST_ASSERT_FALSE(request.embedded);
+  TEST_ASSERT_FALSE(request.orientation);
+  profile.fifo.enabled = true;
+  profile.fifo.fourthDataset = FifoFourthDataset::TIMESTAMP_STEP;
+  profile.interrupts.enabled = true;
+  profile.interrupts.orientation.mode = OrientationMode::SIX_D;
+  TEST_ASSERT_TRUE(profile_cli::eventRequest("all", profile, request));
+  TEST_ASSERT_TRUE(request.dataReady && request.fifo && request.embedded && request.orientation);
+  const char* selections[] = {"ready", "fifo", "embedded", "orientation"};
+  for (uint8_t index = 0; index < 4U; ++index) {
+    TEST_ASSERT_TRUE(profile_cli::eventRequest(selections[index], profile, request));
+    TEST_ASSERT_EQUAL(index == 0, request.dataReady);
+    TEST_ASSERT_EQUAL(index == 1, request.fifo);
+    TEST_ASSERT_EQUAL(index == 2, request.embedded);
+    TEST_ASSERT_EQUAL(index == 3, request.orientation);
+  }
+  TEST_ASSERT_FALSE(profile_cli::eventRequest("timestamp", profile, request));
+  TEST_ASSERT_TRUE(request.orientation);
+  TEST_ASSERT_FALSE(profile_cli::eventRequest(nullptr, profile, request));
+  TEST_ASSERT_TRUE(request.orientation);
+}
+
 }  // namespace
 
 void runProfileCliTests() {
+  RUN_TEST(test_profile_cli_interrupt_enum_parsers_are_total_and_atomic);
+  RUN_TEST(test_profile_cli_interrupt_equality_covers_all_owned_fields);
+  RUN_TEST(test_profile_cli_interrupt_routes_and_orientation_are_atomic_and_bus_silent);
+  RUN_TEST(test_profile_cli_interrupt_invalid_edits_preserve_the_draft);
+  RUN_TEST(test_profile_cli_event_selection_uses_only_configured_engines);
   RUN_TEST(test_profile_cli_fourth_dataset_parsers_preserve_invalid_output);
   RUN_TEST(test_profile_cli_fourth_dataset_edits_are_atomic_and_bus_silent);
   RUN_TEST(test_profile_cli_fourth_dataset_rejects_bad_arity_and_tokens);

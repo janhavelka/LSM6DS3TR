@@ -61,10 +61,10 @@ implementation quoted by the report.
 | H1: Arduino-bound core | Resolved. `include/LSM6DS3TR/Config.h:12` injects transport; `src/LSM6DS3TR.cpp:594` binds without I/O; operation time is supplied by the owner. Core timing guard and native IDF contract check pass. `examples/idf/basic` and real IDF CI builds now exist. |
 | H2: raw writes break hidden state | Resolved within the current diagnostic contract. `src/LSM6DS3TR.cpp:2500` applies `_safeDiagnosticWrite`, blocks active/pending jobs, invalidates configuration before an accepted write, and performs one bounded attempt. `test/test_basic.cpp:2444`, `:2559`, and `:2611` cover unsafe writes, exact register addresses, and ambiguous effects. |
 | H3: partial configuration lacks dirty state | Resolved. `_stepConfigure` at `src/LSM6DS3TR.cpp:1035`, `_invalidateConfiguration` at `:1003`, and terminal effect evidence distinguish unknown, applying, settling, and verified state. `test/test_basic.cpp:703`, `:760`, `:870`, and `:906` inject failures/cancellation at every apply stage and reject untrusted sampling. |
-| H4: incomplete fourth FIFO dataset | Superseded by explicit removal from supported profiles, not completion of a decoder. `validateProfile` at `src/LSM6DS3TR.cpp:365` rejects FIFO/interrupt enables. `docs/chip-reference/13_library_support_matrix.md` marks acquisition, pattern decoding, timestamp/pedometer batching unsupported. See R2 for conditional future work. |
+| H4: incomplete fourth FIFO dataset | The earlier removal fence was replaced by prompt 01 motion acquisition and prompt 02 typed temperature or timestamp/step decoding. Raw counter widths, resolution, epoch, consumption/loss and explicit reset effects are owned by the same bounded engine. External datasets remain unsupported; R2 and its execution records separate software completion from physical qualification. |
 | H5: reset/boot sequencing | Resolved in software. `_stepResetBoot` at `src/LSM6DS3TR.cpp:1244` proves bank/identity, applies required sensor modes, issues the command, arms a fresh post-write inaccessible interval, bounds command polls, and reapplies/verifies the profile. `test/test_basic.cpp:1405`, `:1458`, `:1556`, and `:1612` cover order, waits, failures, and ceilings. Physical current-firmware evidence remains R1. |
 | H6: narrow statuses | Resolved by the version-2 status contract in `include/LSM6DS3TR/Status.h:11`: deadlines, stale/pending results, unknown/mismatched configuration, settling, unsupported profiles, indeterminate effects, and typed transport failures are explicit. The old managed-health policy is deliberately outside the driver. |
-| H7: blocking FIFO drain | Superseded. No production acquisition/drain API is claimed; `_stepFifoPurge` at `src/LSM6DS3TR.cpp:1936` is bounded destructive maintenance. `test/test_basic.cpp:2710`, `:2735`, `:2764`, and `:2808` cover budget, high count bits, cancellation/loss, and overrun. Purge is not a substitute for a production FIFO decoder. |
+| H7: blocking FIFO drain | Resolved in software by prompt 01's bounded owner-polled acquisition and separate destructive purge. `startFifoRead` retains caller-buffer, pattern, effect and deadline evidence; `startFifoPurge` remains maintenance. Their fault/limit/cancel regressions and exact revision evidence are recorded under R2; physical qualification is separate. |
 | H8: no hardware evidence | Historical statement no longer literally true: `docs/HIL_VALIDATION.md:165` records an S2 campaign at `1419ea2`, and earlier S3 evidence is indexed by the guide/changelog. Neither qualifies current main. Fault injection, alternate strap, mounting, and load limitations remain explicit; see R1. |
 | M1: unused tick timestamp | Superseded by `poll(nowMs, maxTransactions)` and caller-specified absolute operation timing; the old ignored timestamp API is absent. `test/test_basic.cpp:499`, `:587`, and `:1163` verify deadline/settling/readiness behavior. |
 | M2: copyable driver | Resolved by deleted copy/move and compile-time assertions in `test/test_compile_contracts.cpp:46` onward. |
@@ -117,8 +117,13 @@ counter-reset/epoch/loss evidence. Implementation resolution is
 targets and local contract/documentation/package checks passed. The exact final
 closeout commit must also pass all CI jobs; its evidence is described in the
 [execution record](prompts/README.md#prompt-02-execution-record).
-Prompts 03/04 remain **NOT IMPLEMENTED**; routing and filter extensions are not
-silently included. New fourth-dataset physical evidence is **NOT RUN**.
+Prompt 03 starts from the accepted fourth-dataset closeout and supplies typed
+shared electrical controls, supported direct routes, 6D/4D orientation and
+bounded independent source observations with acknowledgement effects. Its
+implementation resolution and local/exact-commit CI acceptance gate remain
+**PENDING** in the [execution record](prompts/README.md#prompt-03-execution-record).
+Prompt 04 filter extensions remain **NOT IMPLEMENTED**. Physical fourth-dataset,
+electrical, pulse, interrupt-loss and orientation evidence is **NOT RUN**.
 
 The motion change starts from fetched baseline
 `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26. It adds typed motion
