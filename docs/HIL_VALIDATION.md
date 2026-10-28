@@ -432,7 +432,8 @@ authorized hardware; this implementation does not authorize flashing or resets.
    99% settling from application-specific precision and sensor tolerance.
 2. Confirm register readback precedes gate arming even with slow callbacks and
    variable/zero poll budgets. At 1.6 Hz with LPF2 ODR/400 the source count320
-   corresponds to 200 seconds before quantization and transport margin. Verify
+   corresponds to 200 seconds of discard time plus a 625 ms replacement period,
+   before quantization and transport margin. Verify
    both CLIs derive sufficient deadlines without removing bounded cancellation.
 3. Reference mode captures an initial vector, potentially during initialization;
    it does not establish a measured stationary/gravity reference. Observe the
@@ -456,6 +457,12 @@ authorized hardware; this implementation does not authorize flashing or resets.
    filter/route/FIFO restoration, including restored FILTER_UNQUALIFIED status.
    Verify slope/HP/reference bias calibration rejection; retain calibration
    generation/filter provenance and never automatically reuse an old estimate.
+8. Inject a transport failure after an output low byte, then change scale/filter
+   through configure. Verify one complete output discard precedes the newly
+   armed gate and no held value receives the new interpretation. Repeat after
+   recreating the host driver while the sensor remains powered. Reconcile and
+   diagnostic reads must not bypass the required release; incomplete diagnostic
+   output-pair ranges must reject without I2C. Record bus traces for this case.
 
 Retain raw traces and procedure outcomes per path. Document deviations rather
 than changing source thresholds or claiming the whole matrix from one profile.

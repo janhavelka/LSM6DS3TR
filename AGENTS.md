@@ -256,9 +256,11 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   bus recovery remain application responsibilities.
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
-  and reserve the complete 99-callback profile reapply/readback/activation budget.
-  Configure uses at most 110 callbacks (80 for active motion-only FIFO with routes
-  disabled; up to four more for reference discard), reset/boot 131, recovery 130, power-down 17, explicit counter reset 7,
+  and reserve the complete 100-callback profile reapply/readback/activation budget.
+  Configure uses at most 111 callbacks (active motion-only FIFO with routes
+  disabled uses 80, plus up to four for reference discard and one for output
+  release; a fresh binding requires that release),
+  reset/boot 132, recovery 131, power-down 17, explicit counter reset 7,
   event-source observation 6, and FIFO purge `maxWords + 5` (two additional
   callbacks when explicitly stopping collection). FIFO acquisition reserves
   `2 * maxWords + 3` callbacks; all validate identity before their first destructive device
@@ -267,8 +269,8 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   sample. Self-test gates by its active sensor ODR period rounded up to
   milliseconds (20 ms accelerometer, 5 ms gyroscope); calibration gates by the
   configured ODR period rounded up to milliseconds. Self-test reserves
-  `16 * (samples + 1) + 126` callbacks, including bounded failure cleanup and
-  full profile restoration.
+  `16 * (samples + 1) + 130` callbacks, including main-bank/identity/FIFO
+  preflight, bounded failure cleanup, held-output release and full profile restoration.
 
 ---
 

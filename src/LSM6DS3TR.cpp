@@ -17,7 +17,10 @@ constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
 constexpr uint64_t CLOCK_QUANTIZATION_MARGIN_MS = 1;
-constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 126;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 130;
+constexpr uint8_t SELF_TEST_PREFLIGHT_BANK = 101;
+constexpr uint8_t SELF_TEST_PREFLIGHT_IDENTITY = 102;
+constexpr uint8_t SELF_TEST_PREFLIGHT_FIFO = 103;
 // Datasheet pp.97/103/104: fixed bank-A pedometer policy, modified only in
 // proved sensor power-down. No sensor-hub or general embedded-bank API.
 constexpr uint8_t PEDOMETER_REGISTERS[] = {0x0F, 0x14, 0x15};
@@ -783,7 +786,9 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
                                ? HP_COUNTS[hpcf] : 14U;
     if ((filter.lpf2Enabled || filter.lowPassOn6d) && LPF2_COUNTS[hpcf] > accelSamples)
       accelSamples = LPF2_COUNTS[hpcf];
-    settle = saturatingMultiply(accelPeriod, accelSamples);
+    // The output at the end of the discard interval can still be the last
+    // rejected sample. Reserve one further period for its replacement.
+    settle = saturatingMultiply(accelPeriod, accelSamples + 1U);
   }
   if (profile.gyroOdr != Odr::POWER_DOWN) {
     uint64_t gyroSettle = 70000U;
@@ -791,7 +796,7 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
       gyroSettle = saturatingAdd(
           gyroSettle,
           saturatingMultiply(odrPeriodUs(profile.gyroOdr),
-                             gyroSettleSamples(profile)));
+                             static_cast<uint64_t>(gyroSettleSamples(profile)) + 1U));
     }
     if (gyroSettle > settle) settle = gyroSettle;
   }
@@ -993,6 +998,9 @@ Status LSM6DS3TR::bind(const DriverConfig& config) {
     return Status::Error(Err::RESULT_PENDING, "Terminal result must be taken");
   _driverConfig = config;
   _bound = true;
+  // A powered device can retain an interrupted pair from an earlier owner or
+  // host reset. Binding is bus-silent; the next configure proves release.
+  _outputMayBeHeld = true;
   _hasDesiredProfile = false;
   _hasVerifiedProfile = false;
   _configurationState = ConfigurationState::UNCONFIGURED;
@@ -1158,6 +1166,9 @@ Status LSM6DS3TR::startSample(const SampleRequest& request,
     return Status::Error(Err::INVALID_PARAM, "Unqualified filters require an explicit direct read");
   const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
+  if (_outputMayBeHeld)
+    return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                         "Output pair may be held; configure or recover before sampling");
   if ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
       _verifiedProfile.gyroFilter.highPassEnabled && !request.allowUnqualifiedFilter)
     return Status::Error(Err::UNSUPPORTED_PROFILE, "Gyro HPF has no qualified settling rule");
@@ -1240,6 +1251,9 @@ Status LSM6DS3TR::startReconcile(const OperationTiming& timing,
   if (!_hasDesiredProfile) {
     return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to reconcile");
   }
+  if (_outputMayBeHeld && !_hasVerifiedProfile)
+    return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                         "Readback cannot release output pairs; configure or recover");
   if ((fifoCollecting(_desiredProfile) || counterProfile(_desiredProfile) ||
        _desiredProfile.accelFilter.referenceEnabled) &&
       !_hasVerifiedProfile) {
@@ -1288,6 +1302,7 @@ Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
     _configurationState = ConfigurationState::APPLYING;
     _primaryStatus = Status::Ok();
     _readyPolls = 0;
+    _substep = SELF_TEST_PREFLIGHT_BANK;
   }
   return status;
 }
@@ -1302,6 +1317,9 @@ Status LSM6DS3TR::startCalibration(const CalibrationRequest& request,
   if (!validation.ok()) return validation;
   const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
+  if (_outputMayBeHeld)
+    return Status::Error(Err::CONFIGURATION_UNKNOWN,
+                         "Output pair may be held; configure or recover before calibration");
   if ((request.kind == CalibrationKind::ACCELEROMETER_BIAS &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
       (request.kind == CalibrationKind::GYROSCOPE_BIAS &&
@@ -1441,7 +1459,15 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
   uint8_t tx = reg;
   uint8_t acknowledge = 0;
   const InterruptProfile& interrupts = _verifiedProfile.interrupts;
-  const uint16_t end = static_cast<uint16_t>(reg) + static_cast<uint16_t>(length);
+  const uint16_t linearEnd = static_cast<uint16_t>(reg) + static_cast<uint16_t>(length);
+  // FIFO output bursts round at 0x3F back to 0x3E (AN5130 section 8.4).
+  // Their byte count cannot imply reads of later event-source registers.
+  const uint16_t end = reg <= cmd::REG_FIFO_DATA_OUT_H &&
+                              linearEnd > cmd::REG_FIFO_DATA_OUT_H
+                          ? static_cast<uint16_t>(cmd::REG_FIFO_DATA_OUT_H) + 1U
+                          : linearEnd;
+  const bool touchesOutput = reg <= cmd::REG_OUTZ_H_XL &&
+                             end > cmd::REG_OUT_TEMP_L;
   if (interrupts.enabled && interrupts.latchEvents) {
     if (reg <= cmd::REG_D6D_SRC && end > cmd::REG_D6D_SRC &&
         (interrupts.int1.orientation || interrupts.int2.orientation))
@@ -1456,8 +1482,7 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
   for (uint8_t high : outputHighBytes)
     if (reg <= high && end > high) acknowledge |= EVENT_DATA_READY;
   _workingResult.events.mayHaveAcknowledgedMask |= acknowledge;
-  if (_job == JobKind::EVENT_READ && acknowledge != 0U)
-    _hardwareStateMayHaveChanged = true;
+  if (acknowledge != 0U) _hardwareStateMayHaveChanged = true;
   _transactionUsed = true;
   _operationTransactions = saturatingIncrement(_operationTransactions);
   Status status = normalizeTransport(_driverConfig.i2cWriteRead(
@@ -1469,6 +1494,7 @@ Status LSM6DS3TR::_read(uint8_t reg, uint8_t* data, size_t length,
     if (reg == cmd::REG_FUNC_CFG_ACCESS)
       _bankMayBeUnknown = (data[0] & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U;
   } else {
+    if (touchesOutput) _outputMayBeHeld = true;
     if (acknowledge != 0U) _workingResult.events.historyMayBeLost = true;
     _transportFailures = saturatingIncrement(_transportFailures);
     _lastTransportError = status;
@@ -1982,6 +2008,20 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     return inProgressStatus();
   }
 
+  if (!reconcileOnly && _step == CONFIGURE_SETTLE_ARM && _outputMayBeHeld) {
+    // All admitted output reads start/end on complete pairs. An interrupted
+    // burst can retain a low byte; a confirmed complete read releases it.
+    // Discard these old bytes, then arm the usual gate from fresh owner time.
+    uint8_t discarded[14] = {};
+    const Status status = _read(cmd::REG_DATA_START_ALL, discarded, sizeof(discarded), nowMs);
+    if (!status.ok()) return status;
+    // Only replay has proved IF_INC/BDU and the main bank. An unconfigured
+    // diagnostic burst can succeed without advancing through every byte.
+    _outputMayBeHeld = false;
+    _pollBoundary = true;
+    return inProgressStatus();
+  }
+
   if (_step == CONFIGURE_SETTLE_ARM) {
     _mismatchRegister = 0;
     _mismatchExpected = 0;
@@ -2034,9 +2074,10 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     _waiting = true;
     return inProgressStatus();
   }
-  // Reference mode latches a vector. Consume its first output explicitly;
-  // elapsed time cannot remove it from BDU-protected output registers. FIFO
-  // remains Bypass until this phase and a fresh output period have completed.
+  // Reference mode requires an initial output discard (AN5130 p.14). Keep the
+  // first host vector unpublishable, then wait one fresh output period before
+  // FIFO activation. BDU protects a pair only once its read starts (p.25); it
+  // does not retain an entirely unread first output throughout the time gate.
   if (_step == CONFIGURE_REFERENCE_ARM) {
     const uint64_t periodUs = odrPeriodUs(target.accelOdr);
     _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U +
@@ -2483,6 +2524,41 @@ Status LSM6DS3TR::_stepPowerDown(uint64_t nowMs) {
 }
 
 Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
+  if (_substep >= SELF_TEST_PREFLIGHT_BANK && _substep <= SELF_TEST_PREFLIGHT_FIFO) {
+    // Cached profile provenance cannot prove that the current device/bank/FIFO
+    // still permits destructive maintenance. Check all three before route writes.
+    uint8_t observed = 0;
+    Status status = Status::Ok();
+    if (_substep == SELF_TEST_PREFLIGHT_FIFO) {
+      status = _checkFifoBypass(nowMs);
+      if (status.code == Err::FIFO_MAINTENANCE_REQUIRED) _invalidateConfiguration();
+    } else {
+      const uint8_t reg = _substep == SELF_TEST_PREFLIGHT_BANK
+                              ? cmd::REG_FUNC_CFG_ACCESS : cmd::REG_WHO_AM_I;
+      status = _read(reg, &observed, 1, nowMs);
+      if (status.ok() && _substep == SELF_TEST_PREFLIGHT_BANK &&
+          (observed & (cmd::MASK_FUNC_CFG_EN | cmd::MASK_FUNC_CFG_EN_B)) != 0U) {
+        _invalidateConfiguration();
+        status = Status::Error(Err::CONFIGURATION_UNKNOWN,
+                               "Self-test requires the main register bank", observed);
+      } else if (status.ok() && _substep == SELF_TEST_PREFLIGHT_IDENTITY) {
+        _workingResult.probe = {static_cast<uint8_t>(_driverConfig.address), observed};
+        if (observed != cmd::WHO_AM_I_VALUE) {
+          _invalidateConfiguration();
+          status = Status::Error(Err::CHIP_ID_MISMATCH, "WHO_AM_I mismatch", observed);
+        }
+      }
+    }
+    if (!status.ok()) {
+      _primaryStatus = status;
+      _workingResult.selfTest.primaryStatus = status;
+      _workingResult.selfTest.restorationStatus = Status::Ok();
+      return status;
+    }
+    _substep = _substep == SELF_TEST_PREFLIGHT_FIFO
+                   ? 0U : static_cast<uint8_t>(_substep + 1U);
+    return inProgressStatus();
+  }
   if (_routeMaskStep < 8U) {
     const Status status = _stepMaskRoutes(nowMs);
     if (!status.ok() && !status.inProgress()) {
@@ -3516,7 +3592,8 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
     const bool routeWorkPending = _job != JobKind::RECONCILE &&
         target.interrupts.enabled && _routeEnableStep < 8U;
     const bool configurationCompute =
-        (_step == CONFIGURE_SETTLE_ARM && !counterWorkPending) ||
+        (_step == CONFIGURE_SETTLE_ARM && !counterWorkPending &&
+         (_job == JobKind::RECONCILE || !_outputMayBeHeld)) ||
         _step == CONFIGURE_SETTLE_WAIT || _step == CONFIGURE_REFERENCE_ARM ||
         (_step == CONFIGURE_COMMIT && !routeWorkPending);
     bool safeComputeStep = false;
@@ -3721,7 +3798,14 @@ bool LSM6DS3TR::_validDiagnosticRange(uint8_t startReg, size_t length) {
   if (length == 0U || length > MAX_TRANSPORT_READ_BYTES) return false;
   const uint16_t end = static_cast<uint16_t>(startReg) +
                        static_cast<uint16_t>(length - 1U);
-  return end <= cmd::REG_Z_OFS_USR;
+  if (end > cmd::REG_Z_OFS_USR) return false;
+  // BDU holds a pair once either byte is read. Keep every diagnostic output
+  // access low-first and complete, including ranges crossing the output block.
+  if (startReg >= cmd::REG_OUT_TEMP_L && startReg <= cmd::REG_OUTZ_H_XL &&
+      (startReg & 1U) != 0U) return false;
+  if (end >= cmd::REG_OUT_TEMP_L && end <= cmd::REG_OUTZ_H_XL &&
+      (end & 1U) == 0U) return false;
+  return true;
 }
 
 bool LSM6DS3TR::_safeDiagnosticWrite(uint8_t reg, uint8_t value) {

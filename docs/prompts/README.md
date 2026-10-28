@@ -184,6 +184,35 @@ existing branch, and let the lead own Git mutations when using subagents.
 - Hardware: **NOT RUN**; repeatable cases are in
   [filter qualification](../HIL_VALIDATION.md#filter-transient-and-qualification-campaign).
 
+## Independent audit of prompts 01-04
+
+- Audit date: 2026-10-28. Fetched, clean and synchronized baseline:
+  `fc8bdef87fb2e1ccecf79c5df3f2a4b219ee216e` on the existing `main` branch.
+  All four original prompt bodies were reread in full. Three independent
+  reviewers inspected FIFO/counters, interrupts/lifecycle and filters/CLIs
+  against current code, tests, vendor references and implementation diffs.
+- Confirmed corrections: self-test now checks current bank/identity/FIFO Bypass
+  before writes; gates reserve a replacement output after vendor discard counts;
+  failed output reads retain possible BDU-held-pair evidence until bounded
+  release; sample/calibration acknowledgements set the common effect flag;
+  rounded FIFO bursts cannot claim reads of later embedded-event sources.
+  Diagnostic output reads must cover complete low/high pairs. Reconcile remains
+  read-only and cannot erase uncertain held-output evidence.
+- Added independent complete-set FIFO producer coverage for full-stop behavior,
+  retained coherent records and explicit Bypass rearming. Corrected BDU wording
+  and the stale statement that all production interrupt routes remain disabled.
+- Final local verification passed: **249/249 native tests**, all three Arduino
+  targets, core timing/version/CLI/IDF/chip-reference guards, three IDF checker
+  tests, 18 HIL-runner tests, Python compilation, strict Doxygen, package
+  validation (37 files / 20 linked documents) and whitespace. The resolution is
+  the commit containing this audit record. Its own seven-job CI run, including
+  native ESP-IDF 5.4.4 S2/S3, is the exact-revision completion evidence; earlier
+  implementation runs do not verify these corrections.
+- Changes extend existing profile, operation and fake-bus owners; no new service,
+  allocation, transport dependency, release or hardware action was introduced.
+  Physical qualification remains **NOT RUN**, and qualified gyro HPF remains
+  unsupported without the separate source/physical evidence described above.
+
 ## Coverage and execution order
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |

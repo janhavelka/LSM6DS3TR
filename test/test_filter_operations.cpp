@@ -107,6 +107,21 @@ OperationResult filterSample(Driver& driver, FakeBus& bus, SampleRequest request
   return filterTake(driver, token);
 }
 
+void holdFilterOutputPair(Driver& driver, FakeBus& bus) {
+  bus.modelOutputBdu = true;
+  bus.simulateSelfTest = false;
+  bus.setI16(0x28, 100);
+  bus.partialOutputReadBytes = 9;  // Temperature + gyro pairs, then accel X low only.
+  bus.addFault(bus.transferCalls + 1U, Status::Error(Err::I2C_TIMEOUT, "partial output", -913), true);
+  const OperationResult failed = filterSample(driver, bus, {SAMPLE_ACCELERATION, false});
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                        static_cast<uint8_t>(failed.status.code));
+  TEST_ASSERT_EQUAL_UINT8(0, failed.sample.validMask);
+  TEST_ASSERT_EQUAL_UINT8(1, bus.outputPairReadMask[4]);
+  bus.setI16(0x28, 200);
+  TEST_ASSERT_EQUAL_HEX8(100, bus.regs[0x28]);  // New conversion cannot replace held pair.
+}
+
 void test_filter_hpf_requires_explicit_direct_opt_in_for_every_gyro_request() {
   FakeBus bus;
   Driver driver;
@@ -310,8 +325,8 @@ void test_filter_reference_discards_after_readback_before_fifo_and_routes() {
   bus.notReadyStatusReads = 2;
   const DeviceProfile profile = referenceProfile(true, true);
   const OperationResult result = filterConfigure(driver, bus, profile);
-  TEST_ASSERT_EQUAL_UINT32(110, result.transactionLimit);
-  TEST_ASSERT_EQUAL_UINT32(110, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(111, result.transactionLimit);
+  TEST_ASSERT_EQUAL_UINT32(111, result.transactions);
   TEST_ASSERT_TRUE(result.configuration.referenceDiscardMayHaveOccurred);
   TEST_ASSERT_TRUE(result.configuration.referenceDiscardConfirmed);
   const size_t finalImage = filterFindRead(bus, 0x75);
@@ -323,8 +338,8 @@ void test_filter_reference_discards_after_readback_before_fifo_and_routes() {
   TEST_ASSERT_LESS_THAN(discard, ready);
   TEST_ASSERT_LESS_THAN(fifo, discard);
   TEST_ASSERT_LESS_THAN(route, discard);
-  // 14 * ceil(1e6/104) = 134624 us; source table envelope plus clock tick.
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[finalImage].atMs + 136U, bus.trace[ready].atMs);
+  // 15 * ceil(1e6/104) = 144240 us: 14 discard periods plus one replacement.
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[finalImage].atMs + 146U, bus.trace[ready].atMs);
   TEST_ASSERT_GREATER_OR_EQUAL_UINT64(bus.trace[discard].atMs + 11U, bus.trace[fifo].atMs);
   size_t statusCount = 0;
   size_t discardCount = 0;
@@ -472,7 +487,7 @@ void test_filter_reference_low_odr_and_uint64_gate_never_shortens() {
   profile.gyroOdr = Odr::POWER_DOWN;
   const uint64_t began = bus.nowMs;
   const OperationResult result = filterConfigure(driver, bus, profile);
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(began + 8751U + 626U,
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT64(began + 9376U + 626U,
                                      result.configuration.validAfterUptimeMs);
   TEST_ASSERT_TRUE(result.configuration.referenceDiscardConfirmed);
 
@@ -546,8 +561,9 @@ void test_filter_reference_lifecycle_replay_reserves_exact_callback_ceiling() {
     filterRun(driver, bus);
     const OperationResult result = filterTake(driver, token);
     TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
-    TEST_ASSERT_EQUAL_UINT32(operation == 2 ? 130 : 131, result.transactionLimit);
-    // Boot retains timestamp resolution, omitting its otherwise required reset.
+    TEST_ASSERT_EQUAL_UINT32(operation == 2 ? 131 : 132, result.transactionLimit);
+    // No held-output release is needed. Boot also retains timestamp resolution,
+    // omitting its otherwise required reset.
     TEST_ASSERT_EQUAL_UINT32(operation == 0 ? 131 : 130, result.transactions);
     TEST_ASSERT_TRUE(result.configuration.referenceDiscardConfirmed);
     TEST_ASSERT_EQUAL_HEX8(0x34, bus.regs[0x17]);
@@ -565,7 +581,7 @@ void test_filter_self_test_reference_restore_and_primary_failure_keep_distinct_s
     bus.clearTrace();
     bus.notReadyPeriod = 3;
     if (failShutdown)
-      bus.addFault(16U * 6U + 27U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -801));
+      bus.addFault(16U * 6U + 30U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -801));
     OperationToken token;
     TEST_ASSERT_TRUE(driver.startSelfTest({5}, filterTiming(bus), token).inProgress());
     filterRun(driver, bus);
@@ -573,10 +589,10 @@ void test_filter_self_test_reference_restore_and_primary_failure_keep_distinct_s
     TEST_ASSERT_EQUAL(!failShutdown, result.status.ok());
     TEST_ASSERT_EQUAL(!failShutdown, result.selfTest.primaryStatus.ok());
     TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
-    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 126U, result.transactionLimit);
-    // No timer resolution change during self-test: one optional reset unused;
-    // successful path additionally leaves its failure-cleanup reserve unused.
-    TEST_ASSERT_EQUAL_UINT32(16U * 6U + (failShutdown ? 125U : 124U), result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 130U, result.transactionLimit);
+    // No timer resolution change or failed output read: the optional reset and
+    // held-output release are unused. Success also leaves failure cleanup unused.
+    TEST_ASSERT_EQUAL_UINT32(16U * 6U + (failShutdown ? 128U : 127U), result.transactions);
     TEST_ASSERT_TRUE(result.configuration.referenceDiscardConfirmed);
     TEST_ASSERT_EQUAL_HEX8(0x34, bus.regs[0x17]);
     TEST_ASSERT_EQUAL_HEX8(0x04, bus.regs[0x5E]);
@@ -594,7 +610,7 @@ void test_filter_self_test_reference_restoration_failure_each_discard_callback()
     baselineBus.clearTrace();
     baselineBus.notReadyPeriod = 3;
     if (failPrimary)
-      baselineBus.addFault(16U * 6U + 27U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -811));
+      baselineBus.addFault(16U * 6U + 30U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -811));
     OperationToken token;
     TEST_ASSERT_TRUE(baseline.startSelfTest({5}, filterTiming(baselineBus), token).inProgress());
     filterRun(baseline, baselineBus);
@@ -612,7 +628,7 @@ void test_filter_self_test_reference_restoration_failure_each_discard_callback()
         bus.clearTrace();
         bus.notReadyPeriod = 3;
         if (failPrimary)
-          bus.addFault(16U * 6U + 27U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -811));
+          bus.addFault(16U * 6U + 30U, Status::Error(Err::I2C_TIMEOUT, "primary shutdown", -811));
         bus.addFault(call, Status::Error(Err::I2C_NACK_DATA, "reference restore", -812), ambiguous);
         TEST_ASSERT_TRUE(driver.startSelfTest({5}, filterTiming(bus), token).inProgress());
         filterRun(driver, bus);
@@ -658,15 +674,17 @@ void test_filter_reference_callback_time_and_zero_budget_preserve_both_gates() {
     for (uint32_t i = 0; i < 200U && filterFindRead(bus, 0x75) == bus.traceCount; ++i)
       driver.poll(bus.nowMs, 255);
     TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x75));
+    TEST_ASSERT_EQUAL_UINT8(1, driver.poll(bus.nowMs, 1).transactionsUsed);
+    TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x20));
     bus.nowMs += 23U;
     const uint64_t armAt = bus.nowMs;
     const uint32_t before = bus.transferCalls;
     TEST_ASSERT_EQUAL_UINT8(0, driver.poll(bus.nowMs, gateBudget).transactionsUsed);
-    TEST_ASSERT_EQUAL_UINT64(armAt + 136U, driver.validAfterUptimeMs());
-    bus.nowMs = armAt + 135U;
+    TEST_ASSERT_EQUAL_UINT64(armAt + 146U, driver.validAfterUptimeMs());
+    bus.nowMs = armAt + 145U;
     driver.poll(bus.nowMs, 255);
     TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
-    bus.nowMs = armAt + 136U;
+    bus.nowMs = armAt + 146U;
     for (uint8_t i = 0; i < 8U && filterFindRead(bus, 0x28) == bus.traceCount; ++i)
       driver.poll(bus.nowMs, 255);
     const size_t discard = filterFindRead(bus, 0x28);
@@ -686,6 +704,61 @@ void test_filter_reference_callback_time_and_zero_budget_preserve_both_gates() {
     TEST_ASSERT_TRUE(result.status.ok());
     const size_t activate = filterFindWrite(bus, 0x0A, 0x26);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT64(discardArmAt + 11U, bus.trace[activate].atMs);
+  }
+}
+
+void test_filter_gate_waits_for_output_after_last_discarded_sample() {
+  // Literal source boundaries: accel Table 9 gives 320 samples at 1.6 Hz;
+  // gyro Tables 14/15 give 70 ms plus two samples at 12.5 Hz. The next
+  // output, then the integer-clock margin, must precede qualification.
+  const uint64_t discardedThroughMs[] = {200000U, 230U};
+  const uint64_t qualifiedAtMs[] = {200626U, 311U};
+  for (uint8_t sensor = 0; sensor < 2U; ++sensor) {
+    FakeBus bus;
+    Driver driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    DeviceProfile profile;
+    if (sensor == 0U) {
+      profile.gyroOdr = Odr::POWER_DOWN;
+      profile.accelOdr = Odr::HZ_1_6;
+      profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
+      profile.accelFilter.lpf2Enabled = true;
+      profile.accelFilter.hpcf = AccelHpcf::DIV_400;
+    } else {
+      profile.accelOdr = Odr::POWER_DOWN;
+      profile.gyroOdr = Odr::HZ_12_5;
+    }
+    const uint64_t armAt = bus.nowMs;
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startConfigure(profile, filterTiming(bus), token).inProgress());
+    for (uint8_t i = 0; i < 8U && driver.validAfterUptimeMs() == 0U; ++i)
+      driver.poll(bus.nowMs, 255);
+    TEST_ASSERT_EQUAL_UINT64(armAt + qualifiedAtMs[sensor], driver.validAfterUptimeMs());
+    const uint32_t callbacks = bus.transferCalls;
+    for (uint64_t elapsed : {discardedThroughMs[sensor] + 1U,
+                            qualifiedAtMs[sensor] - 1U}) {
+      bus.nowMs = armAt + elapsed;
+      driver.poll(bus.nowMs, 255);
+      TEST_ASSERT_TRUE(driver.operationActive());
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::SETTLING),
+                            static_cast<uint8_t>(driver.configurationState(bus.nowMs)));
+      DeviceProfile unavailable;
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::SETTLING),
+          static_cast<uint8_t>(driver.getVerifiedProfile(unavailable, bus.nowMs).code));
+      TEST_ASSERT_EQUAL_UINT32(callbacks, bus.transferCalls);
+    }
+    bus.nowMs = armAt + qualifiedAtMs[sensor];
+    const PollResult terminal = driver.poll(bus.nowMs, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, terminal.transactionsUsed);
+    TEST_ASSERT_TRUE(filterTake(driver, token).status.ok());
+    TEST_ASSERT_EQUAL_UINT32(callbacks, bus.transferCalls);
+    SampleRequest request;
+    request.quantityMask = sensor == 0U ? SAMPLE_ACCELERATION : SAMPLE_ANGULAR_RATE;
+    const OperationResult sample = filterSample(driver, bus, request);
+    TEST_ASSERT_TRUE(sample.status.ok());
+    TEST_ASSERT_EQUAL_UINT8(request.quantityMask, sample.sample.qualifiedMask);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SampleQuality::READY_CHECKED),
+                          static_cast<uint8_t>(sample.sample.quality));
   }
 }
 
@@ -823,6 +896,188 @@ void test_filter_reference_fifo_discards_transition_and_requires_stop_for_new_pa
     TEST_ASSERT_EQUAL_UINT8(SAMPLE_ACCELERATION, retained.qualifiedMask);
   }
 }
+void test_filter_diagnostics_require_whole_output_pairs_without_io() {
+  FakeBus bus;
+  Driver driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  uint8_t data[32] = {};
+  for (uint8_t low = 0x20; low <= 0x2C; low += 2U) {
+    const uint32_t before = bus.transferCalls;
+    TEST_ASSERT_FALSE(driver.diagnosticReadBlock(low, data, 1, bus.nowMs).ok());
+    TEST_ASSERT_FALSE(driver.diagnosticReadBlock(low + 1U, data, 1, bus.nowMs).ok());
+    if (low < 0x2C)
+      TEST_ASSERT_FALSE(driver.diagnosticReadBlock(low, data, 3, bus.nowMs).ok());
+    TEST_ASSERT_FALSE(driver.diagnosticReadBlock(low + 1U, data, 3, bus.nowMs).ok());
+    TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+    TEST_ASSERT_TRUE(driver.diagnosticReadBlock(low, data, 2, bus.nowMs).ok());
+  }
+  const uint32_t before = bus.transferCalls;
+  TEST_ASSERT_FALSE(driver.diagnosticReadBlock(0x1F, data, 2, bus.nowMs).ok());
+  TEST_ASSERT_FALSE(driver.diagnosticReadBlock(0x2D, data, 2, bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+  TEST_ASSERT_TRUE(driver.diagnosticReadBlock(0x1F, data, 16, bus.nowMs).ok());
+  TEST_ASSERT_TRUE(driver.diagnosticReadBlock(0x20, data, 14, bus.nowMs).ok());
+}
+
+void test_filter_held_output_blocks_sampling_calibration_and_untrusted_reconcile() {
+  FakeBus bus;
+  Driver driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  filterConfigure(driver, bus, DeviceProfile{});
+  holdFilterOutputPair(driver, bus);
+  const uint32_t before = bus.transferCalls;
+  OperationToken token;
+  for (bool ready : {false, true}) {
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CONFIGURATION_UNKNOWN),
+        static_cast<uint8_t>(driver.startSample({SAMPLE_ACCELERATION, ready},
+                                                filterTiming(bus), token).code));
+    TEST_ASSERT_FALSE(token.valid());
+  }
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CONFIGURATION_UNKNOWN),
+      static_cast<uint8_t>(driver.startCalibration({}, filterTiming(bus), token).code));
+  TEST_ASSERT_FALSE(token.valid());
+  TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+  bus.clearTrace();
+  TEST_ASSERT_TRUE(driver.startReconcile(filterTiming(bus), token).inProgress());
+  filterRun(driver, bus);
+  TEST_ASSERT_TRUE(filterTake(driver, token).status.ok());
+  TEST_ASSERT_EQUAL_UINT32(bus.traceCount, filterFindRead(bus, 0x20));
+  TEST_ASSERT_EQUAL_UINT8(1, bus.outputPairReadMask[4]);
+  TEST_ASSERT_FALSE(driver.startSample({SAMPLE_ACCELERATION, true}, filterTiming(bus), token).inProgress());
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(0x10, bus.regs[0x10], bus.nowMs).ok());
+  const uint32_t afterWrite = bus.transferCalls;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CONFIGURATION_UNKNOWN),
+      static_cast<uint8_t>(driver.startReconcile(filterTiming(bus), token).code));
+  TEST_ASSERT_EQUAL_UINT32(afterWrite, bus.transferCalls);
+  // Cache-only teardown must not forget an outstanding physical byte pair.
+  driver.unbind();
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  bus.clearTrace();
+  const OperationResult restored = filterConfigure(driver, bus, DeviceProfile{});
+  TEST_ASSERT_EQUAL_UINT32(79, restored.transactions);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x20));
+  TEST_ASSERT_EQUAL_UINT8(0, bus.outputPairReadMask[4]);
+}
+
+void test_filter_failed_pair_is_discarded_before_new_scale_and_fresh_gate() {
+  for (uint8_t gateBudget : {0U, 255U}) {
+    FakeBus bus;
+    Driver driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    filterConfigure(driver, bus, DeviceProfile{});
+    holdFilterOutputPair(driver, bus);
+    bus.clearTrace();
+    DeviceProfile changed;
+    changed.accelFullScale = AccelFs::G_16;
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startConfigure(changed, filterTiming(bus), token).inProgress());
+    for (uint16_t i = 0; i < 200U && filterFindRead(bus, 0x75) == bus.traceCount; ++i)
+      driver.poll(bus.nowMs, 255);
+    TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x75));
+    const uint32_t before = bus.transferCalls;
+    TEST_ASSERT_EQUAL_UINT8(0, driver.poll(bus.nowMs, 0).transactionsUsed);
+    TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+    TEST_ASSERT_EQUAL_UINT8(1, bus.outputPairReadMask[4]);
+    TEST_ASSERT_EQUAL_UINT8(1, driver.poll(bus.nowMs, 1).transactionsUsed);
+    const size_t release = filterFindRead(bus, 0x20);
+    TEST_ASSERT_LESS_THAN(bus.traceCount, release);
+    TEST_ASSERT_EQUAL_UINT16(14, bus.trace[release].rxLength);
+    TEST_ASSERT_EQUAL_UINT8(0, bus.outputPairReadMask[4]);
+    bus.setI16(0x28, 200);
+    bus.nowMs += 7U;
+    const uint64_t armAt = bus.nowMs;
+    driver.poll(bus.nowMs, gateBudget);
+    TEST_ASSERT_EQUAL_UINT64(armAt + 146U, driver.validAfterUptimeMs());
+    bus.nowMs = armAt + 145U;
+    TEST_ASSERT_TRUE(driver.poll(bus.nowMs, 255).waiting);
+    bus.nowMs = armAt + 146U;
+    driver.poll(bus.nowMs, 0);
+    TEST_ASSERT_TRUE(filterTake(driver, token).status.ok());
+    const OperationResult sample = filterSample(driver, bus, {SAMPLE_ACCELERATION, true});
+    TEST_ASSERT_TRUE(sample.status.ok());
+    TEST_ASSERT_EQUAL_INT16(200, sample.sample.accel.x);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(AccelFs::G_16),
+                          static_cast<uint8_t>(sample.sample.accelFullScale));
+    TEST_ASSERT_EQUAL_UINT8(SAMPLE_ACCELERATION, sample.sample.qualifiedMask);
+  }
+}
+
+void test_filter_diagnostic_success_does_not_clear_held_output_evidence() {
+  FakeBus bus;
+  Driver driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  filterConfigure(driver, bus, DeviceProfile{});
+  holdFilterOutputPair(driver, bus);
+  uint8_t data[14] = {};
+  TEST_ASSERT_TRUE(driver.diagnosticReadBlock(0x20, data, sizeof(data), bus.nowMs).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, bus.outputPairReadMask[4]);
+  OperationToken token;
+  const uint32_t before = bus.transferCalls;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::CONFIGURATION_UNKNOWN),
+      static_cast<uint8_t>(driver.startSample({SAMPLE_ACCELERATION, true},
+                                              filterTiming(bus), token).code));
+  TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+  // An untrusted diagnostic success cannot prove register auto-increment.
+  TEST_ASSERT_TRUE(driver.diagnosticWriteRegister(0x10, bus.regs[0x10], bus.nowMs).ok());
+  bus.regs[0x12] = 0;
+  TEST_ASSERT_TRUE(driver.diagnosticReadBlock(0x20, data, sizeof(data), bus.nowMs).ok());
+  bus.clearTrace();
+  const OperationResult restored = filterConfigure(driver, bus, DeviceProfile{});
+  TEST_ASSERT_EQUAL_UINT32(79, restored.transactions);
+  TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x20));
+}
+
+void test_filter_held_release_fault_cancel_and_deadline_preserve_required_work() {
+  for (uint8_t failure = 0; failure < 6U; ++failure) {
+    FakeBus bus;
+    Driver driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    filterConfigure(driver, bus, DeviceProfile{});
+    holdFilterOutputPair(driver, bus);
+    bus.clearTrace();
+    OperationToken token;
+    const OperationTiming timing = filterTiming(bus);
+    TEST_ASSERT_TRUE(driver.startConfigure(DeviceProfile{}, timing, token).inProgress());
+    for (uint16_t i = 0; i < 200U && filterFindRead(bus, 0x75) == bus.traceCount; ++i)
+      driver.poll(bus.nowMs, 255);
+    TEST_ASSERT_LESS_THAN(bus.traceCount, filterFindRead(bus, 0x75));
+    if (failure < 2U) {
+      bus.addFault(bus.transferCalls + 1U, Status::Error(Err::I2C_TIMEOUT, "held release", -914), failure != 0U);
+      driver.poll(bus.nowMs, 1);
+    } else {
+      if (failure >= 4U) driver.poll(bus.nowMs, 1);
+      const uint32_t before = bus.transferCalls;
+      if ((failure & 1U) == 0U) driver.cancelActiveJob(bus.nowMs);
+      else driver.poll(bus.nowMs = timing.deadlineMs, 0);
+      TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+    }
+    const OperationResult failed = filterTake(driver, token);
+    TEST_ASSERT_FALSE(failed.status.ok());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
+                          static_cast<uint8_t>(failed.configuration.state));
+    if (failure < 4U) TEST_ASSERT_EQUAL_UINT8(1, bus.outputPairReadMask[4]);
+    bus.clearTrace();
+    const OperationResult restored = filterConfigure(driver, bus, DeviceProfile{});
+    TEST_ASSERT_EQUAL_UINT32(failure < 4U ? 79 : 78, restored.transactions);
+    TEST_ASSERT_EQUAL_UINT8(0, bus.outputPairReadMask[4]);
+  }
+}
+
+void test_filter_conditional_release_fits_full_reference_configure_ceiling() {
+  FakeBus bus;
+  Driver driver;
+  TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+  filterConfigure(driver, bus, DeviceProfile{});
+  holdFilterOutputPair(driver, bus);
+  bus.clearTrace();
+  bus.notReadyStatusReads = 2;
+  const OperationResult result = filterConfigure(driver, bus, referenceProfile(true, true));
+  TEST_ASSERT_EQUAL_UINT32(111, result.transactionLimit);
+  TEST_ASSERT_EQUAL_UINT32(111, result.transactions);
+  TEST_ASSERT_LESS_THAN(filterFindRead(bus, 0x28), filterFindRead(bus, 0x20));
+  TEST_ASSERT_TRUE(result.configuration.referenceDiscardConfirmed);
+}
+
 } // namespace
 
 void runFilterOperationTests() {
@@ -842,7 +1097,14 @@ void runFilterOperationTests() {
   RUN_TEST(test_filter_self_test_reference_restore_and_primary_failure_keep_distinct_status);
   RUN_TEST(test_filter_self_test_reference_restoration_failure_each_discard_callback);
   RUN_TEST(test_filter_reference_callback_time_and_zero_budget_preserve_both_gates);
+  RUN_TEST(test_filter_gate_waits_for_output_after_last_discarded_sample);
   RUN_TEST(test_filter_reference_mismatched_image_never_discards_or_activates);
   RUN_TEST(test_filter_self_test_clears_direct_bandwidth_and_analog_override_recipe);
   RUN_TEST(test_filter_reference_fifo_discards_transition_and_requires_stop_for_new_path);
+  RUN_TEST(test_filter_diagnostics_require_whole_output_pairs_without_io);
+  RUN_TEST(test_filter_held_output_blocks_sampling_calibration_and_untrusted_reconcile);
+  RUN_TEST(test_filter_failed_pair_is_discarded_before_new_scale_and_fresh_gate);
+  RUN_TEST(test_filter_diagnostic_success_does_not_clear_held_output_evidence);
+  RUN_TEST(test_filter_held_release_fault_cancel_and_deadline_preserve_required_work);
+  RUN_TEST(test_filter_conditional_release_fits_full_reference_configure_ceiling);
 }

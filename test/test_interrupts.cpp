@@ -246,7 +246,7 @@ void test_interrupt_configure_masks_before_dependencies_and_activates_after_sett
   bus.setEventSources(0x55, 0x18);
   const DeviceProfile profile = fullInterruptProfile();
   const OperationResult result = interruptConfigure(driver, bus, profile);
-  TEST_ASSERT_EQUAL_UINT32(106U, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(107U, result.transactions);
   size_t lastMaskRead = 0;
   size_t firstDependencyWrite = bus.traceCount;
   size_t firstActivation = bus.traceCount;
@@ -502,7 +502,7 @@ void test_interrupt_configure_faults_cancel_deadlines_cover_every_new_phase() {
     Driver driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
     total = interruptConfigure(driver, bus, profile).transactions;
-    TEST_ASSERT_EQUAL_UINT32(106U, total);
+    TEST_ASSERT_EQUAL_UINT32(107U, total);
   }
   for (uint32_t stop = 0; stop < total; ++stop) {
     for (uint8_t mode = 0; mode < 4; ++mode) {
@@ -700,6 +700,12 @@ void test_interrupt_self_test_masks_before_temporary_writes_and_restores_exact_i
   TEST_ASSERT_TRUE_MESSAGE(result.status.ok(), result.status.msg);
   TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
   TEST_ASSERT_TRUE(result.events.historyMayBeLost);
+  const uint8_t preflightRegisters[] = {0x01, 0x0F, 0x0A};
+  for (uint8_t index = 0; index < 3U; ++index) {
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::WRITE_READ),
+                           static_cast<uint8_t>(bus.trace[index].kind));
+    TEST_ASSERT_EQUAL_HEX8(preflightRegisters[index], bus.trace[index].startReg);
+  }
   const size_t firstTest = interruptFindWrite(bus, 0x14, 0);
   for (uint8_t reg : {0x0D, 0x0E, 0x5E, 0x5F})
     TEST_ASSERT_TRUE(interruptFindWrite(bus, reg, 0) < firstTest);
@@ -710,6 +716,101 @@ void test_interrupt_self_test_masks_before_temporary_writes_and_restores_exact_i
   TEST_ASSERT_EQUAL_HEX8(0x34, bus.regs[0x19]);
   TEST_ASSERT_EQUAL_UINT32(0, bus.orientationSourceReads);
   TEST_ASSERT_EQUAL_UINT32(0, bus.embeddedSourceReads);
+}
+
+void test_self_test_preflight_rejects_changed_hardware_before_any_write() {
+  const uint8_t registers[] = {0x01, 0x01, 0x0F, 0x0A};
+  const uint8_t values[] = {0x80, 0x20, 0x00, 0x26};
+  const Err errors[] = {Err::CONFIGURATION_UNKNOWN, Err::CONFIGURATION_UNKNOWN,
+                        Err::CHIP_ID_MISMATCH, Err::FIFO_MAINTENANCE_REQUIRED};
+  const uint32_t calls[] = {1, 1, 2, 3};
+  for (uint8_t scenario = 0; scenario < 4U; ++scenario) {
+    FakeBus bus;
+    Driver driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    const OperationResult configured = interruptConfigure(driver, bus, interruptProfile());
+    bus.regs[registers[scenario]] = values[scenario];
+    bus.setEventSources(0x42, 0x18);
+    bus.clearTrace();
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startSelfTest({5}, interruptTiming(bus), token).inProgress());
+    TEST_ASSERT_EQUAL_UINT32(0, bus.transferCalls);
+    interruptRun(driver, bus);
+    const OperationResult result = interruptTake(driver, token);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(errors[scenario]),
+                           static_cast<uint8_t>(result.status.code));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(OperationState::FAILED),
+                           static_cast<uint8_t>(result.state));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(errors[scenario]),
+                           static_cast<uint8_t>(result.selfTest.primaryStatus.code));
+    TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
+    TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_EQUAL_UINT32(calls[scenario], result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, bus.orientationSourceReads);
+    TEST_ASSERT_EQUAL_UINT32(0, bus.embeddedSourceReads);
+    TEST_ASSERT_EQUAL_UINT16(0, bus.fifoDataReads);
+    TEST_ASSERT_EQUAL_UINT32(configured.configuration.generation, driver.configGeneration());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::UNKNOWN),
+                           static_cast<uint8_t>(result.configuration.state));
+    TEST_ASSERT_EQUAL(scenario < 2U, result.registerBankMayBeUnknown);
+    DeviceProfile verified;
+    TEST_ASSERT_FALSE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+  }
+}
+
+void test_self_test_preflight_fault_cancel_deadline_and_budgets_preserve_untouched_profile() {
+  const Err errors[] = {Err::I2C_NACK_ADDR, Err::I2C_NACK_DATA, Err::I2C_TIMEOUT,
+                        Err::I2C_ERROR, Err::CANCELLED, Err::DEADLINE_EXPIRED};
+  for (uint8_t stage = 0; stage <= 3U; ++stage) {
+    for (uint8_t mode = 0; mode < 6U; ++mode) {
+      if (stage == 3U && mode < 4U) continue;  // Last preflight read completed.
+      FakeBus bus;
+      Driver driver;
+      TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+      const OperationResult configured = interruptConfigure(driver, bus, interruptProfile());
+      bus.setEventSources(0x42, 0x18);
+      bus.clearTrace();
+      if (mode < 4U)
+        bus.addFault(stage + 1U, Status::Error(errors[mode], "self-test preflight", -748));
+      OperationToken token;
+      const OperationTiming timing = interruptTiming(bus);
+      TEST_ASSERT_TRUE(driver.startSelfTest({5}, timing, token).inProgress());
+      for (uint8_t call = 0; call < stage; ++call) {
+        const uint32_t before = bus.transferCalls;
+        TEST_ASSERT_EQUAL_UINT8(0, driver.poll(bus.nowMs++, 0).transactionsUsed);
+        TEST_ASSERT_EQUAL_UINT32(before, bus.transferCalls);
+        TEST_ASSERT_EQUAL_UINT8(1, driver.poll(bus.nowMs++, 1).transactionsUsed);
+      }
+      TEST_ASSERT_EQUAL_UINT8(0, driver.poll(bus.nowMs++, 0).transactionsUsed);
+      TEST_ASSERT_EQUAL_UINT32(stage, bus.transferCalls);
+      if (mode < 4U) {
+        const PollResult result = driver.poll(bus.nowMs++, 255);
+        TEST_ASSERT_EQUAL_UINT8(1, result.transactionsUsed);
+      } else if (mode == 4U) {
+        TEST_ASSERT_TRUE(driver.cancelActiveJob(bus.nowMs).ok());
+      } else {
+        TEST_ASSERT_EQUAL_UINT8(0, driver.poll(timing.deadlineMs, 255).transactionsUsed);
+      }
+      const OperationResult result = interruptTake(driver, token);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(errors[mode]),
+                             static_cast<uint8_t>(result.status.code));
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(errors[mode]),
+                             static_cast<uint8_t>(result.selfTest.primaryStatus.code));
+      TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
+      TEST_ASSERT_FALSE(result.hardwareStateMayHaveChanged);
+      TEST_ASSERT_FALSE(result.events.historyMayBeLost);
+      TEST_ASSERT_EQUAL_UINT32(stage + (mode < 4U ? 1U : 0U), result.transactions);
+      TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+      TEST_ASSERT_EQUAL_UINT32(0, bus.orientationSourceReads);
+      TEST_ASSERT_EQUAL_UINT32(0, bus.embeddedSourceReads);
+      TEST_ASSERT_EQUAL_HEX8(0x42, bus.regs[0x1D]);
+      TEST_ASSERT_EQUAL_HEX8(0x18, bus.regs[0x53]);
+      TEST_ASSERT_EQUAL_UINT32(configured.configuration.generation, driver.configGeneration());
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
+                             static_cast<uint8_t>(result.configuration.state));
+    }
+  }
 }
 
 void test_interrupt_power_down_fail_cancel_deadline_cover_masking_and_sensor_phases() {
@@ -980,6 +1081,84 @@ void test_event_observed_fifo_loss_survives_a_later_cleared_status() {
   TEST_ASSERT_EQUAL_UINT64(observed.counters.epoch, batch.counters.epoch);
 }
 
+void test_fifo_rounded_bursts_never_acknowledge_later_source_registers() {
+  for (uint8_t scenario = 0; scenario < 3U; ++scenario) {
+    FakeBus bus;
+    Driver driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    interruptConfigure(driver, bus, fullInterruptProfile());
+    bus.setEventSources(0x42, 0x18);
+    bus.setFifo(16, 0, 0x1234);
+    bus.fifoPatternWords = 9;
+    bus.clearTrace();
+    if (scenario != 0U)
+      bus.addFault(4, Status::Error(Err::I2C_TIMEOUT, "rounded FIFO burst"), scenario == 2U);
+    FifoRecord records[6];
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startFifoRead({records, 6, 16}, interruptTiming(bus), token).inProgress());
+    interruptRun(driver, bus);
+    const OperationResult result = interruptTake(driver, token);
+    TEST_ASSERT_EQUAL(scenario == 0U, result.status.ok());
+    TEST_ASSERT_TRUE(result.hardwareStateMayHaveChanged);
+    TEST_ASSERT_EQUAL_UINT8(0, result.events.mayHaveAcknowledgedMask);
+    TEST_ASSERT_EQUAL_UINT8(0, result.events.acknowledgedMask);
+    TEST_ASSERT_EQUAL_UINT32(0, bus.embeddedSourceReads);
+    TEST_ASSERT_EQUAL_UINT32(0, bus.orientationSourceReads);
+    TEST_ASSERT_EQUAL_HEX8(0x18, bus.regs[0x53]);
+    TEST_ASSERT_EQUAL_HEX8(0x42, bus.regs[0x1D]);
+    TEST_ASSERT_EQUAL_UINT16(32, bus.trace[3].rxLength);
+  }
+}
+
+void test_sample_and_calibration_output_acknowledgements_report_effects() {
+  for (bool calibration : {false, true}) {
+    for (uint8_t scenario = 0; scenario < (calibration ? 6U : 5U); ++scenario) {
+      FakeBus bus;
+      Driver driver;
+      TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+      const OperationResult configured = interruptConfigure(driver, bus, DeviceProfile{});
+      bus.clearTrace();
+      if (scenario >= 1U && scenario <= 3U) {
+        bus.addFault(scenario == 1U ? 1U : 2U,
+            Status::Error(Err::I2C_ERROR, "output acknowledgement fault"),
+            scenario == 3U);
+      }
+      OperationToken token;
+      if (calibration) {
+        CalibrationRequest request;
+        request.samples = scenario == 5U ? 2U : 1U;
+        TEST_ASSERT_TRUE(driver.startCalibration(request, interruptTiming(bus), token).inProgress());
+      } else {
+        TEST_ASSERT_TRUE(driver.startSample({}, interruptTiming(bus), token).inProgress());
+      }
+      if (scenario >= 4U) {
+        driver.poll(bus.nowMs++, 1);
+        if (scenario == 5U) driver.poll(bus.nowMs++, 1);
+        const uint32_t calls = bus.transferCalls;
+        TEST_ASSERT_TRUE(driver.cancelActiveJob(bus.nowMs).ok());
+        TEST_ASSERT_EQUAL_UINT32(calls, bus.transferCalls);
+      } else {
+        interruptRun(driver, bus);
+      }
+      const OperationResult result = interruptTake(driver, token);
+      const bool outputAttempted = scenario != 1U && scenario != 4U;
+      const bool outputConfirmed = scenario == 0U || scenario == 5U;
+      TEST_ASSERT_EQUAL(outputAttempted, result.hardwareStateMayHaveChanged);
+      TEST_ASSERT_EQUAL_UINT8(outputAttempted ? EVENT_DATA_READY : 0U,
+          result.events.mayHaveAcknowledgedMask);
+      TEST_ASSERT_EQUAL_UINT8(outputConfirmed ? EVENT_DATA_READY : 0U,
+          result.events.acknowledgedMask);
+      TEST_ASSERT_EQUAL(scenario == 2U || scenario == 3U, result.events.historyMayBeLost);
+      TEST_ASSERT_EQUAL(scenario == 0U, result.status.ok());
+      TEST_ASSERT_EQUAL_UINT32(0, bus.writeCalls);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
+          static_cast<uint8_t>(result.configuration.state));
+      TEST_ASSERT_EQUAL_UINT32(configured.configuration.generation, result.configuration.generation);
+      TEST_ASSERT_EQUAL_UINT64(configured.counters.epoch, result.counters.epoch);
+    }
+  }
+}
+
 void test_diagnostic_auxiliary_pad_routes_cannot_bypass_typed_sources() {
   FakeBus bus;
   Driver driver;
@@ -1023,6 +1202,8 @@ void runInterruptTests() {
   RUN_TEST(test_interrupt_reset_boot_recovery_restore_routes_without_source_acknowledgement);
   RUN_TEST(test_interrupt_power_down_masks_routes_and_calibration_preserves_them);
   RUN_TEST(test_interrupt_self_test_masks_before_temporary_writes_and_restores_exact_image);
+  RUN_TEST(test_self_test_preflight_rejects_changed_hardware_before_any_write);
+  RUN_TEST(test_self_test_preflight_fault_cancel_deadline_and_budgets_preserve_untouched_profile);
   RUN_TEST(test_interrupt_power_down_fail_cancel_deadline_cover_masking_and_sensor_phases);
   RUN_TEST(test_interrupt_self_test_restoration_fault_cancel_deadline_cover_every_phase);
   RUN_TEST(test_interrupt_reset_boot_recovery_route_phases_never_retry_or_hide_effects);
@@ -1030,5 +1211,7 @@ void runInterruptTests() {
   RUN_TEST(test_event_zero_budget_and_all_active_pending_entry_points_are_bus_silent);
   RUN_TEST(test_event_terminal_publication_needs_no_transaction_budget);
   RUN_TEST(test_event_observed_fifo_loss_survives_a_later_cleared_status);
+  RUN_TEST(test_fifo_rounded_bursts_never_acknowledge_later_source_registers);
+  RUN_TEST(test_sample_and_calibration_output_acknowledgements_report_effects);
   RUN_TEST(test_diagnostic_auxiliary_pad_routes_cannot_bypass_typed_sources);
 }

@@ -63,7 +63,7 @@ void test_accel_filter_table_wire_images_and_settle_counts() {
       profile.accelFilter.hpcf = static_cast<AccelHpcf>(row.hpcf);
       profile.accelFilter.compositeInput = static_cast<AccelCompositeInput>(input);
       TEST_ASSERT_TRUE(validateProfile(profile).ok());
-      TEST_ASSERT_EQUAL_UINT64(9616ULL * row.samples, requiredSettleUs(profile));
+      TEST_ASSERT_EQUAL_UINT64(9616ULL * (row.samples + 1U), requiredSettleUs(profile));
       FakeBus bus;
       LSM6DS3TR::LSM6DS3TR driver;
       TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -122,7 +122,7 @@ void test_gyro_ftype_table_wire_images_and_settle_counts() {
       profile.gyroOdr = static_cast<Odr>(odr);
       profile.gyroFilter.lpf1Enabled = true;
       profile.gyroFilter.lpf1Bandwidth = static_cast<GyroLpf1Bandwidth>(ftype);
-      TEST_ASSERT_EQUAL_UINT64(70000ULL + uint64_t(periods[odr-1]) * counts[odr-1][ftype],
+      TEST_ASSERT_EQUAL_UINT64(70000ULL + uint64_t(periods[odr-1]) * (counts[odr-1][ftype] + 1U),
                                requiredSettleUs(profile));
       FakeBus bus;
       LSM6DS3TR::LSM6DS3TR driver;
@@ -205,7 +205,7 @@ void test_orientation_filter_is_independent_and_extends_gate() {
       p.interrupts.orientation.mode = OrientationMode::SIX_D;
       p.interrupts.int1.orientation = true;
       const uint16_t counts[] = {40,80,15,320};
-      TEST_ASSERT_EQUAL_UINT64(9616ULL * counts[hpcf], requiredSettleUs(p));
+      TEST_ASSERT_EQUAL_UINT64(9616ULL * (counts[hpcf] + 1U), requiredSettleUs(p));
       FakeBus bus;
       LSM6DS3TR::LSM6DS3TR driver;
       TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -225,16 +225,16 @@ void test_low_odr_and_transition_bounds_are_source_based() {
   p.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
   p.accelFilter.lpf2Enabled = true;
   p.accelFilter.hpcf = AccelHpcf::DIV_400;
-  TEST_ASSERT_EQUAL_UINT64(200000000ULL, requiredSettleUs(p));
+  TEST_ASSERT_EQUAL_UINT64(200625000ULL, requiredSettleUs(p));
   p.accelFilter = {};
-  TEST_ASSERT_EQUAL_UINT64(8750000ULL, requiredSettleUs(p));
+  TEST_ASSERT_EQUAL_UINT64(9375000ULL, requiredSettleUs(p));
   p.accelOdr = Odr::HZ_6660; p.accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;
-  TEST_ASSERT_EQUAL_UINT64(2114, requiredSettleUs(p)); // 13+1 transition <=14.
+  TEST_ASSERT_EQUAL_UINT64(2265, requiredSettleUs(p)); // 14 discarded periods plus one replacement.
   p.accelOdr = Odr::POWER_DOWN; p.gyroOdr = Odr::HZ_12_5;
   p.gyroPowerMode = GyroPowerMode::LOW_POWER_NORMAL;
-  TEST_ASSERT_EQUAL_UINT64(150000, requiredSettleUs(p));
+  TEST_ASSERT_EQUAL_UINT64(230000, requiredSettleUs(p));
   p.gyroOdr = Odr::HZ_208;
-  TEST_ASSERT_EQUAL_UINT64(74808, requiredSettleUs(p));
+  TEST_ASSERT_EQUAL_UINT64(79616, requiredSettleUs(p));
   p.gyroSleepEnabled = true;
   TEST_ASSERT_EQUAL_UINT64(70000, requiredSettleUs(p));
   p.gyroOdr = Odr::POWER_DOWN;

@@ -207,7 +207,7 @@ void test_fifo_wire_image_and_activation_follow_verified_settling() {
   TEST_ASSERT_TRUE(activation > lastProfileRead);
   TEST_ASSERT_TRUE(activation >= lastProfileRead +
       (requiredSettleUs(profile) + 999U) / 1000U + 1U);
-  TEST_ASSERT_EQUAL_UINT32(80U, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(81U, result.transactions);
 }
 
 OperationResult fifoRead(LSM6DS3TR::LSM6DS3TR& driver, FakeBus& bus,
@@ -386,6 +386,67 @@ void test_fifo_concurrent_arrivals_remain_for_next_bounded_batch() {
   TEST_ASSERT_TRUE(result.fifoRead.truncated);
 }
 
+void test_fifo_whole_set_producer_stops_until_bypass_and_keeps_coherent_records() {
+  // AN5130 Rev1 section8.2.2/Figure28 specifies 2046 retained words for one
+  // XYZ producer. Explicit 3/6/9-word trigger sets exercise full-set admission
+  // independently of the driver's pattern helper and register decimators.
+  const uint16_t words[] = {101, 102, 103, 201, 202, 203, 0xBBAA, 256, 0xDDCC};
+  const uint16_t retained[] = {2046, 2046, 2043};
+  for (uint8_t datasets = 1; datasets <= 3U; ++datasets) {
+    FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
+    DeviceProfile profile = motionProfile();
+    profile.fifo.mode = FifoMode::FIFO;
+    if (datasets == 1U) profile.fifo.accelDecimation = FifoDecimation::OFF;
+    if (datasets == 3U) {
+      profile.fifo.fourthDataset = FifoFourthDataset::TEMPERATURE;
+      profile.fifo.fourthDecimation = FifoDecimation::EVERY_1;
+    }
+    (void)fifoConfigure(driver, bus, profile);
+    const uint8_t groupWords = static_cast<uint8_t>(3U * datasets);
+    bus.fifoPatternWords = groupWords;
+    for (uint16_t trigger = 0; trigger < 684U; ++trigger)
+      bus.appendFifoSet(words, groupWords, groupWords);
+    TEST_ASSERT_EQUAL_UINT16(retained[datasets - 1U], bus.fifoUnreadWords);
+    TEST_ASSERT_TRUE(bus.fifoStoppedOnFull);
+    TEST_ASSERT_FALSE(bus.fifoOverrun);
+
+    FifoMotionRecord records[6];
+    const OperationResult read = fifoRead(driver, bus, records, 6, 18);
+    TEST_ASSERT_TRUE_MESSAGE(read.status.ok(), read.status.msg);
+    TEST_ASSERT_TRUE(read.fifoRead.before.full);
+    TEST_ASSERT_TRUE(read.fifoRead.continuityLost);
+    TEST_ASSERT_FALSE(read.fifoRead.overrunObserved);
+    TEST_ASSERT_EQUAL_UINT16(18, read.fifoRead.wordsConsumed);
+    TEST_ASSERT_EQUAL_UINT16(datasets == 1U ? 5U : 4U, read.fifoRead.records);
+    const uint16_t afterRead = bus.fifoUnreadWords;
+    bus.appendFifoSet(words, groupWords, groupWords);
+    TEST_ASSERT_EQUAL_UINT16(afterRead, bus.fifoUnreadWords);
+
+    OperationToken token;
+    TEST_ASSERT_TRUE(driver.startFifoPurge({1, true}, fifoTiming(bus), token).inProgress());
+    fifoRun(driver, bus);
+    TEST_ASSERT_TRUE(fifoTake(driver, token).fifoPurge.collectionStopped);
+    (void)fifoConfigure(driver, bus, profile);
+    bus.appendFifoSet(words, groupWords, groupWords);
+    TEST_ASSERT_EQUAL_UINT16(groupWords, bus.fifoUnreadWords);
+    TEST_ASSERT_FALSE(bus.fifoStoppedOnFull);
+  }
+
+  // A decimated producer can alternate 9-word and 3-word trigger sets. The
+  // next set is an explicit independent input, not a fixed single-sensor limit.
+  FakeBus mixed;
+  mixed.regs[cmd::REG_FIFO_CTRL5] = 0x21;
+  for (uint16_t trigger = 0; trigger < 684U; ++trigger) {
+    const bool allDatasets = (trigger % 2U) == 0U;
+    mixed.appendFifoSet(words, allDatasets ? 9U : 3U, allDatasets ? 3U : 9U);
+  }
+  TEST_ASSERT_EQUAL_UINT16(2040, mixed.fifoUnreadWords);
+  TEST_ASSERT_TRUE(mixed.fifoStoppedOnFull);
+  TEST_ASSERT_FALSE(mixed.fifoOverrun);
+}
+
 void test_fifo_pattern_discontinuity_invalidates_entire_output() {
   FakeBus bus;
   LSM6DS3TR::LSM6DS3TR driver;
@@ -538,7 +599,7 @@ void test_fifo_buffer_lifetime_tokens_backpressure_unbind_and_rebind() {
 void test_fifo_configure_faults_and_cancellation_cover_activation_stages() {
   const Err errors[] = {Err::I2C_NACK_ADDR, Err::I2C_ERROR, Err::I2C_TIMEOUT};
   for (Err error : errors) {
-    for (uint32_t stage = 1; stage <= 80U; ++stage) {
+    for (uint32_t stage = 1; stage <= 81U; ++stage) {
       FakeBus bus;
       LSM6DS3TR::LSM6DS3TR driver;
       TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -557,7 +618,7 @@ void test_fifo_configure_faults_and_cancellation_cover_activation_stages() {
                             static_cast<uint8_t>(result.configuration.state));
     }
   }
-  for (uint32_t stop = 0; stop <= 80U; ++stop) {
+  for (uint32_t stop = 0; stop <= 81U; ++stop) {
     FakeBus bus;
     LSM6DS3TR::LSM6DS3TR driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
@@ -1090,6 +1151,7 @@ void runFifoTests() {
   RUN_TEST(test_fifo_short_buffer_word_bound_and_partial_vectors_are_bounded);
   RUN_TEST(test_fifo_empty_full_overrun_and_contradictions_never_read_empty);
   RUN_TEST(test_fifo_concurrent_arrivals_remain_for_next_bounded_batch);
+  RUN_TEST(test_fifo_whole_set_producer_stops_until_bypass_and_keeps_coherent_records);
   RUN_TEST(test_fifo_pattern_discontinuity_invalidates_entire_output);
   RUN_TEST(test_fifo_transport_failure_at_every_stage_never_retries_or_publishes);
   RUN_TEST(test_fifo_cancellation_deadline_and_invalid_requests_have_no_stale_batch);

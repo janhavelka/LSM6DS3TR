@@ -476,10 +476,10 @@ struct DriverDiagnostics {
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 110;  ///< Includes four reference-discard callbacks.
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 111;  ///< Includes reference discard and possible held-output release.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 131;  ///< Reset/boot including reference discard.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 130;  ///< Recovery including reference discard.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 132;  ///< Reset/boot including reference discard and held-output release.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 131;  ///< Recovery including reference discard and held-output release.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 17;  ///< Includes route masking and FIFO guard.
 static constexpr uint32_t MAX_COUNTER_RESET_TRANSACTIONS = 7;  ///< Identity, Bypass, reset/clear verification.
@@ -535,6 +535,8 @@ uint64_t odrPeriodUs(Odr odr);
 /// @param profile Valid production profile.
 /// @return Interval in microseconds, or UINT64_MAX for an invalid profile.
 /// @note This bounds only documented paths; it never qualifies gyro HPF.
+/// One further output period follows each active sensor's discard-count interval
+/// so the most recent output can replace the final discarded sample.
 /// Reference mode also requires staged first-output consumption and one new period.
 /// @note The operation engine rounds a nonzero interval up to milliseconds and
 /// adds one clock-quantization tick when arming it after full profile readback.
@@ -686,6 +688,8 @@ public:
   /// @note Gyro HPF requires checkDataReady=false and allowUnqualifiedFilter=true;
   /// its result has FILTER_UNVERIFIED quality and no freshness claim. Other
   /// qualified requested channels retain their independent qualifiedMask bits.
+  /// A failed output burst may hold a BDU byte pair; configure/recover must
+  /// release it before another managed output sample or calibration.
   /// @param request Quantity and readiness policy.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
@@ -735,6 +739,9 @@ public:
   /// @brief Start bounded built-in self-test and full-profile restoration/readback.
   /// @note Requires a verified BYPASS profile; active FIFO returns
   /// FIFO_MAINTENANCE_REQUIRED without issuing a token or performing I2C.
+  /// Before any write, the accepted operation checks the current main bank,
+  /// identity and FIFO Bypass. Contradicting hardware invalidates provenance;
+  /// a preflight failure performs no restoration writes.
   /// @note Keep the device stationary for the complete operation.
   /// @note SelfTestResult reports the primary and restoration outcomes separately.
   /// @param request Average count for each test phase.
@@ -861,7 +868,8 @@ public:
   /// @param startReg First main-bank register address.
   /// @param data Caller-owned output buffer.
   /// @param length Number of bytes, 1..32, remaining within the supported
-  /// main-bank range through the Z user-offset register.
+  /// main-bank range through the Z user-offset register. Ranges touching
+  /// 0x20..0x2D must include both bytes of every touched output pair.
   /// @param nowMs Caller-owned monotonic time for diagnostics.
   /// @return Transport, range, or precondition status.
   Status diagnosticReadBlock(uint8_t startReg, uint8_t* data, size_t length,
@@ -923,6 +931,9 @@ private:
 
   DriverConfig _driverConfig = {};
   bool _bound = false;
+  // A fresh binding and a transport failure can leave the device holding a low
+  // byte until its matching high byte is consumed. Teardown proves no release.
+  bool _outputMayBeHeld = true;
 
   bool _active = false;
   bool _resultPending = false;

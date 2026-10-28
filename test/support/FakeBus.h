@@ -86,6 +86,11 @@ struct FakeBus {
   bool corruptReadBankOnly = false;
   bool alternateAccelInt16Extremes = false;
   uint32_t accelDataReads = 0;
+  // Opt-in AN5130 p.25 model: a started pair blocks new physical conversions
+  // until both bytes are read. Faults can stop after an explicit byte prefix.
+  bool modelOutputBdu = false;
+  uint8_t outputPairReadMask[7] = {};
+  uint8_t partialOutputReadBytes = 0;
   bool holdResetBit = false;
   bool holdBootBit = false;
   uint8_t resetBitReadsRemaining = 0;
@@ -105,6 +110,9 @@ struct FakeBus {
   uint16_t fifoWords[2048] = {};
   uint16_t fifoHead = 0;
   uint16_t fifoPatternWords = 1024;
+  // Independent producer input: words due on the next FIFO trigger, including
+  // all its enabled datasets. The fake does not derive a production schema.
+  uint8_t fifoNextSetWords = 3;
   uint16_t fifoEmptyReadAttempts = 0;
   uint16_t fifoStatusReads = 0;
   uint16_t fifoPatternJumpAfterRead = 0;
@@ -126,6 +134,7 @@ struct FakeBus {
 
   void resetRegisters() {
     std::memset(regs, 0, sizeof(regs));
+    std::memset(outputPairReadMask, 0, sizeof(outputPairReadMask));
     std::memset(bankA, 0, sizeof(bankA));
     bankA[0x0F] = 0x10;
     bankA[0x14] = 0x6E;
@@ -136,6 +145,7 @@ struct FakeBus {
     fifoUnreadWords = 0;
     fifoHead = 0;
     fifoPattern = 0;
+    fifoNextSetWords = 3;
     fifoOverrun = false;
     fifoStoppedOnFull = false;
     regs[cmd::REG_WHO_AM_I] = cmd::WHO_AM_I_VALUE;
@@ -222,14 +232,15 @@ struct FakeBus {
     static constexpr uint8_t DIVISORS[] = {0, 1, 2, 3, 4, 8, 16, 32};
     if (decimation == 0U || fifoFourthTriggers++ % DIVISORS[decimation] != 0U) return;
     if ((regs[cmd::REG_FIFO_CTRL2] & 0x80U) != 0U) {
-      appendFifoWord(static_cast<uint16_t>(((timestampTicks >> 8U) & 0xFFU) |
-                                         ((timestampTicks >> 8U) & 0xFF00U)));
-      appendFifoWord(static_cast<uint16_t>(0x00A5U | ((timestampTicks & 0xFFU) << 8U)));
-      appendFifoWord(stepCount);
+      const uint16_t words[] = {
+          static_cast<uint16_t>(((timestampTicks >> 8U) & 0xFFU) |
+                                ((timestampTicks >> 8U) & 0xFF00U)),
+          static_cast<uint16_t>(0x00A5U | ((timestampTicks & 0xFFU) << 8U)),
+          stepCount};
+      appendFifoSet(words, 3, 3);
     } else if ((regs[cmd::REG_FIFO_CTRL2] & 0x08U) != 0U) {
-      appendFifoWord(0xBBAAU);
-      appendFifoWord(static_cast<uint16_t>(temperature));
-      appendFifoWord(0xDDCCU);
+      const uint16_t words[] = {0xBBAAU, static_cast<uint16_t>(temperature), 0xDDCCU};
+      appendFifoSet(words, 3, 3);
     }
   }
 
@@ -332,6 +343,8 @@ struct FakeBus {
     syncFifoRegisters();
   }
 
+  // Raw word injection remains available for synthetic occupancy/overwrite
+  // fixtures. Physical trigger fixtures use appendFifoSet for atomic datasets.
   void appendFifoWord(uint16_t value) {
     if (fifoStoppedOnFull) return;
     if (fifoUnreadWords == 2048U) {
@@ -349,6 +362,25 @@ struct FakeBus {
     if (fifoUnreadWords == 2048U && (regs[cmd::REG_FIFO_CTRL5] & 7U) == 1U) {
       fifoStoppedOnFull = true;
     }
+    syncFifoRegisters();
+  }
+
+  void appendFifoSet(const uint16_t* words, uint8_t count, uint8_t nextSetWords) {
+    const uint8_t mode = regs[cmd::REG_FIFO_CTRL5] & 7U;
+    if (mode == 0U || fifoStoppedOnFull) return;
+    // AN5130 section 8.2.2/Figure 28: FIFO mode stops at FULL_SMART and
+    // remains stopped after host reads until Bypass rearms it. An XYZ-only
+    // producer starting empty retains 2046 words, never a partial 2048th set.
+    if (mode == 1U && fifoUnreadWords + count >= 2048U) {
+      fifoNextSetWords = count;
+      fifoStoppedOnFull = true;
+      syncFifoRegisters();
+      return;
+    }
+    for (uint8_t index = 0; index < count; ++index) appendFifoWord(words[index]);
+    fifoNextSetWords = nextSetWords;
+    if (mode == 1U && fifoUnreadWords + fifoNextSetWords >= 2048U)
+      fifoStoppedOnFull = true;
     syncFifoRegisters();
   }
 
@@ -391,7 +423,7 @@ struct FakeBus {
     if (fifoOverrun) {
       regs[cmd::REG_FIFO_STATUS2] |= cmd::MASK_FIFO_OVER_RUN;
     }
-    if (fifoFullSmart || fifoUnreadWords > 2045U) {
+    if (fifoFullSmart || fifoUnreadWords + fifoNextSetWords >= 2048U) {
       regs[cmd::REG_FIFO_STATUS2] |= 0x20U;
     }
     const uint16_t threshold = static_cast<uint16_t>(regs[cmd::REG_FIFO_CTRL1]) |
@@ -476,9 +508,24 @@ struct FakeBus {
   }
 
   void setI16(uint8_t lowRegister, int16_t value) {
+    if (modelOutputBdu && (regs[0x12] & 0x40U) != 0U &&
+        lowRegister >= 0x20U && lowRegister <= 0x2CU &&
+        outputPairReadMask[(lowRegister - 0x20U) / 2U] != 0U)
+      return;
     const uint16_t bits = static_cast<uint16_t>(value);
     regs[lowRegister] = static_cast<uint8_t>(bits & 0xFFu);
     regs[static_cast<uint8_t>(lowRegister + 1u)] = static_cast<uint8_t>(bits >> 8);
+  }
+
+  uint8_t readOutputByte(uint8_t reg) {
+    const uint8_t value = regs[reg];
+    if (modelOutputBdu && (regs[0x12] & 0x40U) != 0U &&
+        reg >= 0x20U && reg <= 0x2DU) {
+      uint8_t& mask = outputPairReadMask[(reg - 0x20U) / 2U];
+      mask |= (reg & 1U) == 0U ? 1U : 2U;
+      if (mask == 3U) mask = 0;
+    }
+    return value;
   }
 };
 
@@ -550,6 +597,11 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     return fault->status;
   }
   bus.injectEventArrival();
+  size_t consumedLength = rxLength;
+  if (fault != nullptr && bus.partialOutputReadBytes != 0U &&
+      startReg <= 0x2DU && static_cast<size_t>(startReg) + rxLength > 0x20U &&
+      bus.partialOutputReadBytes < consumedLength)
+    consumedLength = bus.partialOutputReadBytes;
 
   if (startReg == cmd::REG_FIFO_DATA_OUT_L && rxLength >= 2U) {
     // AN5130 sections 4.7.1 and 8.4: FIFO output addresses round from
@@ -618,11 +670,11 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
                                 : std::numeric_limits<int16_t>::max();
       bus.setI16(cmd::REG_OUTX_L_XL, value);
     }
-    for (size_t i = 0; i < rxLength; ++i) {
+    for (size_t i = 0; i < consumedLength; ++i) {
       const uint8_t reg = static_cast<uint8_t>(startReg + i);
       rxData[i] = reg != cmd::REG_FUNC_CFG_ACCESS &&
           (bus.regs[cmd::REG_FUNC_CFG_ACCESS] & 0x80U) != 0U
-          ? bus.bankA[reg] : bus.regs[reg];
+          ? bus.bankA[reg] : bus.readOutputByte(reg);
     }
     if (countdownReset && --bus.resetBitReadsRemaining == 0u &&
         !bus.holdResetBit) {
@@ -643,7 +695,7 @@ inline Status fakeWriteRead(uint8_t address, const uint8_t* txData, size_t txLen
     }
   }
 
-  const bool sourceEffect = bus.applySourceReadEffects(startReg, rxLength);
+  const bool sourceEffect = bus.applySourceReadEffects(startReg, consumedLength);
   if (fault != nullptr) {
     FakeBus::finishTransfer(transfer, fault->status, true);
     return fault->status;

@@ -80,12 +80,21 @@ until full profile reapply and readback succeeds. Cancellation remains
 bus-silent and therefore reports unknown provenance instead of performing this
 I2C cleanup.
 
-The public hard callback ceiling is `16 * (samples + 1) + 126`: each of four
+Before masking routes or writing temporary settings, self-test observes the
+main bank, WHO_AM_I and hardware FIFO Bypass in three separate callbacks.
+An unexpected bank, identity or active FIFO invalidates cached provenance and
+fails without writing or consuming data. A transport failure, cancellation or
+deadline during this preflight preserves the untouched verified profile; no
+restoration write is needed.
+
+The public hard callback ceiling is `16 * (samples + 1) + 130`: each of four
 phases reserves three readiness checks plus one burst for its discard and
 averaged samples, normal fixed test work uses 20 callbacks, one additional
-callback is reserved for a failed terminal write followed by cleanup, and exact
-profile restoration reserves 97, including fixed bank-A policy, bounded counter
-resolution/enable stages, up to four reference-discard callbacks and final route activation. Eight initial route-mask
+callback is reserved for a failed terminal write followed by cleanup, three
+callbacks cover the read-only preflight, and exact
+profile restoration reserves 98, including fixed bank-A policy, bounded counter
+resolution/enable stages, up to four reference-discard callbacks, possible
+held-output release after an ambiguous output read and final route activation. Eight initial route-mask
 callbacks precede temporary settings; the same mask proof is reused for restore.
 The restored profile is the actual pre-test verified profile, including its
 routes, rather than an unapplied staged draft. Maintenance can lose pending

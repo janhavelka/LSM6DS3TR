@@ -209,7 +209,7 @@ EXACT_DOCUMENT_FACTS = {
         "150..700 dps inclusive",
         "20 ms at the 52 Hz accelerometer",
         "`CTRL2_G=0x00` to power down the gyroscope",
-        "`16 * (samples + 1) + 126`",
+        "`16 * (samples + 1) + 130`",
     ),
     "12_source_ambiguities.md": (
         "`FUNC_CFG_ACCESS[4]=0`",

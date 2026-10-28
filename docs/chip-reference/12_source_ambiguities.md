@@ -162,6 +162,48 @@ source/physical gate. No timeout, DRDY bit or guessed RC formula closes it.
 HPF and LPF1 requests in low-power/normal mode are rejected rather than
 silently accepting bits that hardware bypasses. Hardware evidence is **NOT RUN**.
 
+## Discard Counts Versus The Latest Unread Output
+
+AN5130 Table 9, p. 14 describes maximum settling time in samples to discard;
+Tables 13/15/16, pp. 19-22 likewise give discard counts. Section 4.4, p. 25
+states that entirely unread output pairs contain the latest sample, and BDU
+freezes a pair only after reading it starts. The source does not promise that
+the unread value at exactly the end of a discard-count interval is already
+the following acceptable sample. A data-ready flag can still describe that
+last rejected value.
+
+**Resolution (conservative library policy):** after each active sensor's
+source-derived discard-count interval, reserve one more full output period
+before qualifying direct output, calibration or route/FIFO activation. For
+example, 320 discard periods at 1.6 Hz take 200000 ms; the replacement period
+extends the interval to 200625 ms, before millisecond-clock quantization margin.
+The gyro adds this period after its 70 ms base and table count; sleep retains
+only the 70 ms base. Vendor counts are unchanged, and the extra period never
+qualifies gyro HPF. Reference and FIFO consumption rules remain separate.
+
+## Interrupted Output Reads Can Keep A BDU Pair Held
+
+AN5130 section 4.4, p. 25 guarantees a started output pair remains blocked
+until both bytes are read. It does not state that ordinary configuration writes,
+repeating `BDU=1`, or elapsed settling time releases a partially read pair.
+A failed low-first burst can therefore retain one old axis through a later
+scale or filter change.
+
+**Resolution (bounded owner contract):** diagnostic ranges must include both
+bytes of every motion/temperature output pair they touch, in ascending order.
+Reject a range that starts at a high byte or ends at a low byte before I2C.
+A new binding and every failed output read conservatively mark output pairs
+as possibly held. Managed output sampling and calibration then require explicit
+configure/recovery; read-only reconciliation cannot release that evidence.
+Trusted reconciliation may still verify bytes, retaining the held condition;
+untrusted reconciliation rejects it. Replay conditionally discards one complete
+14-byte output burst before arming its fresh settling gate. Only this confirmed
+read after main-bank, IF_INC and BDU verification clears the held condition;
+failure, cancellation, register writes, teardown and rebind do not manufacture
+such proof. Diagnostic reads never clear the condition, since an unconfigured
+device may not have auto-increment enabled even when its callback succeeds.
+The sole-owner contract excludes external partial or reverse-order output reads.
+
 ## User-Offset Register List Typo
 
 The `CTRL6_C.USR_OFF_W` description lists `X_OFS_USR`, `FUNC_CFG_ACCESS`, and
@@ -259,7 +301,8 @@ an initial zero status image.
 **Resolution:** watermark zero means the threshold is always reached
 mathematically, never that watermark reporting is disabled. Return the observed
 hardware flag; do not synthesize WaterM immediately after reset or claim its
-first-update timing. Production interrupt routes and STOP_ON_FTH remain off.
+first-update timing. Zero watermark does not itself enable an interrupt route;
+routes require the typed interrupt profile. STOP_ON_FTH remains unsupported.
 
 ## FIFO Trigger Wording
 

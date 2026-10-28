@@ -12,7 +12,9 @@ retain the configured mode and filter provenance. A successful write is not
 enough to declare the next sample usable.
 
 This library converts the tables below into one conservative `validAfter` gate
-for paths with a documented qualification rule. Gyroscope HPF is an explicit
+for paths with a documented qualification rule. Each active sensor's gate
+includes one output period after its discard-count interval, allowing the final
+discarded output to be replaced before publication. Gyroscope HPF is an explicit
 exception: a register image can be verified without proving its output settled.
 The owner supplies monotonic time; the core performs no sleeps and does no I2C
 while the time gate is active. Required discard reads are separate bounded
@@ -84,10 +86,10 @@ qualification ownership and unsupported combinations are library policy.
 
 | Host path | L/H/R | HPCF | Direct LPF1 selection | Composite input | Additional contract |
 |---|---|---|---|---|---|
-| LPF1 | 0/0/0 | `00` unless used by 6D LPF2 | ODR/2 or ODR/4 | canonical 0 unless used by 6D LPF2 | DC-preserving; 14-period gate |
-| LPF2 | 1/0/0 | `00`/`01`/`10`/`11` | canonical 0 | 0 or 1 | DC-preserving; 40/80/15/320-period gate |
-| Slope | 0/1/0 | `00` | canonical 0 | 0 | Difference of consecutive vectors divided by two; 14-period gate |
-| High-pass | 0/1/0 | `01`/`10`/`11` | canonical 0 | 0 | Removes DC; 80/15/320-period gate |
+| LPF1 | 0/0/0 | `00` unless used by 6D LPF2 | ODR/2 or ODR/4 | canonical 0 unless used by 6D LPF2 | DC-preserving; 14 discard periods plus one replacement period |
+| LPF2 | 1/0/0 | `00`/`01`/`10`/`11` | canonical 0 | 0 or 1 | DC-preserving; 40/80/15/320 discard periods plus one replacement period |
+| Slope | 0/1/0 | `00` | canonical 0 | 0 | Difference of consecutive vectors divided by two; 14 discard periods plus one replacement period |
+| High-pass | 0/1/0 | `01`/`10`/`11` | canonical 0 | 0 | Removes DC; 80/15/320 discard periods plus one replacement period |
 | Reference | 0/1/1 | canonical `01` | canonical 0 | 0 | Relative to captured vector; LPF1 gate and explicit first-output discard; no LPF2 on 6D |
 
 Contradictory host LPF2 and HP/slope selections are rejected, as are nondefault
@@ -132,8 +134,12 @@ maximum for the selected host/event path. Its smallest value, 14 periods,
 covers every documented Table 12/13 LPF1 transition: at most 13 basic samples
 plus one transition sample, or five for high-performance above-833 Hz changes.
 This is a policy envelope, not a claim that every configuration needs fourteen
-physical host reads. Filter gates use ceiling-rounded nominal periods and
-saturating arithmetic. At 1.6 Hz, LPF2 ODR/400 alone needs 200 seconds; CLI
+physical host reads. The gate then adds one complete output period, because
+an unread latest value at the end of the discard interval can still be the
+final rejected sample. This is conservative library policy; vendor table
+counts above remain unchanged. Filter gates use ceiling-rounded nominal
+periods and saturating arithmetic. At 1.6 Hz, LPF2 ODR/400 has a 200-second
+discard interval followed by a 625 ms replacement period; CLI
 operation deadlines must be derived from the profile rather than a fixed
 five-second assumption.
 
@@ -217,7 +223,8 @@ that sleep preserves a host calibration estimate. Source: AN5130 pp. 12,
 
 Library policy uses the power-down transition envelope when the previous state
 cannot be trusted: 70 ms plus this table in high-performance mode, or 70 ms
-plus one period in low-power/normal mode.
+plus one discard period in low-power/normal mode. An active gyro then receives
+one further output period to replace the last discarded output.
 That envelope also covers the documented two-sample active-to-high-performance
 and one-sample active-to-low-power transitions. Sleep retains the 70 ms base
 but is not an active sampling source. Applying this LPF envelope while HPF is
@@ -225,10 +232,21 @@ enabled may qualify other channels; it never proves HPF settling.
 
 ## BDU, Ready Flags, And Atomicity
 
-`CTRL3_C.BDU=1` protects each individual 16-bit LSB/MSB output pair. It does
-not make XYZ, accel+gyro, or motion+temperature one simultaneous sample. Burst
+`CTRL3_C.BDU=1` protects each individual 16-bit LSB/MSB output pair after the
+read of that pair starts, until both bytes are read. Entirely unread pairs
+continue to contain the most recent output; BDU does not retain the first
+output produced after a configuration change. It does not make XYZ, accel+gyro,
+or motion+temperature one simultaneous sample. Burst
 reads minimize skew, but same-cycle vector semantics require a separately
 validated DRDY/FIFO policy. Source: AN5130 section 4.4, p. 25.
+
+An interrupted output burst can leave a low byte held across configuration
+writes. Diagnostics therefore admit only whole output pairs. A new binding or
+failed output callback requires a confirmed complete output discard after
+replay verifies the bank, IF_INC and BDU, and before
+replay's fresh time gate; until released, managed output samples and calibration
+reject without I2C. Diagnostics and read-only reconciliation preserve this condition. See the
+[output-pair resolution](12_source_ambiguities.md#interrupted-output-reads-can-keep-a-bdu-pair-held).
 
 `CTRL4_C.DRDY_MASK` covers the documented accelerometer LPF1 and gyroscope LPF2
 settling paths. Its FIFO invalid markers (`0x7FFF`, `0x7FFE`, `0x7FFD`) apply

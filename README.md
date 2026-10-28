@@ -216,10 +216,10 @@ Total callback ceilings are part of the public contract:
 | Operation | Maximum transport callbacks |
 | --- | ---: |
 | Probe | 2 |
-| Configure | 110 worst case, including route masking/activation, reference discard, counter policy and active FIFO |
+| Configure | 111 worst case, including route masking/activation, reference discard, held-output release, counter policy and active FIFO |
 | Sample | 66 |
-| Reset or boot | 131 |
-| Recover | 130 |
+| Reset or boot | 132 |
+| Recover | 131 |
 | Reconcile | 35 |
 | Power-down | 17 worst case; 15 when already in the main bank |
 | Explicit counter reset | 7 |
@@ -238,8 +238,9 @@ that fault.
 Ready-checked sampling permits at most 65 STATUS reads; if readiness is still
 absent it fails `DATA_NOT_READY`, preserving the 66th callback for the burst
 when readiness succeeds. Reset and boot permit at most 16 command-bit read
-polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 99 callbacks for full
-counter policy/profile reapply/readback and optional FIFO/route activation. Their ceiling also includes the verified main-bank
+polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 100 callbacks for full
+counter policy/profile reapply/readback, possible held-output release and optional
+FIFO/route activation. Their ceiling also includes the verified main-bank
 clear, identity validation, gyroscope Power-Down, an explicitly active
 high-performance accelerometer, and command preparation; recovery instead
 includes a main-bank precheck and identity validation before those preparation
@@ -305,11 +306,20 @@ one clock-quantization tick. The owner can supply this fresh time with a
 zero-transaction-budget poll. Read-only reconciliation preserves an existing
 trusted validity timestamp and generation; untrusted state requires a new conservative gate.
 The source tables use the maximum documented transition requirement when the
-prior state is unknown. Reference initialization consumes one ready-checked
+prior state is unknown. One further output period allows the last discarded
+sample to be replaced before the gate qualifies output. Reference initialization consumes one ready-checked
 XYZ vector in bounded stages before publishing the configured state.
 Possible and confirmed consumption are reported separately. FIFO collection
 starts only after these gates; its initial per-sensor vectors are discarded
 by the FIFO owner, so late host reads never qualify pre-transition records.
+
+A failed output burst can leave a BDU byte pair held. Managed samples and
+calibration then reject until verified replay releases it. Configure
+and recovery reserve one conditional 14-byte discard before their fresh time
+gate, including after a new binding. Reconciliation stays read-only and does
+not clear a held-pair condition. Diagnostics cannot clear that condition either.
+Diagnostic output reads must contain complete
+16-bit pairs; single-byte output reads are rejected before I2C.
 
 `configGeneration` increments after a fully verified profile application or a
 verified power-down transition, never after a partial or ambiguous effect.
@@ -679,8 +689,9 @@ sensor-power-down then self-test-disable sequence used by successful self-test
 completion.
 The owner-visible primary-failure boundary occurs after that cleanup and before
 full-profile restoration. The callback ceiling is
-`16 * (samples + 1) + 126`, including one extra failure-cleanup callback
-and the maximum counter-policy and reference-discard restoration work.
+`16 * (samples + 1) + 130`, including three read-only preflight callbacks, one
+extra failure-cleanup callback, possible held-output release and the maximum
+counter-policy and reference-discard restoration work.
 Self-test temporarily removes the managed user-offset contribution, establishes
 the required sensor modes,
 and powers down the opposite sensor where required. A verified gyro-sleep
@@ -868,7 +879,8 @@ draft; it does not touch hardware until `profile apply`.
 
 Both CLIs include the profile's settling interval in configure, lifecycle
 replay, reconcile, and self-test restoration deadlines. For example, 1.6 Hz
-LP with LPF2 ODR/400 needs 200 seconds of settling alone. The derived budget
+LP with LPF2 ODR/400 needs 200 seconds of discard time plus a 625 ms replacement
+period. The derived budget
 adds clock quantization, bounded reference-discard waits, and bus/scheduling
 allowance, and saturates safely. Profile output prints the interval and budget.
 The allowance also reserves every permitted callback at the configured

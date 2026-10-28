@@ -158,6 +158,12 @@ physical gates and qualified gyro HPF require distinct evidence under
 [the support matrix](chip-reference/13_library_support_matrix.md); unsupported
 external datasets and unrelated event engines are outside this sequence.
 
+A fresh independent review of all four prompts from `fc8bdef` corrected
+self-test hardware preflight, the last-discarded-output timing boundary,
+possible BDU-held pairs after failed reads and common acknowledgement effects.
+The [independent audit record](prompts/README.md#independent-audit-of-prompts-01-04)
+records its scope and verification separately from the original implementations.
+
 Acceptance requires a typed replayable configuration with full validation and
 readback, bounded caller-buffer acquisition, exact fourth-dataset/pattern
 schema including temperature/step/timestamp interactions and rollover,

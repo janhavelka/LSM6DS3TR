@@ -832,25 +832,25 @@ void test_profile_cli_set_field_enforces_all_cross_field_rules_atomically() {
 
 void test_profile_cli_settle_budget_rounds_adds_and_saturates() {
   DeviceProfile profile{};
-  TEST_ASSERT_EQUAL_UINT32(5136, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(5146, profile_cli::settleBudgetMs(profile, 5000));
 
   profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
   profile.accelOdr = Odr::HZ_1_6;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(13751, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(14376, profile_cli::settleBudgetMs(profile, 5000));
   profile.accelFilter.lpf2Enabled = true;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(30001, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(30626, profile_cli::settleBudgetMs(profile, 5000));
   TEST_ASSERT_EQUAL_UINT32(
-      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 25000U));
+      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 25626U));
   TEST_ASSERT_EQUAL_UINT32(
-      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 24999U));
+      UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 25625U));
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
                           profile_cli::settleBudgetMs(profile, UINT32_MAX));
 
   profile.accelOdr = Odr::HZ_12_5;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(6201, profile_cli::settleBudgetMs(profile, 3000));
+  TEST_ASSERT_EQUAL_UINT32(6281, profile_cli::settleBudgetMs(profile, 3000));
   profile.accelOdr = Odr::POWER_DOWN;
   profile.gyroOdr = Odr::POWER_DOWN;
   assertValid(profile);
@@ -1314,8 +1314,10 @@ void test_profile_cli_event_selection_uses_only_configured_engines() {
 }
 
 void test_profile_cli_callback_and_sample_budgets_bound_and_saturate() {
-  TEST_ASSERT_EQUAL_UINT32(10500, profile_cli::callbackBudgetMs(110, 50, 5000));
-  TEST_ASSERT_EQUAL_UINT32(11550, profile_cli::callbackBudgetMs(131, 50, 5000));
+  TEST_ASSERT_EQUAL_UINT32(10550,
+      profile_cli::callbackBudgetMs(MAX_CONFIGURE_TRANSACTIONS, 50, 5000));
+  TEST_ASSERT_EQUAL_UINT32(11600,
+      profile_cli::callbackBudgetMs(MAX_RESET_TRANSACTIONS, 50, 5000));
   TEST_ASSERT_EQUAL_UINT32(0, profile_cli::callbackBudgetMs(0, 50, 0));
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::callbackBudgetMs(UINT32_MAX, UINT32_MAX, UINT32_MAX));
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::callbackBudgetMs(1, UINT32_MAX, 1));

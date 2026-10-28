@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserves the actual verified filter profile and separate restoration failure.
 - Extend source-backed timing across HPCF/FTYPE codes while preserving default
   encodings and trusted-reconcile gates. Configure/reset/recover ceilings are
-  110/131/130; self-test reserves `16 * (samples + 1) + 126` callbacks.
+  111/132/131; self-test reserves `16 * (samples + 1) + 130` callbacks.
   Filter transient and 6D physical qualification remain **NOT RUN**.
 
 
@@ -92,6 +92,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Self-test now proves the current main bank, chip identity and FIFO Bypass
+  before its first write. Failed preflight leaves hardware untouched; observed
+  contradictions invalidate configuration provenance.
+- Filter qualification waits one further output period after the vendor discard
+  interval so the last rejected output has been replaced, including slow ODRs.
+  Clarified that BDU locks a pair only after its read begins.
+- Failed output reads retain possible BDU-held data evidence. Replay releases
+  those pairs with one bounded discard before arming qualification; incomplete
+  diagnostic output-pair ranges are rejected before I/O.
+- Sample and calibration output reads now report their possible DRDY
+  acknowledgement through the common hardware-effect flag, including ambiguous
+  failed reads, without invalidating the verified configuration.
+- FIFO bursts respect output-address rounding when reporting read side effects;
+  long bursts no longer claim acknowledgement of later embedded-event sources.
 - Included profile settling in both CLI examples' configure, reset/boot/
   recovery, reconcile, and self-test restoration deadlines, so supported slow
   profiles no longer time out solely because their settling exceeds a fixed
