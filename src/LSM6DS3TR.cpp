@@ -17,7 +17,7 @@ constexpr uint64_t SELF_TEST_ACCEL_SETTLE_MS = 100;
 constexpr uint64_t SELF_TEST_GYRO_SETTLE_MS = 150;
 constexpr uint64_t SELF_TEST_GYRO_STIMULUS_SETTLE_MS = 50;
 constexpr uint64_t CLOCK_QUANTIZATION_MARGIN_MS = 1;
-constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 122;
+constexpr uint32_t SELF_TEST_FIXED_TRANSACTIONS = 126;
 // Datasheet pp.97/103/104: fixed bank-A pedometer policy, modified only in
 // proved sensor power-down. No sensor-hub or general embedded-bank API.
 constexpr uint8_t PEDOMETER_REGISTERS[] = {0x0F, 0x14, 0x15};
@@ -154,12 +154,22 @@ bool validHpf(GyroHpfMode mode) {
   return static_cast<uint8_t>(mode) <= static_cast<uint8_t>(GyroHpfMode::HZ_1_040);
 }
 
+bool validFilterEnums(const AccelFilterConfig& accel, const GyroFilterConfig& gyro) {
+  return validHpf(gyro.highPassMode) &&
+      static_cast<uint8_t>(gyro.lpf1Bandwidth) <= 3U &&
+      static_cast<uint8_t>(accel.hpcf) <= 3U &&
+      static_cast<uint8_t>(accel.lpf1Bandwidth) <= 1U &&
+      static_cast<uint8_t>(accel.compositeInput) <= 1U &&
+      static_cast<uint8_t>(accel.analogBandwidth) <= 1U;
+}
+
 bool validSampleQuality(SampleQuality quality) {
   switch (quality) {
     case SampleQuality::READY_CHECKED:
     case SampleQuality::DIRECT_UNVERIFIED:
     case SampleQuality::CONFIG_UNKNOWN:
     case SampleQuality::SETTLING:
+    case SampleQuality::FILTER_UNVERIFIED:
       return true;
     default:
       return false;
@@ -167,17 +177,25 @@ bool validSampleQuality(SampleQuality quality) {
 }
 
 uint16_t gyroSettleSamples(const DeviceProfile& profile) {
-  // buildCtrl6() never sets CTRL6_C.FTYPE, so this device runs FTYPE=00 only.
-  // LPF1 off -> AN5130 Table 15; LPF1 on -> the FTYPE=00 column of AN5130
-  // Table 16. Not a generic LPF1 bound: FTYPE 01/10 raise 208/416/833 Hz.
+  // AN5130 Tables 15/16 exclude HPF. This bounds only the qualified LPF path.
+  if (profile.gyroPowerMode == GyroPowerMode::LOW_POWER_NORMAL) return 1;
+  const uint8_t ftype = static_cast<uint8_t>(profile.gyroFilter.lpf1Bandwidth);
+  if (ftype > 3U) return 0;
+  static constexpr uint16_t LPF1_COUNTS[10][4] = {
+      {2, 2, 2, 2}, {3, 3, 3, 3}, {3, 3, 3, 3}, {4, 4, 4, 4},
+      {4, 4, 5, 4}, {5, 6, 6, 5}, {7, 8, 9, 6},
+      {135, 135, 135, 135}, {270, 270, 270, 270}, {540, 540, 540, 540}};
+  const uint8_t odr = static_cast<uint8_t>(profile.gyroOdr);
+  if (profile.gyroFilter.lpf1Enabled && odr >= 1U && odr <= 10U)
+    return LPF1_COUNTS[odr - 1U][ftype];
   switch (profile.gyroOdr) {
     case Odr::HZ_12_5: return 2;
     case Odr::HZ_26: return 3;
     case Odr::HZ_52: return 3;
-    case Odr::HZ_104: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
-    case Odr::HZ_208: return profile.gyroFilter.lpf1Enabled ? 4 : 3;
-    case Odr::HZ_416: return profile.gyroFilter.lpf1Enabled ? 5 : 3;
-    case Odr::HZ_833: return profile.gyroFilter.lpf1Enabled ? 7 : 3;
+    case Odr::HZ_104:
+    case Odr::HZ_208:
+    case Odr::HZ_416:
+    case Odr::HZ_833: return 3;
     case Odr::HZ_1660: return 135;
     case Odr::HZ_3330: return 270;
     case Odr::HZ_6660: return 540;
@@ -374,7 +392,11 @@ uint8_t buildFifoCtrl5(const DeviceProfile& profile) {
 
 uint8_t buildCtrl1(const DeviceProfile& profile) {
   return static_cast<uint8_t>((static_cast<uint8_t>(profile.accelOdr) << cmd::BIT_ODR_XL) |
-                              (static_cast<uint8_t>(profile.accelFullScale) << cmd::BIT_FS_XL));
+      (static_cast<uint8_t>(profile.accelFullScale) << cmd::BIT_FS_XL) |
+      (profile.accelFilter.lpf1Bandwidth == AccelLpf1Bandwidth::ODR_DIV_4
+           ? cmd::MASK_LPF1_BW_SEL : 0U) |
+      (profile.accelFilter.analogBandwidth == AccelAnalogBandwidth::HZ_400
+           ? cmd::MASK_BW0_XL : 0U));
 }
 
 uint8_t buildCtrl2(const DeviceProfile& profile) {
@@ -415,7 +437,8 @@ uint8_t buildCtrl6(const DeviceProfile& profile) {
            : 0U) |
       (profile.accelOffsetWeight == AccelOffsetWeight::MG_16
            ? cmd::MASK_USR_OFF_W
-           : 0U));
+           : 0U) |
+      static_cast<uint8_t>(profile.gyroFilter.lpf1Bandwidth));
 }
 
 uint8_t buildCtrl7(const DeviceProfile& profile) {
@@ -430,6 +453,10 @@ uint8_t buildCtrl7(const DeviceProfile& profile) {
 uint8_t buildCtrl8(const DeviceProfile& profile) {
   return static_cast<uint8_t>(
       (profile.accelFilter.lpf2Enabled ? cmd::MASK_LPF2_XL_EN : 0U) |
+      (static_cast<uint8_t>(profile.accelFilter.hpcf) << cmd::BIT_HPCF_XL) |
+      (profile.accelFilter.referenceEnabled ? cmd::MASK_HP_REF_MODE : 0U) |
+      (profile.accelFilter.compositeInput == AccelCompositeInput::LOW_NOISE
+           ? cmd::MASK_INPUT_COMPOSITE : 0U) |
       (profile.accelFilter.highPassSlopeEnabled ? cmd::MASK_HP_SLOPE_XL_EN : 0U) |
       (profile.accelFilter.lowPassOn6d ? cmd::MASK_LOW_PASS_ON_6D : 0U));
 }
@@ -506,7 +533,7 @@ Status validateProfile(const DeviceProfile& profile) {
       !validGyroFs(profile.gyroFullScale) ||
       !accelOdrAllowed(profile.accelOdr, profile.accelPowerMode) ||
       !gyroOdrAllowed(profile.gyroOdr, profile.gyroPowerMode) ||
-      !validHpf(profile.gyroFilter.highPassMode) ||
+      !validFilterEnums(profile.accelFilter, profile.gyroFilter) ||
       !validOffsetWeight(profile.accelOffsetWeight)) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported ODR, range, power, or filter");
   }
@@ -525,16 +552,41 @@ Status validateProfile(const DeviceProfile& profile) {
     return Status::Error(Err::UNSUPPORTED_PROFILE,
                          "Gyroscope filters require high-performance mode");
   }
-  if (profile.gyroFilter.highPassEnabled) {
-    return Status::Error(
-        Err::UNSUPPORTED_PROFILE,
-        "Gyroscope high-pass settling is not a production profile contract");
+  const AccelFilterConfig& accel = profile.accelFilter;
+  const GyroFilterConfig& gyro = profile.gyroFilter;
+  if ((!gyro.lpf1Enabled && gyro.lpf1Bandwidth != GyroLpf1Bandwidth::FTYPE_00) ||
+      (!gyro.highPassEnabled && gyro.highPassMode != GyroHpfMode::HZ_0_016)) {
+    return Status::Error(Err::INVALID_CONFIG, "Bypassed gyro filters require default bandwidths");
   }
-  if (profile.accelFilter.highPassSlopeEnabled ||
-      profile.accelFilter.lowPassOn6d) {
-    return Status::Error(
-        Err::UNSUPPORTED_PROFILE,
-        "Slope/high-pass output and 6D filtering are not production sample profiles");
+  if (gyro.highPassEnabled &&
+      (profile.gyroOdr == Odr::POWER_DOWN || profile.gyroSleepEnabled ||
+       profile.fifo.gyroDecimation != FifoDecimation::OFF)) {
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "Gyro HPF requires active direct unqualified output; FIFO is qualified only");
+  }
+  if ((accel.lpf2Enabled && accel.highPassSlopeEnabled) ||
+      ((accel.lpf2Enabled || accel.highPassSlopeEnabled) &&
+       accel.lpf1Bandwidth != AccelLpf1Bandwidth::ODR_DIV_2) ||
+      (accel.highPassSlopeEnabled && accel.compositeInput != AccelCompositeInput::LOW_LATENCY) ||
+      (!accel.lpf2Enabled && !accel.highPassSlopeEnabled && !accel.lowPassOn6d &&
+       (accel.hpcf != AccelHpcf::DIV_50 ||
+        accel.compositeInput != AccelCompositeInput::LOW_LATENCY)) ||
+      (accel.referenceEnabled &&
+       (!accel.highPassSlopeEnabled || accel.lpf2Enabled || accel.lowPassOn6d ||
+        accel.hpcf != AccelHpcf::DIV_100))) {
+    return Status::Error(Err::INVALID_CONFIG, "Contradictory accelerometer filter path or inactive setting");
+  }
+  if (accel.analogBandwidth == AccelAnalogBandwidth::HZ_400 &&
+      (profile.accelPowerMode != AccelPowerMode::HIGH_PERFORMANCE ||
+       profile.accelOdr < Odr::HZ_1660 || profile.accelOdr > Odr::HZ_6660)) {
+    return Status::Error(Err::INVALID_CONFIG, "Forced analog bandwidth requires high-performance high ODR");
+  }
+  if (accel.referenceEnabled && profile.accelOdr == Odr::POWER_DOWN) {
+    return Status::Error(Err::INVALID_CONFIG, "Reference capture requires active accelerometer");
+  }
+  if (accel.lowPassOn6d &&
+      (!profile.interrupts.enabled || profile.interrupts.orientation.mode == OrientationMode::OFF)) {
+    return Status::Error(Err::INVALID_CONFIG, "6D low-pass selection requires the orientation owner");
   }
   const InterruptProfile& interrupts = profile.interrupts;
   if (static_cast<uint8_t>(interrupts.polarity) > 1U ||
@@ -716,10 +768,21 @@ uint64_t odrPeriodUs(Odr odr) {
 }
 
 uint64_t requiredSettleUs(const DeviceProfile& profile) {
+  // Invalid enum values must not index tables or manufacture a finite gate.
+  if (!validateProfile(profile).ok()) return std::numeric_limits<uint64_t>::max();
   uint64_t settle = 0U;
   const uint64_t accelPeriod = odrPeriodUs(profile.accelOdr);
   if (accelPeriod != 0U) {
-    const uint64_t accelSamples = profile.accelFilter.lpf2Enabled ? 40U : 14U;
+    // AN5130 Table 9's minimum 14 bounds Table 13's worst transition
+    // (13 + one extra cross-mode/ODR discard). LPF2 is independent for 6D.
+    static constexpr uint16_t LPF2_COUNTS[] = {40, 80, 15, 320};
+    static constexpr uint16_t HP_COUNTS[] = {14, 80, 15, 320};
+    const AccelFilterConfig& filter = profile.accelFilter;
+    const uint8_t hpcf = static_cast<uint8_t>(filter.hpcf);
+    uint64_t accelSamples = filter.highPassSlopeEnabled && !filter.referenceEnabled
+                               ? HP_COUNTS[hpcf] : 14U;
+    if ((filter.lpf2Enabled || filter.lowPassOn6d) && LPF2_COUNTS[hpcf] > accelSamples)
+      accelSamples = LPF2_COUNTS[hpcf];
     settle = saturatingMultiply(accelPeriod, accelSamples);
   }
   if (profile.gyroOdr != Odr::POWER_DOWN) {
@@ -735,11 +798,32 @@ uint64_t requiredSettleUs(const DeviceProfile& profile) {
   return settle;
 }
 
+FilterProvenance filterProvenance(const DeviceProfile& profile) {
+  FilterProvenance result{};
+  result.accel = profile.accelFilter;
+  result.gyro = profile.gyroFilter;
+  result.accelOdr = profile.accelOdr;
+  result.gyroOdr = profile.gyroOdr;
+  result.accelPowerMode = profile.accelPowerMode;
+  result.gyroPowerMode = profile.gyroPowerMode;
+  return result;
+}
+
+uint8_t qualifiedQuantityMask(const DeviceProfile& profile) {
+  uint8_t result = 0;
+  if (profile.accelOdr != Odr::POWER_DOWN) result |= SAMPLE_ACCELERATION;
+  if (profile.gyroOdr != Odr::POWER_DOWN && !profile.gyroSleepEnabled &&
+      !profile.gyroFilter.highPassEnabled) result |= SAMPLE_ANGULAR_RATE;
+  if (profile.accelOdr != Odr::POWER_DOWN || profile.gyroOdr != Odr::POWER_DOWN)
+    result |= SAMPLE_TEMPERATURE;
+  return result;
+}
+
 uint32_t maximumSelfTestTransactions(uint16_t samples) {
   if (samples < SELF_TEST_MIN_SAMPLES || samples > SELF_TEST_MAX_SAMPLES) return 0U;
   // Each sample reserves three ready checks and one burst in four phases.
   // Fixed work reserves the 20 normal test writes, one failure-cleanup write,
-  // and the 66-callback profile restore.
+  // route-mask proof, and the 97-callback profile restore including reference discard.
   return 16U * (static_cast<uint32_t>(samples) + SELF_TEST_DISCARD_SAMPLES) +
          SELF_TEST_FIXED_TRANSACTIONS;
 }
@@ -815,11 +899,23 @@ int32_t decodeTemperatureMilliC(int16_t raw) {
 Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
   const bool qualityConsistent =
       (raw.quality != SampleQuality::READY_CHECKED ||
-       raw.freshMask == raw.validMask) &&
+       (raw.freshMask == raw.validMask &&
+        (raw.qualifiedMask & raw.validMask) == raw.validMask)) &&
       (raw.quality != SampleQuality::DIRECT_UNVERIFIED ||
-       raw.freshMask == 0U);
+       (raw.freshMask == 0U &&
+        (raw.qualifiedMask & raw.validMask) == raw.validMask)) &&
+      (raw.quality != SampleQuality::FILTER_UNVERIFIED ||
+       (raw.freshMask == 0U && raw.filters.gyro.highPassEnabled &&
+        (raw.validMask & SAMPLE_ANGULAR_RATE) != 0U &&
+        (raw.qualifiedMask & SAMPLE_ANGULAR_RATE) == 0U));
   if (raw.validMask == 0U || (raw.validMask & ~SAMPLE_ALL) != 0U ||
       (raw.freshMask & ~raw.validMask) != 0U ||
+      (raw.qualifiedMask & ~SAMPLE_ALL) != 0U ||
+      !validFilterEnums(raw.filters.accel, raw.filters.gyro) ||
+      !accelOdrAllowed(raw.filters.accelOdr, raw.filters.accelPowerMode) ||
+      !gyroOdrAllowed(raw.filters.gyroOdr, raw.filters.gyroPowerMode) ||
+      (raw.filters.gyro.highPassEnabled &&
+       (raw.validMask & raw.qualifiedMask & SAMPLE_ANGULAR_RATE) != 0U) ||
       !validSampleQuality(raw.quality) || !qualityConsistent) {
     return Status::Error(Err::INVALID_PARAM, "Invalid raw sample provenance");
   }
@@ -830,6 +926,8 @@ Status convertSample(const RawSampleResult& raw, ConvertedSample& out) {
   candidate.sequence = raw.sequence;
   candidate.configGeneration = raw.configGeneration;
   candidate.readUptimeMs = raw.readUptimeMs;
+  candidate.filters = raw.filters;
+  candidate.qualifiedMask = raw.qualifiedMask;
   if ((raw.validMask & SAMPLE_ACCELERATION) != 0U) {
     const Status status =
         decodeAcceleration(raw.accel, raw.accelFullScale, candidate.accelMicroG);
@@ -994,6 +1092,10 @@ Status LSM6DS3TR::_start(JobKind kind, const OperationTiming& timing,
   _routeMaskStep = 0;
   _routeEnableStep = 0;
   _workingResult.events.configGeneration = _configGeneration;
+  if (_hasVerifiedProfile) {
+    _workingResult.events.filters = filterProvenance(_verifiedProfile);
+    _workingResult.events.qualifiedMask = qualifiedQuantityMask(_verifiedProfile);
+  }
   return inProgressStatus();
 }
 
@@ -1019,12 +1121,14 @@ Status LSM6DS3TR::startConfigure(const DeviceProfile& profile,
   return status;
 }
 
-Status LSM6DS3TR::_checkReadyForKnownConfiguration(uint64_t nowMs) const {
+Status LSM6DS3TR::_checkReadyForVerifiedConfiguration(uint64_t nowMs) const {
   const ConfigurationState state = configurationState(nowMs);
   if (state == ConfigurationState::SETTLING) {
     return Status::Error(Err::SETTLING, "Configuration is settling");
   }
-  if (state != ConfigurationState::KNOWN || !_hasVerifiedProfile) {
+  if ((state != ConfigurationState::KNOWN &&
+       state != ConfigurationState::FILTER_UNQUALIFIED) ||
+      !_hasVerifiedProfile) {
     return Status::Error(Err::CONFIGURATION_UNKNOWN, "Configuration is not verified");
   }
   return Status::Ok();
@@ -1050,8 +1154,13 @@ Status LSM6DS3TR::startSample(const SampleRequest& request,
   if (request.quantityMask == 0U || (request.quantityMask & ~SAMPLE_ALL) != 0U) {
     return Status::Error(Err::INVALID_PARAM, "Invalid sample quantity mask");
   }
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  if (request.allowUnqualifiedFilter && request.checkDataReady)
+    return Status::Error(Err::INVALID_PARAM, "Unqualified filters require an explicit direct read");
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
+  if ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
+      _verifiedProfile.gyroFilter.highPassEnabled && !request.allowUnqualifiedFilter)
+    return Status::Error(Err::UNSUPPORTED_PROFILE, "Gyro HPF has no qualified settling rule");
   if (((request.quantityMask & SAMPLE_ACCELERATION) != 0U &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
       ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
@@ -1131,10 +1240,11 @@ Status LSM6DS3TR::startReconcile(const OperationTiming& timing,
   if (!_hasDesiredProfile) {
     return Status::Error(Err::CONFIGURATION_UNKNOWN, "No desired profile to reconcile");
   }
-  if ((fifoCollecting(_desiredProfile) || counterProfile(_desiredProfile)) &&
+  if ((fifoCollecting(_desiredProfile) || counterProfile(_desiredProfile) ||
+       _desiredProfile.accelFilter.referenceEnabled) &&
       !_hasVerifiedProfile) {
     return Status::Error(Err::FIFO_MAINTENANCE_REQUIRED,
-                         "Readback cannot establish buffered FIFO provenance");
+                         "Readback cannot establish FIFO or reference-discard provenance");
   }
   const Status status = _start(JobKind::RECONCILE, timing, token);
   if (status.inProgress()) {
@@ -1164,7 +1274,7 @@ Status LSM6DS3TR::startSelfTest(const SelfTestRequest& request,
       request.samples > SELF_TEST_MAX_SAMPLES) {
     return Status::Error(Err::INVALID_PARAM, "Self-test samples must be 5..100");
   }
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
   if (fifoCollecting(_verifiedProfile)) {
     return Status::Error(Err::FIFO_MAINTENANCE_REQUIRED,
@@ -1190,7 +1300,7 @@ Status LSM6DS3TR::startCalibration(const CalibrationRequest& request,
   if (!admission.ok()) return admission;
   const Status validation = validateCalibrationRequest(request);
   if (!validation.ok()) return validation;
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
   if ((request.kind == CalibrationKind::ACCELEROMETER_BIAS &&
        _verifiedProfile.accelOdr == Odr::POWER_DOWN) ||
@@ -1200,6 +1310,12 @@ Status LSM6DS3TR::startCalibration(const CalibrationRequest& request,
     return Status::Error(Err::INVALID_PARAM,
                          "Calibration sensor is powered down or sleeping");
   }
+  if ((request.kind == CalibrationKind::ACCELEROMETER_BIAS &&
+       _verifiedProfile.accelFilter.highPassSlopeEnabled) ||
+      (request.kind == CalibrationKind::GYROSCOPE_BIAS &&
+       _verifiedProfile.gyroFilter.highPassEnabled))
+    return Status::Error(Err::UNSUPPORTED_PROFILE,
+                         "Bias estimation requires a DC-preserving sensor path");
   const Status status = _start(JobKind::CALIBRATION, timing, token);
   if (status.inProgress()) {
     _operationTransactionLimit = maximumCalibrationTransactions(request.samples);
@@ -1250,7 +1366,7 @@ Status LSM6DS3TR::startFifoRead(const FifoReadRequest& request,
       request.capacity > FIFO_CAPACITY_WORDS / 3U ||
       maximumFifoReadTransactions(request.maxWords) == 0U)
     return Status::Error(Err::INVALID_PARAM, "Invalid FIFO output buffer or word bound");
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
   if (!_verifiedProfile.fifo.enabled ||
       _verifiedProfile.fifo.mode == FifoMode::BYPASS)
@@ -1425,7 +1541,7 @@ Status LSM6DS3TR::startEventRead(const EventReadRequest& request,
       (request.embedded ? EVENT_EMBEDDED : 0U) | (request.orientation ? EVENT_ORIENTATION : 0U));
   if (requested == 0U)
     return Status::Error(Err::INVALID_PARAM, "Select at least one event source group");
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
   if ((request.fifo && !_verifiedProfile.fifo.enabled) ||
       (request.embedded && !counterProfile(_verifiedProfile)) ||
@@ -1537,7 +1653,7 @@ Status LSM6DS3TR::startCounterReset(const CounterResetRequest& request,
   if (!admission.ok()) return admission;
   if (!request.timestamp && !request.steps)
     return Status::Error(Err::INVALID_PARAM, "Select at least one counter reset");
-  const Status ready = _checkReadyForKnownConfiguration(timing.nowMs);
+  const Status ready = _checkReadyForVerifiedConfiguration(timing.nowMs);
   if (!ready.ok()) return ready;
   if (!counterProfile(_verifiedProfile))
     return Status::Error(Err::UNSUPPORTED_PROFILE, "Counter reset requires timestamp/step profile");
@@ -1702,7 +1818,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
                                     ? _selfTestRestoreProfile : _desiredProfile;
   const bool activateFifo = !reconcileOnly && fifoCollecting(target);
   const bool activateRoutes = !reconcileOnly && target.interrupts.enabled;
-  const bool deferCommit = activateFifo || activateRoutes;
+  const bool discardReference = !reconcileOnly && target.accelFilter.referenceEnabled;
+  const bool deferCommit = activateFifo || activateRoutes || discardReference;
   if (((!reconcileOnly && _job == JobKind::CONFIGURE) ||
        (reconcileOnly && _job == JobKind::RECONCILE)) &&
       _substep == 0U) {
@@ -1885,7 +2002,8 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
     uint64_t settleMs = 0U;
     const bool priorGateTrusted =
         _configurationStateBeforeOperation == ConfigurationState::KNOWN ||
-        _configurationStateBeforeOperation == ConfigurationState::SETTLING;
+        _configurationStateBeforeOperation == ConfigurationState::SETTLING ||
+        _configurationStateBeforeOperation == ConfigurationState::FILTER_UNQUALIFIED;
     if (reconcileOnly && priorGateTrusted) {
       _validAfterUptimeMs = _validAfterBeforeOperationMs;
       _configurationState = _configurationStateBeforeOperation;
@@ -1903,6 +2021,7 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
                                              : ConfigurationState::SETTLING;
     }
     _configurationMayBeUnknown = deferCommit;
+    _readyPolls = 0;
     _step = CONFIGURE_SETTLE_WAIT;
     if (settleMs != 0U) {
       _waiting = true;
@@ -1913,6 +2032,58 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
   if (_step == CONFIGURE_SETTLE_WAIT &&
       nowMs < _validAfterUptimeMs) {
     _waiting = true;
+    return inProgressStatus();
+  }
+  // Reference mode latches a vector. Consume its first output explicitly;
+  // elapsed time cannot remove it from BDU-protected output registers. FIFO
+  // remains Bypass until this phase and a fresh output period have completed.
+  if (_step == CONFIGURE_REFERENCE_ARM) {
+    const uint64_t periodUs = odrPeriodUs(target.accelOdr);
+    _waitUntilMs = saturatingAdd(nowMs, (periodUs + 999U) / 1000U +
+                                         CLOCK_QUANTIZATION_MARGIN_MS);
+    if (_workingResult.configuration.referenceDiscardConfirmed) {
+      _validAfterUptimeMs = _waitUntilMs;
+      _step = CONFIGURE_SETTLE_WAIT;
+    } else {
+      _step = CONFIGURE_REFERENCE_READY;
+    }
+    _waiting = true;
+    return inProgressStatus();
+  }
+  if (_step == CONFIGURE_REFERENCE_READY) {
+    if (nowMs < _waitUntilMs) {
+      _waiting = true;
+      return inProgressStatus();
+    }
+    uint8_t statusReg = 0;
+    const Status status = _read(cmd::REG_STATUS_REG, &statusReg, 1, nowMs);
+    if (!status.ok()) return status;
+    if ((statusReg & cmd::MASK_XLDA) == 0U) {
+      if (++_readyPolls >= 3U)
+        return Status::Error(Err::DATA_NOT_READY, "Reference discard was not ready in three checks");
+      _step = CONFIGURE_REFERENCE_ARM;
+      _pollBoundary = true;
+    } else {
+      _step = CONFIGURE_REFERENCE_READ;
+    }
+    return inProgressStatus();
+  }
+  if (_step == CONFIGURE_REFERENCE_READ) {
+    uint8_t discarded[6] = {};
+    const uint32_t before = _operationTransactions;
+    const Status status = _read(cmd::REG_DATA_START_ACCEL, discarded, sizeof(discarded), nowMs);
+    _workingResult.configuration.referenceDiscardMayHaveOccurred =
+        _operationTransactions != before;
+    if (!status.ok()) return status;
+    _workingResult.configuration.referenceDiscardConfirmed = true;
+    _step = CONFIGURE_REFERENCE_ARM;
+    _pollBoundary = true;
+    return inProgressStatus();
+  }
+  if (_step == CONFIGURE_SETTLE_WAIT && discardReference &&
+      !_workingResult.configuration.referenceDiscardConfirmed) {
+    _step = CONFIGURE_REFERENCE_READY;
+    _waitUntilMs = 0;
     return inProgressStatus();
   }
   if (_step == CONFIGURE_SETTLE_WAIT && !activateFifo) {
@@ -1975,7 +2146,9 @@ Status LSM6DS3TR::_stepConfigure(uint64_t nowMs, bool reconcileOnly) {
         (target.fifo.accelDecimation != FifoDecimation::OFF ? SAMPLE_ACCELERATION : 0U)) : 0U;
     _fifoContinuityLost = false;
   }
-  _configurationState = ConfigurationState::KNOWN;
+  _configurationState = target.gyroFilter.highPassEnabled
+                            ? ConfigurationState::FILTER_UNQUALIFIED
+                            : ConfigurationState::KNOWN;
   if (_job == JobKind::SELF_TEST) {
     _workingResult.selfTest.primaryStatus = _primaryStatus;
     _workingResult.selfTest.restorationStatus = Status::Ok();
@@ -2057,6 +2230,10 @@ Status LSM6DS3TR::_stepSample(uint64_t nowMs) {
   sample.readUptimeMs = nowMs;
   sample.accelFullScale = _verifiedProfile.accelFullScale;
   sample.gyroFullScale = _verifiedProfile.gyroFullScale;
+  sample.filters = filterProvenance(_verifiedProfile);
+  sample.qualifiedMask = static_cast<uint8_t>(sample.validMask & qualifiedQuantityMask(_verifiedProfile));
+  if (sample.qualifiedMask != sample.validMask)
+    sample.quality = SampleQuality::FILTER_UNVERIFIED;
   return _finish(Status::Ok(), OperationState::SUCCEEDED);
 }
 
@@ -2487,6 +2664,7 @@ Status LSM6DS3TR::_stepSelfTest(uint64_t nowMs) {
     DeviceProfile testProfile = _selfTestRestoreProfile;
     testProfile.accelOdr = Odr::HZ_52;
     testProfile.accelFullScale = AccelFs::G_4;
+    testProfile.accelFilter = {};  // AN5130 requires the exact unfiltered CTRL1_XL=0x38.
     const Status status =
         _writeByte(cmd::REG_CTRL1_XL, buildCtrl1(testProfile), nowMs);
     if (!status.ok()) return routeFailureToRestore(status);
@@ -2730,6 +2908,8 @@ Status LSM6DS3TR::_stepCalibration(uint64_t nowMs) {
 
   CalibrationResult& result = _workingResult.calibration;
   result.kind = _calibrationRequest.kind;
+  result.configGeneration = _configGeneration;
+  result.filters = filterProvenance(_verifiedProfile);
   result.samples = _samplesDone;
   if (accel) {
     int32_t sensitivity = 0;
@@ -2926,6 +3106,8 @@ Status LSM6DS3TR::_stepFifoRead(uint64_t nowMs) {
         record.accelFullScale = _verifiedProfile.accelFullScale;
         record.gyroFullScale = _verifiedProfile.gyroFullScale;
         record.kind = word.kind;
+        record.filters = filterProvenance(_verifiedProfile);
+        record.qualifiedMask = static_cast<uint8_t>(word.quantityMask & qualifiedQuantityMask(_verifiedProfile));
         if (word.kind == FifoRecordKind::TEMPERATURE) {
           // AN5130 Table 74: only bytes 2/3 are temperature. The other two
           // words are unused, and a FIFO trigger proves no new conversion.
@@ -3151,7 +3333,9 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
   if (_job == JobKind::FIFO_PURGE) _breakCounterContinuity();
   if (_configurationState == ConfigurationState::SETTLING &&
       _pollNowMs >= _validAfterUptimeMs) {
-    _configurationState = ConfigurationState::KNOWN;
+    _configurationState = _verifiedProfile.gyroFilter.highPassEnabled
+                              ? ConfigurationState::FILTER_UNQUALIFIED
+                              : ConfigurationState::KNOWN;
   }
   _workingResult.status = status;
   _workingResult.state = state;
@@ -3162,6 +3346,11 @@ Status LSM6DS3TR::_finish(const Status& status, OperationState state) {
   _workingResult.configuration.state = configurationState(_pollNowMs);
   _workingResult.configuration.generation = _configGeneration;
   _workingResult.configuration.validAfterUptimeMs = _validAfterUptimeMs;
+  const ConfigurationState terminalConfig = configurationState(_pollNowMs);
+  _workingResult.configuration.qualifiedMask =
+      _hasVerifiedProfile && (terminalConfig == ConfigurationState::KNOWN ||
+                              terminalConfig == ConfigurationState::FILTER_UNQUALIFIED)
+          ? qualifiedQuantityMask(_verifiedProfile) : 0U;
   _workingResult.counters.epoch = _counterEpoch;
   _workingResult.counters.continuityLost = _counterContinuityLost;
   _workingResult.registerBankMayBeUnknown = _bankMayBeUnknown;
@@ -3328,7 +3517,7 @@ PollResult LSM6DS3TR::poll(uint64_t nowMs, uint8_t maxTransactions) {
         target.interrupts.enabled && _routeEnableStep < 8U;
     const bool configurationCompute =
         (_step == CONFIGURE_SETTLE_ARM && !counterWorkPending) ||
-        _step == CONFIGURE_SETTLE_WAIT ||
+        _step == CONFIGURE_SETTLE_WAIT || _step == CONFIGURE_REFERENCE_ARM ||
         (_step == CONFIGURE_COMMIT && !routeWorkPending);
     bool safeComputeStep = false;
     if (_job == JobKind::EVENT_READ &&
@@ -3484,7 +3673,8 @@ Status LSM6DS3TR::takeResult(OperationToken token, OperationResult& out) {
 ConfigurationState LSM6DS3TR::configurationState(uint64_t nowMs) const {
   if (_configurationState == ConfigurationState::SETTLING &&
       nowMs >= _validAfterUptimeMs) {
-    return ConfigurationState::KNOWN;
+    return _verifiedProfile.gyroFilter.highPassEnabled
+               ? ConfigurationState::FILTER_UNQUALIFIED : ConfigurationState::KNOWN;
   }
   return _configurationState;
 }
@@ -3500,7 +3690,9 @@ Status LSM6DS3TR::getDesiredProfile(DeviceProfile& out) const {
 
 Status LSM6DS3TR::getVerifiedProfile(DeviceProfile& out, uint64_t nowMs) const {
   if (!_bound) return Status::Error(Err::NOT_BOUND, "Driver is not bound");
-  if (!_hasVerifiedProfile || configurationState(nowMs) != ConfigurationState::KNOWN) {
+  const ConfigurationState state = configurationState(nowMs);
+  if (!_hasVerifiedProfile || (state != ConfigurationState::KNOWN &&
+                               state != ConfigurationState::FILTER_UNQUALIFIED)) {
     return Status::Error(configurationState(nowMs) == ConfigurationState::SETTLING
                              ? Err::SETTLING
                              : Err::CONFIGURATION_UNKNOWN,

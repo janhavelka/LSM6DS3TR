@@ -8,6 +8,10 @@
 |---|---|---|
 | I2C addresses `0x6A` / `0x6B`, WHO_AM_I | supported | `DriverConfig`, `startProbe`, identity checks in destructive flows |
 | Accelerometer/gyro ODR, full scale, admitted modes and filters | supported | replayable `DeviceProfile`, configure/readback/reconcile |
+| Accel LPF1/LPF2, slope/HP and reference output | supported in software; hardware NOT RUN | Typed bandwidth/input/HPCF, analog bandwidth, source-backed time gate; actual first reference discard, immutable interpretation, DC-sensitive calibration rejection |
+| Gyro LPF1 FTYPE 00/01/10/11 | supported in software; hardware NOT RUN | Full bandwidth-code table in CTRL6_C; source-backed ODR/mode settling |
+| Gyro HPF configuration and explicit direct reads | supported unqualified only; hardware NOT RUN | Four HPM cutoffs, full readback, FILTER_UNQUALIFIED configuration and FILTER_UNVERIFIED sample; opt-in direct only, no freshness, gyro FIFO rejected |
+| Qualified gyro HPF sampling/settling | unsupported; unresolved source/physical gate | AN5130 transition tables exclude HPF; no guessed RC formula, DRDY flag or caller timeout establishes validity |
 | BDU, IF_INC, little-endian motion/temperature burst reads | supported | managed profile and `startSample` |
 | Ready-checked accel, gyro, temperature, and combined snapshots | supported | `SampleRequest`; temperature-containing requests require TDA |
 | Conversion to g, dps, and degrees Celsius | supported | allocation-free conversion helpers with profile provenance |
@@ -26,7 +30,7 @@
 | FIFO triggered modes, high-byte packing, stop-on-threshold | unsupported | mode-switch triggers remain unsupported; supported collection triggers do not enable those modes |
 | INT1/INT2 electrical and supported source routes | supported in software; hardware NOT RUN | typed shared polarity/drive, motion DRDY mode, global embedded LIR, supported direct pin/source pairs and bounded route masking/activation |
 | Bounded source-event observation and acknowledgement evidence | supported in software; hardware NOT RUN | `startEventRead`, separate raw/time/valid observations and effect masks; no simultaneous snapshot or measured pad claim |
-| 6D/4D orientation | supported in software; hardware NOT RUN | active accel, exact 80/70/60/50 degree threshold, routed engine and LPF1 ODR/2 input; 6D LPF2 remains unsupported until filter qualification |
+| 6D/4D orientation | supported in software; hardware NOT RUN | active accel, exact 80/70/60/50 degree threshold, routed engine; LPF1 ODR/2 or explicitly selected LPF2 input with shared HPCF and complete settling gate |
 | Pedometer fixed policy for timestamp/step FIFO | supported in software; hardware NOT RUN | accelerometer at least 26 Hz; fixed bank-A policy with powered-down write/readback and main-bank restoration; explicit bounded counter reset |
 | Significant motion, relative/absolute tilt | unsupported | chip facts retained; no typed production profile |
 | Tap, wake-up, free-fall, activity/inactivity | unsupported | chip facts retained; no typed production profile |

@@ -93,7 +93,8 @@ enum class ConfigurationState : uint8_t {
   APPLYING,      ///< A procedure is writing or verifying the managed image.
   KNOWN,         ///< Managed image is verified and output is valid.
   UNKNOWN,       ///< Desired state exists but hardware provenance is unverified.
-  SETTLING       ///< Managed image is verified; sensor output is not yet valid.
+  SETTLING,      ///< Managed image is verified; sensor output is not yet valid.
+  FILTER_UNQUALIFIED ///< Verified image; gyro HPF output has no source-backed settling bound.
 };
 
 /// @brief Absolute times in the caller's single monotonic uptime domain.
@@ -131,13 +132,27 @@ enum class SampleQuality : uint8_t {
   READY_CHECKED,      ///< Every valid field has fresh data-ready evidence.
   DIRECT_UNVERIFIED,  ///< Direct burst; freshMask must be zero.
   CONFIG_UNKNOWN,     ///< Configuration unknown; freshness remains field-specific.
-  SETTLING            ///< Verified profile unsettled; freshness remains field-specific.
+  SETTLING,           ///< Verified profile unsettled; freshness remains field-specific.
+  FILTER_UNVERIFIED   ///< Explicit direct read includes unqualified HPF; freshMask is zero.
 };
 
 /// @brief Quantity and readiness policy for one atomic sample operation.
 struct SampleRequest {
   uint8_t quantityMask = SAMPLE_ALL;  ///< Nonzero subset of SAMPLE_ALL.
   bool checkDataReady = true;  ///< Require fresh status evidence before the burst.
+  bool allowUnqualifiedFilter = false;  ///< Explicit opt-in, only with checkDataReady=false.
+};
+
+/// @brief Immutable filter interpretation, independent of current driver state.
+/// @note Reference output is relative to a stored reference, not absolute gravity.
+/// Host observation time and availability never establish filter qualification.
+struct FilterProvenance {
+  AccelFilterConfig accel = {};  ///< Complete accelerometer host and orientation path.
+  GyroFilterConfig gyro = {};  ///< Gyroscope LPF1/HPF choices.
+  Odr accelOdr = Odr::HZ_104;  ///< Accelerometer rate when captured.
+  Odr gyroOdr = Odr::HZ_104;  ///< Gyroscope rate when captured.
+  AccelPowerMode accelPowerMode = AccelPowerMode::HIGH_PERFORMANCE;  ///< Accel mode.
+  GyroPowerMode gyroPowerMode = GyroPowerMode::HIGH_PERFORMANCE;  ///< Gyro mode.
 };
 
 /// @brief Atomic raw sample plus the immutable interpretation provenance.
@@ -153,6 +168,8 @@ struct RawSampleResult {
   uint32_t configGeneration = 0;  ///< Verified profile generation used for the read.
   AccelFs accelFullScale = AccelFs::G_2;  ///< Immutable acceleration scale provenance.
   GyroFs gyroFullScale = GyroFs::DPS_250;  ///< Immutable angular-rate scale provenance.
+  FilterProvenance filters = {};  ///< Immutable filter interpretation.
+  uint8_t qualifiedMask = SAMPLE_ALL;  ///< Qualified fields; intersect with validMask.
 };
 
 /// @brief Converted fixed-unit representation. Conversion never reads driver state.
@@ -166,6 +183,8 @@ struct ConvertedSample {
   uint8_t freshMask = 0;  ///< Copied field-freshness mask.
   SampleQuality quality = SampleQuality::DIRECT_UNVERIFIED;  ///< Copied evidence level.
   uint32_t configGeneration = 0;  ///< Copied configuration provenance.
+  FilterProvenance filters = {};  ///< Copied immutable filter interpretation.
+  uint8_t qualifiedMask = SAMPLE_ALL;  ///< Copied qualification, separate from freshness.
 };
 
 /// @brief Address and identity returned by an identity-dependent operation.
@@ -178,10 +197,13 @@ struct ProbeResult {
 struct ConfigurationResult {
   ConfigurationState state = ConfigurationState::UNCONFIGURED;  ///< Terminal evidence state.
   uint32_t generation = 0;  ///< Verified configuration generation.
-  uint64_t validAfterUptimeMs = 0;  ///< Earliest caller time for interpreted samples.
+  uint64_t validAfterUptimeMs = 0;  ///< Time gate for qualified paths only; never qualifies gyro HPF.
   uint8_t mismatchRegister = 0;  ///< First register with failed readback, or zero.
   uint8_t expectedValue = 0;  ///< Expected value for mismatchRegister.
   uint8_t observedValue = 0;  ///< Observed value for mismatchRegister.
+  uint8_t qualifiedMask = 0;  ///< Qualified active quantities at completion.
+  bool referenceDiscardMayHaveOccurred = false;  ///< Reference output consumption attempted.
+  bool referenceDiscardConfirmed = false;  ///< Required first reference XYZ read succeeded.
 };
 
 /// @brief Sample count for each baseline and stimulated self-test phase.
@@ -229,6 +251,8 @@ struct CalibrationResult {
   Axes bias = {};  ///< Sensor-native candidate bias in g or dps.
   Axes peakToPeak = {};  ///< Per-axis sample span in g or dps.
   uint16_t samples = 0;  ///< Valid samples included in the result.
+  uint32_t configGeneration = 0;  ///< Bias belongs to this configuration only; never auto-reused.
+  FilterProvenance filters = {};  ///< Filter/ODR context of the candidate bias.
 };
 
 /// @brief Bound for one explicitly destructive FIFO purge.
@@ -276,6 +300,8 @@ struct FifoMotionRecord {
   TimestampResolution timestampResolution = TimestampResolution::MS_6_4;  ///< Tick scale.
   uint64_t counterEpoch = 0;  ///< Driver-instance interpretation interval, never a wrap total.
   bool counterContinuityLost = true;  ///< No lossless counter observation claim in this interval.
+  FilterProvenance filters = {};  ///< Interpretation established before collection activation.
+  uint8_t qualifiedMask = 0;  ///< Qualified payload fields; no freshness/timestamp claim.
 };
 
 /// @brief General FIFO record name; the historical motion name remains compatible.
@@ -392,6 +418,8 @@ struct EventReadResult {
   bool zHigh = false;  ///< Observed ZH bit; not decoded as a 4D cause.
   bool timestampRouted = false;  ///< Configuration fact only; no timestamp status bit exists.
   bool historyMayBeLost = false;  ///< Observed loss, maintenance or ambiguous acknowledgement.
+  FilterProvenance filters = {};  ///< Includes orientation LPF1 versus LPF2 source selection.
+  uint8_t qualifiedMask = 0;  ///< Qualified motion/temperature paths; ready flags prove availability only.
 };
 
 /// @brief One terminal result. The caller must take it exactly once.
@@ -438,7 +466,7 @@ struct DriverDiagnostics {
   uint32_t configGeneration = 0;  ///< Current verified generation.
   ConfigurationState configurationState =
       ConfigurationState::UNCONFIGURED;  ///< Current configuration evidence.
-  uint64_t validAfterUptimeMs = 0;  ///< Earliest valid interpreted-sample time.
+  uint64_t validAfterUptimeMs = 0;  ///< Time gate for documented paths; excludes gyro HPF qualification.
   uint8_t mismatchRegister = 0;  ///< Most recently mismatched managed register.
   uint8_t mismatchExpected = 0;  ///< Expected value for mismatchRegister.
   uint8_t mismatchObserved = 0;  ///< Observed value for mismatchRegister.
@@ -448,10 +476,10 @@ struct DriverDiagnostics {
 /// These totals include every callback from admission to terminal result.
 ///@{
 static constexpr uint32_t MAX_PROBE_TRANSACTIONS = 2;  ///< Probe ceiling.
-static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 106;  ///< Includes route masking and final activation.
+static constexpr uint32_t MAX_CONFIGURE_TRANSACTIONS = 110;  ///< Includes four reference-discard callbacks.
 static constexpr uint32_t MAX_SAMPLE_TRANSACTIONS = 66;  ///< Sample ceiling.
-static constexpr uint32_t MAX_RESET_TRANSACTIONS = 127;  ///< Reset/boot with counter/FIFO/route restoration.
-static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 126;  ///< Recovery with counter/FIFO/route restoration.
+static constexpr uint32_t MAX_RESET_TRANSACTIONS = 131;  ///< Reset/boot including reference discard.
+static constexpr uint32_t MAX_RECOVER_TRANSACTIONS = 130;  ///< Recovery including reference discard.
 static constexpr uint32_t MAX_RECONCILE_TRANSACTIONS = 35;  ///< Reconcile ceiling.
 static constexpr uint32_t MAX_POWER_DOWN_TRANSACTIONS = 17;  ///< Includes route masking and FIFO guard.
 static constexpr uint32_t MAX_COUNTER_RESET_TRANSACTIONS = 7;  ///< Identity, Bypass, reset/clear verification.
@@ -505,10 +533,22 @@ uint64_t odrPeriodUs(Odr odr);
 
 /// @brief Calculate the conservative post-configuration settling interval.
 /// @param profile Valid production profile.
-/// @return Settling interval in microseconds, saturating at UINT64_MAX.
+/// @return Interval in microseconds, or UINT64_MAX for an invalid profile.
+/// @note This bounds only documented paths; it never qualifies gyro HPF.
+/// Reference mode also requires staged first-output consumption and one new period.
 /// @note The operation engine rounds a nonzero interval up to milliseconds and
 /// adds one clock-quantization tick when arming it after full profile readback.
 uint64_t requiredSettleUs(const DeviceProfile& profile);
+
+/// @brief Capture immutable filter interpretation without I2C.
+/// @param profile Valid profile to describe.
+/// @return Complete filter, rate and mode value.
+FilterProvenance filterProvenance(const DeviceProfile& profile);
+
+/// @brief Identify active quantities with a source-backed filter qualification rule.
+/// @param profile Valid profile; this helper does not establish elapsed settling.
+/// @return SAMPLE_* mask excluding inactive sensors and unqualified gyro HPF.
+uint8_t qualifiedQuantityMask(const DeviceProfile& profile);
 
 /// @brief Calculate the hard callback ceiling for self-test.
 /// @param samples Average count per baseline/stimulated phase.
@@ -643,6 +683,9 @@ public:
                         OperationToken& token);
 
   /// @brief Start one atomic managed sample.
+  /// @note Gyro HPF requires checkDataReady=false and allowUnqualifiedFilter=true;
+  /// its result has FILTER_UNVERIFIED quality and no freshness claim. Other
+  /// qualified requested channels retain their independent qualifiedMask bits.
   /// @param request Quantity and readiness policy.
   /// @param timing Admission time and absolute deadline.
   /// @param token Receives a nonzero token only when accepted.
@@ -746,7 +789,8 @@ public:
   /// @param timing One immutable absolute owner-clock deadline.
   /// @param token Accepted correlation token, otherwise zero.
   /// @return IN_PROGRESS, or a bus-silent validation/admission error.
-  /// @note Requires a known settled profile. Routed latched sources are
+  /// @note Requires verified bytes and completed documented gates. Ready flags
+  /// prove availability, never gyro HPF qualification. Routed latched sources are
   /// acknowledged by their source read, with possible effects visible on error.
   /// Timestamp end acknowledgement is the explicit timestamp counter reset.
   Status startEventRead(const EventReadRequest& request, const OperationTiming& timing,
@@ -786,7 +830,9 @@ public:
   /// @return OK, NOT_BOUND, or CONFIGURATION_UNKNOWN if no desired profile exists.
   Status getDesiredProfile(DeviceProfile& out) const;
 
-  /// @brief Copy the currently verified and settled profile.
+  /// @brief Copy the verified profile after its documented time gates.
+  /// @note FILTER_UNQUALIFIED also exposes verified bytes; gyro HPF still has no
+  /// qualified output rule. This getter does not upgrade output confidence.
   /// @param out Receives the profile on success.
   /// @param nowMs Current caller-owned monotonic time.
   /// @return OK, NOT_BOUND, SETTLING, or CONFIGURATION_UNKNOWN.
@@ -840,6 +886,9 @@ private:
   static constexpr uint16_t CONFIGURE_FIFO_ACTIVATE = CONFIGURE_SETTLE_WAIT + 1U;
   static constexpr uint16_t CONFIGURE_FIFO_VERIFY = CONFIGURE_FIFO_ACTIVATE + 1U;
   static constexpr uint16_t CONFIGURE_COMMIT = CONFIGURE_FIFO_VERIFY + 1U;
+  static constexpr uint16_t CONFIGURE_REFERENCE_READY = CONFIGURE_COMMIT + 1U;
+  static constexpr uint16_t CONFIGURE_REFERENCE_READ = CONFIGURE_REFERENCE_READY + 1U;
+  static constexpr uint16_t CONFIGURE_REFERENCE_ARM = CONFIGURE_REFERENCE_READ + 1U;
 
   Status _start(JobKind kind, const OperationTiming& timing, OperationToken& token);
   PollResult _pollOne(uint64_t nowMs);
@@ -867,7 +916,7 @@ private:
   Status _read(uint8_t reg, uint8_t* data, size_t length, uint64_t nowMs);
   Status _writeByte(uint8_t reg, uint8_t value, uint64_t nowMs);
   Status _checkStart(const OperationTiming& timing) const;
-  Status _checkReadyForKnownConfiguration(uint64_t nowMs) const;
+  Status _checkReadyForVerifiedConfiguration(uint64_t nowMs) const;
   Status _checkFifoBypass(uint64_t nowMs);
   static bool _validDiagnosticRange(uint8_t startReg, size_t length);
   static bool _safeDiagnosticWrite(uint8_t reg, uint8_t value);

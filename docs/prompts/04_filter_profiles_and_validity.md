@@ -1,9 +1,15 @@
 # 04 - Filter profiles, settling and data validity
 
-**Status: NOT IMPLEMENTED.** Execute in
+**Status: IMPLEMENTED (software); hardware NOT RUN; qualified gyro HPF unresolved.**
+Original execution instructions follow for
 `C:\Users\Honza\Documents\Projects\LSM6DS3TR`.
 Preparation baseline: `e262bf22f3d0cf035fbbca10f45b3e0752bf2bac`.
 Historical audit tip: `035eff530e72ea43e4b42b02df0ea2ff05e33383`.
+Execution on 2026-10-28 started from fetched synchronized `10cbe28` after
+reviewing completed 01-03. Scope, source audit, verification and implementation
+resolution are recorded in the [execution record](README.md#prompt-04-execution-record).
+Gyro HPF supports explicit unqualified direct reads only; its bounded qualified
+settling rule remains an unresolved source/physical gate. Hardware is **NOT RUN**.
 Read [the complete execution index](README.md), including its exact verification
 commands and Git/CI requirements. **Requires completed 01-03**, whose current
 implementations and resolution SHAs must be reviewed before editing shared

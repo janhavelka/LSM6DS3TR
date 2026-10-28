@@ -89,6 +89,10 @@ CRITICAL_REFERENCE_ANCHORS = (
 # constants. The checker compares them with CommandTable.h rather than merely
 # checking that a name exists in both documentation and code.
 HEADER_FACTS = {
+    "MASK_HP_REF_MODE": 0x10,
+    "MASK_HPCF_XL": 0x60,
+    "MASK_FTYPE": 0x03,
+
     "REG_FUNC_CFG_ACCESS": 0x01,
     "REG_FIFO_CTRL5": 0x0A,
     "REG_WHO_AM_I": 0x0F,
@@ -205,7 +209,7 @@ EXACT_DOCUMENT_FACTS = {
         "150..700 dps inclusive",
         "20 ms at the 52 Hz accelerometer",
         "`CTRL2_G=0x00` to power down the gyroscope",
-        "`16 * (samples + 1) + 122`",
+        "`16 * (samples + 1) + 126`",
     ),
     "12_source_ambiguities.md": (
         "`FUNC_CFG_ACCESS[4]=0`",
@@ -215,6 +219,10 @@ EXACT_DOCUMENT_FACTS = {
         "`D4D_EN=1` enables 4D",
     ),
     "13_library_support_matrix.md": (
+        "Gyro HPF configuration and explicit direct reads | supported unqualified only",
+        "Qualified gyro HPF sampling/settling | unsupported; unresolved source/physical gate",
+        "Accel LPF1/LPF2, slope/HP and reference output | supported in software",
+
         "Internal-motion FIFO configuration, acquisition, pattern decoding | supported in software; hardware NOT RUN",
         "FIFO temperature and timestamp/step fourth datasets | supported in software; hardware NOT RUN",
         "FIFO internal and step-event collection triggers | supported in software; hardware NOT RUN",

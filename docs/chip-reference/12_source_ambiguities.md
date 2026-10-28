@@ -119,6 +119,49 @@ bandwidth. The field table and bandwidth table place it in `CTRL6_C[1:0]`.
 
 **Resolution:** use `CTRL6_C[1:0]`; keep reserved `FUNC_CFG_ACCESS` bits clear.
 
+## Accelerometer Composite-Input Table Layout
+
+AN5130 Table 9, p. 14, and datasheet Table 73, p. 68, have a merged
+`INPUT_COMPOSITE` cell across all four LPF2 HPCF rows. Plain-text extraction
+places "1 (low noise)" beside HPCF `01` and "0 (low latency)" beside `10`,
+which can incorrectly suggest that only those bandwidth/input pairs exist.
+
+**Resolution:** visually inspected source tables show both inputs apply to
+every LPF2 bandwidth. The HP/slope rows separately require input 0. The
+maintained filter table, typed validation and wire-image tests follow the
+actual cell boundaries. Canonical ignored fields are library policy, not
+reserved silicon encodings.
+
+## Accelerometer Reference Is Not An HPF Cutoff
+
+AN5130 p. 14 requires `HP_REF_MODE=1`, `HP_SLOPE_XL_EN=1`, and nonzero HPCF
+to enable reference mode, but says both LPF2 and HP filters are then unavailable.
+The retained vector is subtracted from later outputs; the first output must
+be discarded. Reusing the HPF cutoff name would imply a frequency response
+the source does not establish.
+
+**Resolution:** treat reference as a distinct interpretation with canonical
+HPCF `01`, no LPF2 orientation input, a bounded actual output discard and the
+conservative LPF1 validity gate. Report relative-to-captured-vector data, not
+absolute gravity or a documented HPF frequency. The source does not establish
+that the captured reference is a calibrated static gravity vector; physical
+reference capture/transients remain **NOT RUN**.
+
+## Gyroscope HPF Has No Qualified-Settling Bound
+
+AN5130 p. 16 specifies the HPF cutoffs and its high-performance-only availability.
+Its turn-on and discard Tables 14-16, pp. 20-22, explicitly apply with HPF
+disabled. Neither those sources nor datasheet `CTRL7_G` defines a bounded
+HPF output-qualification rule. A cutoff alone is insufficient evidence.
+
+**Resolution:** support typed HPF register configuration/readback with explicit
+unqualified direct-read opt-in and captured filter quality. Preserve the
+meaning of settled `KNOWN` and `READY_CHECKED`; an HPF image cannot manufacture
+those claims for gyro output. Qualified gyro HPF support remains an unresolved
+source/physical gate. No timeout, DRDY bit or guessed RC formula closes it.
+HPF and LPF1 requests in low-power/normal mode are rejected rather than
+silently accepting bits that hardware bypasses. Hardware evidence is **NOT RUN**.
+
 ## User-Offset Register List Typo
 
 The `CTRL6_C.USR_OFF_W` description lists `X_OFS_USR`, `FUNC_CFG_ACCESS`, and

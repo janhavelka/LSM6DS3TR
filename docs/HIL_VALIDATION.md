@@ -398,7 +398,7 @@ register readback and historical snapshot campaigns do not qualify these cases.
    Rotate through positive/negative X/Y/Z positions with independent references.
    Check two-sample recognition, 4D suppression of Z, one-ODR nonlatched requests
    and routed latched acknowledgement. The supported source path is LPF1 ODR/2;
-   the optional 6D LPF2 path remains unsupported until prompt 04. Preserve raw
+   repeat using the optional 6D LPF2 path and its independent source gate. Preserve raw
    direction bytes after read-clear rather than requiring undocumented zeros.
 7. Generate simultaneous causes and events between the four independent source
    callbacks. Check raw/time/valid fields, read mask and confirmed/possible
@@ -416,3 +416,46 @@ register readback and historical snapshot campaigns do not qualify these cases.
    pulse counts, event counts, known losses, deadlines and scheduling data.
    Qualify interrupt loss, electrical behavior and orientation response only from
    matching logs; no current automated software pass claims this physical gate.
+
+
+## Filter transient and qualification campaign
+
+**Status: NOT RUN.** Software regression and CI do not measure filter transient,
+DC response, reference capture or physical orientation response. Use separately
+authorized hardware; this implementation does not authorize flashing or resets.
+
+1. Capture board/chip identity, commit, full verified profile, owner poll budgets,
+   transport callback durations and host timestamps. For every accel LPF1 path,
+   LPF2 HPCF code/input, slope/HP code, reference mode and gyro FTYPE, apply a
+   repeatable mechanical step and compare response with AN5130 Tables9/12-16.
+   Include mode/ODR changes, 1.6 Hz, 12.5 Hz and maximum ODR. Distinguish vendor
+   99% settling from application-specific precision and sensor tolerance.
+2. Confirm register readback precedes gate arming even with slow callbacks and
+   variable/zero poll budgets. At 1.6 Hz with LPF2 ODR/400 the source count320
+   corresponds to 200 seconds before quantization and transport margin. Verify
+   both CLIs derive sufficient deadlines without removing bounded cancellation.
+3. Reference mode captures an initial vector, potentially during initialization;
+   it does not establish a measured stationary/gravity reference. Observe the
+   mandatory first XYZ consumption and next-period wait. Replay/reset/self-test
+   recaptures hardware reference state; do not treat old and new relative axes as
+   sharing a persistent physical baseline.
+4. Exercise FIFO stop/purge before every interpretation change. Confirm collection
+   stays Bypass through all gates/reference discard, and that the first complete
+   vector of each newly enabled sensor is consumed as transition loss. Queue data
+   before a change and verify it cannot be relabeled with the new filter generation.
+5. Compare default 6D LPF1 ODR/2 against each admitted LPF2 bandwidth/input and
+   6D/4D threshold. Host HP/slope and event LPF2 may differ; retain raw source/time
+   evidence and measure actual pad response, latch clearing and missed events.
+6. For all four gyro HPF cutoffs, use only `sample gyro unqualified` (or explicit
+   SampleRequest opt-in). Record raw transients without settled/freshness claims.
+   Ordinary ready/direct gyro requests, gyro FIFO and gyro bias calibration must
+   reject. Unaffected accel/temperature retain independent qualification.
+   A passing experiment alone does not create a universal bounded HPF guarantee:
+   qualified gyro HPF remains an unresolved authoritative-source/physical gate.
+7. Run unfiltered self-test from admitted filtered profiles and verify exact
+   filter/route/FIFO restoration, including restored FILTER_UNQUALIFIED status.
+   Verify slope/HP/reference bias calibration rejection; retain calibration
+   generation/filter provenance and never automatically reuse an old estimate.
+
+Retain raw traces and procedure outcomes per path. Document deviations rather
+than changing source thresholds or claiming the whole matrix from one profile.

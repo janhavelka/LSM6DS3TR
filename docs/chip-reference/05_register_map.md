@@ -132,3 +132,15 @@ The dedicated wrist-tilt route (`DRDY_PULSE_CFG_G[0]`), DEN-DRDY route
 rejected by raw diagnostics. Their definitions are in datasheet Tables 43,
 58 and 78-79, pp. 59, 64 and 69-70. This preserves supported motion DRDY pulse
 control in bit 7 and INT2 combining in CTRL4_C bit 5.
+
+## Typed filter fields
+
+The profile composes CTRL1_XL `LPF1_BW_SEL[1]` / `BW0_XL[0]`,
+CTRL4_C `LPF1_SEL_G[1]`, CTRL6_C `FTYPE[1:0]`, CTRL7_G
+`HP_EN_G[6]` / `HPM_G[5:4]`, and CTRL8_XL `LPF2_XL_EN[7]`,
+`HPCF_XL[6:5]`, `HP_REF_MODE[4]`, `INPUT_COMPOSITE[3]`,
+`HP_SLOPE_XL_EN[2]`, `LOW_PASS_ON_6D[0]`. CTRL8_XL bit 1 stays zero.
+Sources: datasheet pp.61,64,66-68; AN5130 Tables9/11/16. Complete managed
+readback verifies these fields alongside offset, interrupt and counter fields.
+See [filter paths and qualification](09_filters_and_settling.md) for canonical
+combination rules and the explicit unqualified gyro HPF boundary.

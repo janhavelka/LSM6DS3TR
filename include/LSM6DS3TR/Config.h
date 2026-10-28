@@ -97,7 +97,7 @@ enum class GyroPowerMode : uint8_t {
 };
 
 /// @brief Register-level gyroscope high-pass cutoff encoding.
-/// @note Production DeviceProfile values currently require high-pass disabled.
+/// @note HPF configuration supports explicit unqualified direct reads only.
 enum class GyroHpfMode : uint8_t {
   HZ_0_016 = 0,  ///< 0.016 Hz cutoff encoding.
   HZ_0_065 = 1,  ///< 0.065 Hz cutoff encoding.
@@ -120,18 +120,62 @@ struct AccelUserOffset {
   int8_t z = 0;  ///< Z-axis register value.
 };
 
-/// @brief Accelerometer filter choices represented by DeviceProfile.
+/// @brief LPF1 host-output bandwidth selection.
+enum class AccelLpf1Bandwidth : uint8_t {
+  ODR_DIV_2 = 0,  ///< ODR/2 in high performance; 740 Hz in low-power/normal.
+  ODR_DIV_4       ///< ODR/4 in every admitted power mode.
+};
+
+/// @brief Shared LPF2/high-pass cutoff register encoding.
+enum class AccelHpcf : uint8_t {
+  DIV_50 = 0,  ///< LPF2 ODR/50, or slope ODR/4 on the high-pass path.
+  DIV_100,     ///< LPF2/HP ODR/100; also the canonical reference-mode code.
+  DIV_9,       ///< LPF2/HP ODR/9.
+  DIV_400      ///< LPF2/HP ODR/400.
+};
+
+/// @brief Input to the accelerometer composite filter.
+enum class AccelCompositeInput : uint8_t {
+  LOW_LATENCY = 0,  ///< LPF1 ODR/2 branch; required for slope/HP/reference output.
+  LOW_NOISE        ///< LPF1 ODR/4 branch, available for the LPF2 path.
+};
+
+/// @brief Analog anti-alias bandwidth in high-performance mode.
+enum class AccelAnalogBandwidth : uint8_t {
+  AUTOMATIC = 0,  ///< 400 Hz below 1.66 kHz ODR; 1500 Hz at higher ODRs.
+  HZ_400         ///< Force 400 Hz; admitted only at high-performance ODR >=1.66 kHz.
+};
+
+/// @brief Gyroscope LPF1 bandwidth codes from AN5130 Tables 11 and 16.
+enum class GyroLpf1Bandwidth : uint8_t {
+  FTYPE_00 = 0,  ///< CTRL6_C.FTYPE=00.
+  FTYPE_01,      ///< CTRL6_C.FTYPE=01.
+  FTYPE_10,      ///< CTRL6_C.FTYPE=10.
+  FTYPE_11       ///< CTRL6_C.FTYPE=11.
+};
+
+/// @brief Coherent accelerometer host-output and orientation filter choices.
+/// @note The compatible selectors are mutually exclusive: neither selects LPF1,
+/// lpf2Enabled selects LPF2, highPassSlopeEnabled selects slope/HP according to
+/// hpcf. Reference mode instead subtracts the captured initial vector; it is
+/// not an ordinary high-pass stream. Inactive fields require canonical defaults.
 struct AccelFilterConfig {
-  bool lpf2Enabled = false;  ///< Enable the supported LPF2 output path.
-  bool highPassSlopeEnabled = false;  ///< Reserved for future typed support.
-  bool lowPassOn6d = false;  ///< Reserved for future interrupt-profile support.
+  bool lpf2Enabled = false;  ///< Host LPF2 output; excludes high-pass/reference output.
+  bool highPassSlopeEnabled = false;  ///< Host slope/HP output, or reference subtraction.
+  bool lowPassOn6d = false;  ///< Orientation uses the LPF2 branch; requires a routed 6D/4D profile.
+  AccelHpcf hpcf = AccelHpcf::DIV_50;  ///< Shared LPF2/HP code; DIV_50 means slope on HP path.
+  AccelLpf1Bandwidth lpf1Bandwidth = AccelLpf1Bandwidth::ODR_DIV_2;  ///< Direct LPF1 output only.
+  AccelCompositeInput compositeInput = AccelCompositeInput::LOW_LATENCY;  ///< LPF2 input branch.
+  AccelAnalogBandwidth analogBandwidth = AccelAnalogBandwidth::AUTOMATIC;  ///< Analog path policy.
+  bool referenceEnabled = false;  ///< Requires HP selector, DIV_100, no LPF2/6D LPF2; discards first vector.
 };
 
 /// @brief Gyroscope filter choices represented by DeviceProfile.
 struct GyroFilterConfig {
   bool lpf1Enabled = false;  ///< Enable LPF1 in high-performance mode.
-  bool highPassEnabled = false;  ///< Unsupported in production profiles.
+  bool highPassEnabled = false;  ///< HPF: high performance only, explicitly unqualified direct output.
   GyroHpfMode highPassMode = GyroHpfMode::HZ_0_016;  ///< Register encoding when enabled.
+  GyroLpf1Bandwidth lpf1Bandwidth = GyroLpf1Bandwidth::FTYPE_00;  ///< LPF1 bandwidth; default when bypassed.
 };
 
 /// @brief Supported internal-trigger, full-word motion FIFO modes.
@@ -245,9 +289,10 @@ struct InterruptRoutes {
   bool orientation = false;  ///< Either pin; requires the typed 6D/4D profile.
 };
 
-/// @brief Orientation detector with source-backed LPF1 ODR/2 input.
+/// @brief Orientation detector with LPF1 ODR/2 or explicitly selected LPF2 input.
 /// @note Detection uses two consecutive samples; no minimum 26 Hz ODR is imposed
-/// on this basic engine. LOW_PASS_ON_6D remains unsupported until filter support.
+/// on this basic engine. AccelFilterConfig::lowPassOn6d selects its LPF2 input;
+/// that branch is independent of the final host-output mux.
 struct OrientationProfile {
   OrientationMode mode = OrientationMode::OFF;  ///< Active accel and a route required when on.
   OrientationThreshold threshold = OrientationThreshold::DEG_80;  ///< Exact degree choice.

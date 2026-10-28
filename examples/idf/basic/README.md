@@ -49,14 +49,14 @@ ESP-IDF facilities:
   driver provenance on success, and requires a fresh
   probe/configure; `freq [100000|400000]` replaces the handle at a chip-valid
   bus rate while preserving verified sensor configuration on success;
-- `probe`, `configure`, `sample [all|accel|gyro|temp] [ready|direct]`, `reset`,
+- `probe`, `configure`, `sample [all|accel|gyro|temp] [ready|direct|unqualified]`, `reset`,
   `boot`, `recover`, `reconcile`, and `powerdown` start bounded tokened jobs;
 - `profile [show|validate|defaults|apply]`, `cfg`, and `settings` expose staged,
   desired, and verified profiles. `profile set` atomically covers every
   `DeviceProfile` field, including ranges, ODR/power modes, supported filters,
-  gyro sleep, HPF mode bits, hardware offsets, and the explicitly rejected
-  production invariants (BDU off, interrupt enable, gyro HPF enable,
-  slope/high-pass output, and 6D filtering);
+  gyro sleep, typed LPF/HPF/reference selections, 6D source selection and
+  hardware offsets. BDU remains enabled and incompatible filter/dependency
+  edits are rejected atomically;
 - `fifo <1..2048 words> [1..32 records]` starts typed motion acquisition into
   static caller storage retained through terminal consumption. It prints complete
   vectors only after matching success, plus immutable scale/generation/read-time
@@ -83,3 +83,38 @@ Each individual setter validates the complete candidate and leaves the prior
 draft unchanged on parse, arity, cross-field, or unsupported-profile errors.
 The exact value tokens and coupled-field ordering are listed in the main
 [CLI profile table](../../../README.md#bring-up-cli).
+
+## Filter Diagnostics
+
+`profile set xl_filter` changes coupled host output selectors atomically:
+`lpf1 2`/`lpf1 4`, `lpf2 50`/`100`/`9`/`400`, `slope 4`,
+`highpass 100`/`9`/`400`, or `reference 100`. The reference token is a
+canonical register selection, not a high-pass cutoff. Configure consumes
+its first XYZ sample with bounded readiness checks before completing.
+`xl_input latency|noise`, `xl_hpcf 50|100|9|400`, and
+`xl_analog auto|400` select the remaining typed choices under complete-profile
+validation. `xl_6d_lpf on` requires a routed orientation profile.
+
+Gyro LPF1 uses `g_lpf1 on` and `g_ftype 0|1|2|3`.
+Gyro HPF uses `g_hpf on` followed by `g_hpf_mode 0.016|0.065|0.260|1.040`.
+It requires an active awake high-performance gyro and excludes gyro FIFO.
+After `profile apply` completes, `sample gyro unqualified` explicitly opts
+into a direct read with `filter_unverified` quality and zero freshness;
+ordinary `ready` and `direct` requests for that channel reject before I2C.
+`filter_unqualified` means verified register settings without a vendor-backed
+gyro HPF settling guarantee. It never becomes qualified just by waiting.
+
+Sample, FIFO and event output prints captured filter provenance and per-channel
+qualification separately from freshness. Later profile edits do not reinterpret
+older results. Calibration rejects DC-removing paths for its selected sensor;
+self-test uses the unfiltered vendor recipe and restores the actual verified
+filter/interrupt/FIFO profile with separate primary/restoration status.
+
+Both frameworks derive replay and restoration deadlines from the chosen profile:
+1.6 Hz LPF2 ODR/400 alone needs 200 seconds, plus quantization, any reference
+discard and bus/scheduling allowance. Callback ceilings are multiplied by the
+configured transport timeout; sampling reserves all readiness checks and
+cadence waits, and calibration reserves all sample waits/callbacks.
+Profile output prints that interval and
+the configure budget. Hardware filter transients and 6D response for the new
+paths remain **NOT RUN**; an HPF cutoff is not evidence of qualified settling.

@@ -6,9 +6,8 @@
  * surfaces identical. It performs no I2C and commits a draft change only when
  * the complete resulting profile passes the production driver's validation.
  * It covers every DeviceProfile field: supported ODR/range/power/filter/sleep
- * and offset values, inactive gyro HPF mode bits, and the invariant fields
- * that production validation deliberately keeps at BDU-on,
- * and unsupported-filter-off values.
+ * and offset values, typed filter paths, and the invariant fields that
+ * production validation deliberately keeps at BDU-on.
  *
  * @note Boolean grammar is 0/1, off/on, or false/true. Parsing an unsupported
  *       invariant value succeeds syntactically but complete-profile validation
@@ -28,11 +27,68 @@ namespace profile_cli {
 
 using namespace LSM6DS3TR;
 
+/// Reserve every allowed synchronous callback plus explicit scheduling/wait time.
+inline uint32_t callbackBudgetMs(uint32_t callbacks, uint32_t timeoutMs,
+                                  uint32_t allowanceMs) {
+  const uint64_t total = static_cast<uint64_t>(callbacks) * timeoutMs + allowanceMs;
+  return total > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(total);
+}
+
 /// Add in-operation profile settling to the bus-work/scheduling allowance.
 inline uint32_t settleBudgetMs(const DeviceProfile& profile, uint32_t fixedMs) {
-  const uint64_t settleMs = (requiredSettleUs(profile) + 999U) / 1000U;
-  const uint64_t totalMs = settleMs + fixedMs;
+  const uint64_t settleUs = requiredSettleUs(profile);
+  const uint64_t settleMs = settleUs / 1000U + (settleUs % 1000U != 0U ? 1U : 0U);
+  // Reference mode additionally consumes one sample, with up to three ready
+  // checks. Include three rounded periods and their clock margins explicitly.
+  const uint64_t periodUs = odrPeriodUs(profile.accelOdr);
+  const uint64_t discardMs = profile.accelFilter.referenceEnabled
+      ? 3U * (periodUs / 1000U + (periodUs % 1000U != 0U ? 1U : 0U) + 1U) : 0U;
+  const uint64_t totalMs = settleMs + discardMs + fixedMs + (settleUs != 0U ? 1U : 0U);
   return totalMs > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(totalMs);
+}
+
+// "unqualified" is an explicit opt-in and never requests a ready-checked read.
+inline bool sampleRequest(const char* quantity, const char* mode, SampleRequest& out) {
+  if (quantity == nullptr || mode == nullptr) return false;
+  SampleRequest candidate{};
+  if (std::strcmp(quantity, "all") == 0) candidate.quantityMask = SAMPLE_ALL;
+  else if (std::strcmp(quantity, "accel") == 0) candidate.quantityMask = SAMPLE_ACCELERATION;
+  else if (std::strcmp(quantity, "gyro") == 0) candidate.quantityMask = SAMPLE_ANGULAR_RATE;
+  else if (std::strcmp(quantity, "temp") == 0) candidate.quantityMask = SAMPLE_TEMPERATURE;
+  else return false;
+  if (std::strcmp(mode, "ready") == 0) candidate.checkDataReady = true;
+  else if (std::strcmp(mode, "direct") == 0) candidate.checkDataReady = false;
+  else if (std::strcmp(mode, "unqualified") == 0) {
+    candidate.checkDataReady = false;
+    candidate.allowUnqualifiedFilter = true;
+  } else return false;
+  out = candidate;
+  return true;
+}
+
+inline const char* sampleModeName(const SampleRequest& request) {
+  return request.allowUnqualifiedFilter ? "unqualified"
+                                       : request.checkDataReady ? "ready" : "direct";
+}
+
+/// Bound all 65 ready checks, their cadence waits, and the final burst.
+inline uint32_t sampleBudgetMs(const DeviceProfile& profile, const SampleRequest& request,
+                                uint32_t timeoutMs) {
+  if (!validateProfile(profile).ok()) return UINT32_MAX;
+  if (!request.checkDataReady) return callbackBudgetMs(1U, timeoutMs, 1000U);
+  uint64_t periodUs = 0;
+  if ((request.quantityMask & SAMPLE_ACCELERATION) != 0U)
+    periodUs = odrPeriodUs(profile.accelOdr);
+  if ((request.quantityMask & SAMPLE_ANGULAR_RATE) != 0U &&
+      odrPeriodUs(profile.gyroOdr) > periodUs)
+    periodUs = odrPeriodUs(profile.gyroOdr);
+  // Conservative CLI allowance: 80 ms bounds every documented temperature
+  // scheduling cadence, without claiming a physical temperature conversion.
+  if ((request.quantityMask & SAMPLE_TEMPERATURE) != 0U && periodUs < 80000U)
+    periodUs = 80000U;
+  const uint64_t intervalMs = periodUs / 1000U + (periodUs % 1000U != 0U ? 1U : 0U) + 1U;
+  const uint32_t waitMs = static_cast<uint32_t>((MAX_SAMPLE_TRANSACTIONS - 2U) * intervalMs);
+  return callbackBudgetMs(MAX_SAMPLE_TRANSACTIONS, timeoutMs, waitMs + 1000U);
 }
 
 inline const char* boolName(bool value) { return value ? "on" : "off"; }
@@ -100,6 +156,57 @@ inline const char* gyroHpfModeName(GyroHpfMode value) {
     case GyroHpfMode::HZ_1_040: return "1.040";
     default: return "invalid";
   }
+}
+
+inline const char* accelHpcfName(AccelHpcf value) {
+  switch (value) {
+    case AccelHpcf::DIV_50: return "50";
+    case AccelHpcf::DIV_100: return "100";
+    case AccelHpcf::DIV_9: return "9";
+    case AccelHpcf::DIV_400: return "400";
+    default: return "invalid";
+  }
+}
+
+inline const char* accelLpf1BandwidthName(AccelLpf1Bandwidth value) {
+  switch (value) {
+    case AccelLpf1Bandwidth::ODR_DIV_2: return "2";
+    case AccelLpf1Bandwidth::ODR_DIV_4: return "4";
+    default: return "invalid";
+  }
+}
+
+inline const char* accelCompositeInputName(AccelCompositeInput value) {
+  switch (value) {
+    case AccelCompositeInput::LOW_LATENCY: return "latency";
+    case AccelCompositeInput::LOW_NOISE: return "noise";
+    default: return "invalid";
+  }
+}
+
+inline const char* accelAnalogBandwidthName(AccelAnalogBandwidth value) {
+  switch (value) {
+    case AccelAnalogBandwidth::AUTOMATIC: return "auto";
+    case AccelAnalogBandwidth::HZ_400: return "400";
+    default: return "invalid";
+  }
+}
+
+inline const char* gyroLpf1BandwidthName(GyroLpf1Bandwidth value) {
+  switch (value) {
+    case GyroLpf1Bandwidth::FTYPE_00: return "0";
+    case GyroLpf1Bandwidth::FTYPE_01: return "1";
+    case GyroLpf1Bandwidth::FTYPE_10: return "2";
+    case GyroLpf1Bandwidth::FTYPE_11: return "3";
+    default: return "invalid";
+  }
+}
+
+inline const char* accelOutputName(const AccelFilterConfig& value) {
+  if (value.referenceEnabled) return "reference";
+  if (value.highPassSlopeEnabled)
+    return value.hpcf == AccelHpcf::DIV_50 ? "slope" : "highpass";
+  return value.lpf2Enabled ? "lpf2" : "lpf1";
 }
 
 inline const char* offsetWeightName(AccelOffsetWeight value) {
@@ -231,7 +338,13 @@ inline bool equal(const DeviceProfile& lhs, const DeviceProfile& rhs) {
          lhs.accelFilter.lpf2Enabled == rhs.accelFilter.lpf2Enabled &&
          lhs.accelFilter.highPassSlopeEnabled == rhs.accelFilter.highPassSlopeEnabled &&
          lhs.accelFilter.lowPassOn6d == rhs.accelFilter.lowPassOn6d &&
+         lhs.accelFilter.hpcf == rhs.accelFilter.hpcf &&
+         lhs.accelFilter.lpf1Bandwidth == rhs.accelFilter.lpf1Bandwidth &&
+         lhs.accelFilter.compositeInput == rhs.accelFilter.compositeInput &&
+         lhs.accelFilter.analogBandwidth == rhs.accelFilter.analogBandwidth &&
+         lhs.accelFilter.referenceEnabled == rhs.accelFilter.referenceEnabled &&
          lhs.gyroFilter.lpf1Enabled == rhs.gyroFilter.lpf1Enabled &&
+         lhs.gyroFilter.lpf1Bandwidth == rhs.gyroFilter.lpf1Bandwidth &&
          lhs.gyroFilter.highPassEnabled == rhs.gyroFilter.highPassEnabled &&
          lhs.gyroFilter.highPassMode == rhs.gyroFilter.highPassMode &&
          lhs.gyroSleepEnabled == rhs.gyroSleepEnabled &&
@@ -367,6 +480,71 @@ inline bool parseGyroHpfMode(const char* text, GyroHpfMode& value) {
 
 inline Status invalidValue(const char* message) {
   return Status::Error(Err::INVALID_PARAM, message);
+}
+
+inline bool parseAccelHpcf(const char* text, AccelHpcf& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "50") == 0) value = AccelHpcf::DIV_50;
+  else if (std::strcmp(text, "100") == 0) value = AccelHpcf::DIV_100;
+  else if (std::strcmp(text, "9") == 0) value = AccelHpcf::DIV_9;
+  else if (std::strcmp(text, "400") == 0) value = AccelHpcf::DIV_400;
+  else return false;
+  return true;
+}
+
+inline bool parseAccelCompositeInput(const char* text, AccelCompositeInput& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "latency") == 0) value = AccelCompositeInput::LOW_LATENCY;
+  else if (std::strcmp(text, "noise") == 0) value = AccelCompositeInput::LOW_NOISE;
+  else return false;
+  return true;
+}
+
+inline bool parseAccelAnalogBandwidth(const char* text, AccelAnalogBandwidth& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "auto") == 0) value = AccelAnalogBandwidth::AUTOMATIC;
+  else if (std::strcmp(text, "400") == 0) value = AccelAnalogBandwidth::HZ_400;
+  else return false;
+  return true;
+}
+
+inline bool parseGyroLpf1Bandwidth(const char* text, GyroLpf1Bandwidth& value) {
+  if (text == nullptr) return false;
+  if (std::strcmp(text, "0") == 0) value = GyroLpf1Bandwidth::FTYPE_00;
+  else if (std::strcmp(text, "1") == 0) value = GyroLpf1Bandwidth::FTYPE_01;
+  else if (std::strcmp(text, "2") == 0) value = GyroLpf1Bandwidth::FTYPE_10;
+  else if (std::strcmp(text, "3") == 0) value = GyroLpf1Bandwidth::FTYPE_11;
+  else return false;
+  return true;
+}
+
+inline bool selectAccelOutput(const char* path, const char* bandwidth,
+                              AccelFilterConfig& out) {
+  if (path == nullptr || bandwidth == nullptr) return false;
+  AccelFilterConfig candidate{};
+  candidate.lowPassOn6d = out.lowPassOn6d;
+  candidate.analogBandwidth = out.analogBandwidth;
+  if (std::strcmp(path, "lpf1") == 0) {
+    if (std::strcmp(bandwidth, "2") == 0)
+      candidate.lpf1Bandwidth = AccelLpf1Bandwidth::ODR_DIV_2;
+    else if (std::strcmp(bandwidth, "4") == 0)
+      candidate.lpf1Bandwidth = AccelLpf1Bandwidth::ODR_DIV_4;
+    else return false;
+  } else if (std::strcmp(path, "lpf2") == 0) {
+    candidate.lpf2Enabled = true;
+    if (!parseAccelHpcf(bandwidth, candidate.hpcf)) return false;
+  } else if (std::strcmp(path, "slope") == 0) {
+    if (std::strcmp(bandwidth, "4") != 0) return false;
+    candidate.highPassSlopeEnabled = true;
+  } else if (std::strcmp(path, "highpass") == 0 || std::strcmp(path, "reference") == 0) {
+    candidate.highPassSlopeEnabled = true;
+    candidate.referenceEnabled = std::strcmp(path, "reference") == 0;
+    if (!parseAccelHpcf(bandwidth, candidate.hpcf) || candidate.hpcf == AccelHpcf::DIV_50)
+      return false;
+    if (candidate.referenceEnabled && candidate.hpcf != AccelHpcf::DIV_100) return false;
+  } else return false;
+  out = candidate;
+  return true;
 }
 
 inline bool parseFifoMode(const char* text, FifoMode& value) {
@@ -541,6 +719,18 @@ inline Status setField(DeviceProfile& profile, const char* field,
   } else if (std::strcmp(field, "xl_6d_lpf") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.accelFilter.lowPassOn6d))
       return invalidValue("xl_6d_lpf expects 0|1");
+  } else if (std::strcmp(field, "xl_filter") == 0) {
+    if (valueCount != 2U || !selectAccelOutput(values[0], values[1], candidate.accelFilter))
+      return invalidValue("xl_filter expects lpf1 2|4, lpf2 50|100|9|400, slope 4, highpass 100|9|400, or reference 100");
+  } else if (std::strcmp(field, "xl_hpcf") == 0) {
+    if (valueCount != 1U || !parseAccelHpcf(values[0], candidate.accelFilter.hpcf))
+      return invalidValue("xl_hpcf expects 50|100|9|400; code 50 means ODR/4 for slope");
+  } else if (std::strcmp(field, "xl_input") == 0) {
+    if (valueCount != 1U || !parseAccelCompositeInput(values[0], candidate.accelFilter.compositeInput))
+      return invalidValue("xl_input expects latency|noise");
+  } else if (std::strcmp(field, "xl_analog") == 0) {
+    if (valueCount != 1U || !parseAccelAnalogBandwidth(values[0], candidate.accelFilter.analogBandwidth))
+      return invalidValue("xl_analog expects auto|400");
   } else if (std::strcmp(field, "g_odr") == 0) {
     if (valueCount != 1U || !parseOdr(values[0], candidate.gyroOdr) ||
         candidate.gyroOdr == Odr::HZ_1_6)
@@ -554,9 +744,16 @@ inline Status setField(DeviceProfile& profile, const char* field,
   } else if (std::strcmp(field, "g_lpf1") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.gyroFilter.lpf1Enabled))
       return invalidValue("g_lpf1 expects 0|1");
+    if (!candidate.gyroFilter.lpf1Enabled)
+      candidate.gyroFilter.lpf1Bandwidth = GyroLpf1Bandwidth::FTYPE_00;
+  } else if (std::strcmp(field, "g_ftype") == 0) {
+    if (valueCount != 1U || !parseGyroLpf1Bandwidth(values[0], candidate.gyroFilter.lpf1Bandwidth))
+      return invalidValue("g_ftype expects 0|1|2|3 with g_lpf1 on");
   } else if (std::strcmp(field, "g_hpf") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.gyroFilter.highPassEnabled))
       return invalidValue("g_hpf expects 0|1");
+    if (!candidate.gyroFilter.highPassEnabled)
+      candidate.gyroFilter.highPassMode = GyroHpfMode::HZ_0_016;
   } else if (std::strcmp(field, "g_hpf_mode") == 0) {
     if (valueCount != 1U ||
         !parseGyroHpfMode(values[0], candidate.gyroFilter.highPassMode))
@@ -640,7 +837,10 @@ inline Status setField(DeviceProfile& profile, const char* field,
   } else if (std::strcmp(field, "interrupts") == 0) {
     if (valueCount != 1U || !parseBool(values[0], candidate.interrupts.enabled))
       return invalidValue("interrupts expects 0|1");
-    if (!candidate.interrupts.enabled) candidate.interrupts = {};
+    if (!candidate.interrupts.enabled) {
+      candidate.interrupts = {};
+      candidate.accelFilter.lowPassOn6d = false;
+    }
   } else if (std::strcmp(field, "irq") == 0) {
     if (valueCount != 5U ||
         !parseInterruptPolarity(values[0], candidate.interrupts.polarity) ||
@@ -675,6 +875,7 @@ inline Status setField(DeviceProfile& profile, const char* field,
       candidate.interrupts.orientation = {};
       candidate.interrupts.int1.orientation = false;
       candidate.interrupts.int2.orientation = false;
+      candidate.accelFilter.lowPassOn6d = false;
     } else {
       if (valueCount != 3U ||
           !parseOrientationMode(values[0], candidate.interrupts.orientation.mode) ||

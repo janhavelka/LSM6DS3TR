@@ -54,7 +54,7 @@ COMMANDS = [
 ]
 
 PROFILE_FIELDS = [
-    "xl_odr", "xl_fs", "xl_power", "xl_lpf2", "xl_slope_hp",
+    "xl_odr", "xl_fs", "xl_power", "xl_lpf2", "xl_filter", "xl_hpcf", "xl_input", "xl_analog", "g_ftype", "xl_slope_hp",
     "xl_6d_lpf", "g_odr", "g_fs", "g_power", "g_lpf1", "g_hpf",
     "g_hpf_mode", "g_sleep", "bdu", "offset_weight", "offset", "fifo",
     "fifo_mode", "fifo_odr", "fifo_g_dec", "fifo_xl_dec", "fifo_watermark",
@@ -127,6 +127,20 @@ OWNER_SAFE_TOKENS = [
     "tokenize(line, tokens, count)",
     "parseSampleArguments",
     "profile_cli::setField",
+    "profile_cli::sampleRequest",
+    "SampleQuality::FILTER_UNVERIFIED",
+    "ConfigurationState::FILTER_UNQUALIFIED",
+    "raw.qualifiedMask",
+    "record.qualifiedMask",
+    "events.qualifiedMask",
+    "raw.filters",
+    "filter_context",
+    "result.configuration.referenceDiscardConfirmed",
+    "configure_budget_ms=",
+    "profile_cli::callbackBudgetMs",
+    "profile_cli::sampleBudgetMs",
+    "maximumCalibrationTransactions(request.samples)",
+    "sample gyro unqualified",
     "DeviceProfile stagedProfile",
     "SessionKind::SCAN",
     "SessionKind::STRESS",
@@ -135,7 +149,7 @@ OWNER_SAFE_TOKENS = [
     "validateSessionResult",
     "transport::wireProbe",
     "transport::setWireFrequency",
-    "expected sample [all|accel|gyro|temp] [ready|direct]",
+    "expected sample [all|accel|gyro|temp] [ready|direct|unqualified]",
     "selftest [5..100]",
     "samples < 5U",
     "samples == 0U",
@@ -291,7 +305,7 @@ def main() -> int:
         fail("runtime frequency mutation must require an initialized owner bus")
     if "address != 0x6AU && address != 0x6BU" not in text:
         fail("runtime address selection must remain within the SA0 contract")
-    if "periodMs * static_cast<uint64_t>(request.samples) * 3U + 5000U" not in text:
+    if "(periodMs + 1U) * static_cast<uint64_t>(request.samples) * 3U + 5000U" not in text:
         fail("calibration deadline must cover every supported ODR/sample count")
     if not re.search(
         r"pendingToken = token;\s*lastPoll = \{\};\s*lastPoll\.status = status;",

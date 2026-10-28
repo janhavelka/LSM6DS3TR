@@ -80,12 +80,12 @@ until full profile reapply and readback succeeds. Cancellation remains
 bus-silent and therefore reports unknown provenance instead of performing this
 I2C cleanup.
 
-The public hard callback ceiling is `16 * (samples + 1) + 122`: each of four
+The public hard callback ceiling is `16 * (samples + 1) + 126`: each of four
 phases reserves three readiness checks plus one burst for its discard and
 averaged samples, normal fixed test work uses 20 callbacks, one additional
 callback is reserved for a failed terminal write followed by cleanup, and exact
-profile restoration reserves 93, including fixed bank-A policy, bounded counter
-resolution/enable stages and final route activation. Eight initial route-mask
+profile restoration reserves 97, including fixed bank-A policy, bounded counter
+resolution/enable stages, up to four reference-discard callbacks and final route activation. Eight initial route-mask
 callbacks precede temporary settings; the same mask proof is reused for restore.
 The restored profile is the actual pre-test verified profile, including its
 routes, rather than an unapplied staged draft. Maintenance can lose pending
@@ -119,3 +119,18 @@ confirmed/possible effects; they do not prove that an interrupt was pending.
 Self-test masks and verifies routes before changing sensor/test settings and
 restores them through the shared configure owner. It does not read source
 registers to manufacture a clean event history. Cancellation remains bus-silent.
+
+## Filter and bias context
+
+Calibration is admitted only for a DC-preserving selected channel. Accelerometer
+slope, high-pass and reference output and gyroscope HPF reject bias calibration
+before any I2C. An unaffected accelerometer can still be calibrated beside gyro
+HPF. Results carry immutable filter/ODR/mode and configuration generation; no
+bias is auto-applied or automatically reused across a filter change.
+
+Self-test may start from verified `FILTER_UNQUALIFIED` gyro HPF settings: the
+vendor temporary unfiltered recipe is still used and the actual pre-test verified
+profile is restored, including HPF and its unqualified status. Reference-mode
+restoration consumes its first output again; a stored physical reference vector
+is not preserved through self-test/reset. Primary and restoration outcomes remain
+separate. Filter transient and physical bias performance evidence is **NOT RUN**.

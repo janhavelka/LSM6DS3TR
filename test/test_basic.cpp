@@ -32,6 +32,8 @@ void runProfileCliTests();
 void runFifoTests();
 void runFifoFourthTests();
 void runInterruptTests();
+void runFilterProfileTests();
+void runFilterOperationTests();
 
 namespace {
 
@@ -2914,6 +2916,7 @@ void test_profile_rejections_are_complete_and_bus_silent() {
 
   profile = makeProfile();
   profile.accelFilter.highPassSlopeEnabled = true;
+  profile.accelFilter.lpf2Enabled = true;  // Contradictory host output paths.
   rejected(profile);
   profile = makeProfile();
   profile.accelFilter.lowPassOn6d = true;
@@ -2953,8 +2956,8 @@ void test_profile_rejections_are_complete_and_bus_silent() {
 }
 
 void test_nondefault_profile_encodes_and_reads_back_every_supported_field() {
-  const GyroHpfMode modes[] = {GyroHpfMode::HZ_0_016, GyroHpfMode::HZ_0_065,
-                               GyroHpfMode::HZ_0_260, GyroHpfMode::HZ_1_040};
+  const GyroLpf1Bandwidth modes[] = {GyroLpf1Bandwidth::FTYPE_00, GyroLpf1Bandwidth::FTYPE_01,
+                                    GyroLpf1Bandwidth::FTYPE_10, GyroLpf1Bandwidth::FTYPE_11};
   for (uint8_t mode = 0; mode < 4u; ++mode) {
     FakeBus bus;
     LSM6DS3TR::LSM6DS3TR driver;
@@ -2967,7 +2970,7 @@ void test_nondefault_profile_encodes_and_reads_back_every_supported_field() {
     profile.accelFilter.lpf2Enabled = true;
     profile.gyroFilter.lpf1Enabled = true;
     profile.gyroFilter.highPassEnabled = false;
-    profile.gyroFilter.highPassMode = modes[mode];
+    profile.gyroFilter.lpf1Bandwidth = modes[mode];
     profile.gyroSleepEnabled = true;
     profile.accelOffsetWeight = AccelOffsetWeight::MG_16;
     profile.accelUserOffset = AccelUserOffset{11, -22, 33};
@@ -2977,9 +2980,8 @@ void test_nondefault_profile_encodes_and_reads_back_every_supported_field() {
     TEST_ASSERT_EQUAL_HEX8(0x62u, bus.regs[cmd::REG_CTRL2_G]);
     TEST_ASSERT_EQUAL_HEX8(0x44u, bus.regs[cmd::REG_CTRL3_C]);
     TEST_ASSERT_EQUAL_HEX8(0x42u, bus.regs[cmd::REG_CTRL4_C]);
-    TEST_ASSERT_EQUAL_HEX8(0x08u, bus.regs[cmd::REG_CTRL6_C]);
-    TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(mode << 4u),
-                           bus.regs[cmd::REG_CTRL7_G]);
+    TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(0x08u | mode), bus.regs[cmd::REG_CTRL6_C]);
+    TEST_ASSERT_EQUAL_HEX8(0u, bus.regs[cmd::REG_CTRL7_G]);
     TEST_ASSERT_EQUAL_HEX8(0x80u, bus.regs[cmd::REG_CTRL8_XL]);
     TEST_ASSERT_EQUAL_HEX8(11u, bus.regs[cmd::REG_X_OFS_USR]);
     TEST_ASSERT_EQUAL_HEX8(static_cast<uint8_t>(-22),
@@ -2988,7 +2990,7 @@ void test_nondefault_profile_encodes_and_reads_back_every_supported_field() {
     DeviceProfile verified;
     TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(modes[mode]),
-                            static_cast<uint8_t>(verified.gyroFilter.highPassMode));
+                            static_cast<uint8_t>(verified.gyroFilter.lpf1Bandwidth));
     TEST_ASSERT_TRUE(verified.gyroSleepEnabled);
   }
 }
@@ -3598,8 +3600,8 @@ void test_poll_exposes_cumulative_progress_and_stops_on_primary_failure_boundary
 
 void test_maximum_transaction_helpers_cover_exact_boundaries() {
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(4));
-  TEST_ASSERT_EQUAL_UINT32(218u, maximumSelfTestTransactions(5));
-  TEST_ASSERT_EQUAL_UINT32(1738u, maximumSelfTestTransactions(100));
+  TEST_ASSERT_EQUAL_UINT32(222u, maximumSelfTestTransactions(5));
+  TEST_ASSERT_EQUAL_UINT32(1742u, maximumSelfTestTransactions(100));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumSelfTestTransactions(101));
   TEST_ASSERT_EQUAL_UINT32(0u, maximumCalibrationTransactions(0));
   TEST_ASSERT_EQUAL_UINT32(4u, maximumCalibrationTransactions(1));
@@ -4080,8 +4082,8 @@ void test_self_test_transaction_ceiling_covers_distributed_readiness_waits() {
     TEST_ASSERT_EQUAL_UINT32(bus.transferCalls, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(maximumSelfTestTransactions(samples),
                              result.transactionLimit);
-    // This default profile omits 18 counter, 8 route activation and 1 cleanup callback.
-    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 27u, result.transactions);
+    // This default profile omits 18 counter, 8 route, 4 reference and 1 cleanup callback.
+    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 31u, result.transactions);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
                             static_cast<uint8_t>(
                                 driver.configurationState(bus.nowMs)));
@@ -4120,7 +4122,7 @@ void test_self_test_transaction_ceiling_reserves_failed_shutdown_cleanup() {
     TEST_ASSERT_EQUAL_UINT32(bus.transferCalls, result.transactions);
     TEST_ASSERT_EQUAL_UINT32(maximumSelfTestTransactions(samples),
                              result.transactionLimit);
-    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 26u, result.transactions);
+    TEST_ASSERT_EQUAL_UINT32(result.transactionLimit - 30u, result.transactions);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ConfigurationState::KNOWN),
                             static_cast<uint8_t>(
                                 driver.configurationState(bus.nowMs)));
@@ -4252,6 +4254,8 @@ int main() {
   runFifoTests();
   runFifoFourthTests();
   runInterruptTests();
+  runFilterProfileTests();
+  runFilterOperationTests();
   RUN_TEST(test_status_contract);
   RUN_TEST(test_validate_driver_config_and_address);
   RUN_TEST(test_validate_profile_rejects_all_unsupported_or_unsafe_values);

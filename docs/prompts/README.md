@@ -1,6 +1,6 @@
 # LSM6DS3TR-C optional feature implementation sequence
 
-Prepared: 2026-10-25. **Status: prompts 01-03 IMPLEMENTED (software); prompt 04 NOT IMPLEMENTED.** These files are executable
+Prepared: 2026-10-25. **Status: prompts 01-04 IMPLEMENTED (software); hardware qualification NOT RUN.** These files are executable
 engineering instructions; creating them does not add features or qualify
 hardware. They implement the optional work described by R2 in the
 [retained branch audit](../RETAINED_BRANCH_AUDIT.md).
@@ -138,6 +138,50 @@ existing branch, and let the lead own Git mutations when using subagents.
   Electrical levels, pulse durations, interrupt loss under load and orientation
   response remain distinct physical gates.
 
+## Prompt 04 execution record
+
+- Execution date: 2026-10-28; actual workspace is
+  `C:\Users\HonzovoSpectre\Documents\Projects\LSM6DS3TR`.
+- Fetched execution baseline: clean synchronized `main` / `origin/main` at
+  `10cbe2822a9f86f45a7d0327ddf42b8e3c91bb81` (power-down routing follow-up).
+- Reviewed prerequisite implementation resolutions: motion FIFO
+  `0cc5ef2e5f395dbf87c6d18aaf81e49112c73f06`, fourth datasets/counters
+  `f7c2d5d87a505d428a379b6628c447b62ec5a1b8`, and interrupt/orientation
+  `d35165d4d12e8d2a1be6e323326b4df966fac00b`; their acceptance records above
+  remain separate from this filter change.
+- Source audit: visually inspected AN5130 Tables9/12-16 and datasheet Figure8.
+  Corrected the extracted merged LPF2 input column; all four HPCF bandwidths
+  admit both low-latency and low-noise input. FTYPE belongs to CTRL6_C.
+  Reference mode disables LPF2/HP and is relative to a captured initial vector.
+- Implemented scope: all admitted accel LPF1/LPF2/HPCF/input/analog, slope/HP/
+  reference choices, all gyro LPF1 FTYPE codes, independent orientation LPF2,
+  complete image/readback/restoration, conservative source-backed time gates,
+  staged first reference discard and immutable per-quantity qualification.
+- Gyro HPF has typed configuration/readback and explicit direct-only opt-in.
+  `FILTER_UNQUALIFIED` does not weaken `KNOWN`; `FILTER_UNVERIFIED` has no
+  freshness evidence. Gyro HPF FIFO and bias calibration remain rejected.
+  Qualified gyro HPF settling is an **unresolved source/physical gate** because
+  AN5130 excludes it; register support does not close that claim.
+- Default encodings/source fields are preserved. Canonical inactive filter
+  fields are now enforced; no alias profile silently represents a bypassed
+  bandwidth. The existing unreleased 2.3.0 feature metadata is retained; no
+  release, tag, branch deletion or hardware action is part of this work.
+- Local software verification: **236/236 native tests**, including 34 added
+  filter/operation/CLI regressions with source-independent tables, callback-time
+  and zero-budget gates, reference/FIFO transition loss, fault/cancel/deadline
+  matrices, exact ceilings and vendor-recipe restoration. All three Arduino
+  targets, core timing/version/CLI/IDF/chip-reference guards, three IDF checker
+  self-tests, 18 HIL-runner tests, Python compilation, strict Doxygen, package
+  validation (37 files / 20 linked documents) and whitespace passed. The generated
+  docs directory needed its Windows read-only attributes cleared before the
+  clean Doxygen wrapper; no source or check was bypassed.
+- Exact implementation resolution is recorded by the closeout commit following
+  implementation. Exact-final-commit CI must verify that closeout revision;
+  an older green run does not verify it. Native ESP-IDF 5.4.4 S2/S3 builds run
+  in that CI matrix because no exported local SDK is available.
+- Hardware: **NOT RUN**; repeatable cases are in
+  [filter qualification](../HIL_VALIDATION.md#filter-transient-and-qualification-campaign).
+
 ## Coverage and execution order
 
 | Order | Finding / present mechanism | Requested implementation | Dependencies | Status |
@@ -145,7 +189,7 @@ existing branch, and let the lead own Git mutations when using subagents.
 | [01](01_fifo_profile_and_acquisition.md) | R2 / old H4,H7: original enable-only profile and purge-only mechanism replaced. | Typed motion FIFO profile, safe replay, pattern interpretation and bounded caller-buffer acquisition. | None | IMPLEMENTED (software); hardware NOT RUN |
 | [02](02_fourth_dataset_and_counter_provenance.md) | R2 / old H4: typed fourth-source schema and fixed timestamp/pedometer ownership added. | Temperature versus timestamp-plus-step records, explicit counter lifetime and mutually exclusive schema. | 01 | IMPLEMENTED (software); hardware NOT RUN |
 | [03](03_interrupt_profiles_and_event_evidence.md) | R2: typed global controls, direct source routes and bounded independent event observations. | Complete electrical/routing profile for supported DRDY/FIFO/step sources and a bounded 6D/4D event path. | 01, 02 | IMPLEMENTED (software); hardware NOT RUN |
-| [04](04_filter_profiles_and_validity.md) | R2 / old M5: gyro HPF, accel HP/slope and 6D LPF rejected; FTYPE/HPCF choices are incomplete; settling helper covers the restricted defaults. | Typed filter paths, correct settling/readiness provenance, and 6D filter integration. | 01, 02, 03 | NOT IMPLEMENTED |
+| [04](04_filter_profiles_and_validity.md) | R2 / old M5: complete typed accel/HPCF and gyro FTYPE; explicit unqualified-only gyro HPF. | Source-backed settling, staged reference discard, immutable qualification and independent 6D LPF2 input. | 01, 02, 03 | IMPLEMENTED (software); qualified gyro HPF unresolved; hardware NOT RUN |
 
 Execute in order because the prompts share the profile image, operation engine,
 CLI surface, fixed-memory ceilings and tests. Each prompt delivers useful,

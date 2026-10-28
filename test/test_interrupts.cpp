@@ -192,6 +192,7 @@ void test_interrupt_invalid_profiles_are_total_and_bus_silent() {
   candidates[11].interrupts.int1.orientation = false;
   candidates[12].accelOdr = Odr::POWER_DOWN;
   candidates[13].accelFilter.lowPassOn6d = true;
+  candidates[13].interrupts.orientation.mode = OrientationMode::OFF;
   candidates[14].interrupts.int1.fifoWatermark = true;
   candidates[15].fifo = {};
   candidates[16].interrupts.int1.gyroReady = true;
@@ -245,7 +246,7 @@ void test_interrupt_configure_masks_before_dependencies_and_activates_after_sett
   bus.setEventSources(0x55, 0x18);
   const DeviceProfile profile = fullInterruptProfile();
   const OperationResult result = interruptConfigure(driver, bus, profile);
-  TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, result.transactions);
+  TEST_ASSERT_EQUAL_UINT32(106U, result.transactions);
   size_t lastMaskRead = 0;
   size_t firstDependencyWrite = bus.traceCount;
   size_t firstActivation = bus.traceCount;
@@ -501,7 +502,7 @@ void test_interrupt_configure_faults_cancel_deadlines_cover_every_new_phase() {
     Driver driver;
     TEST_ASSERT_TRUE(driver.bind(makeDriverConfig(bus)).ok());
     total = interruptConfigure(driver, bus, profile).transactions;
-    TEST_ASSERT_EQUAL_UINT32(MAX_CONFIGURE_TRANSACTIONS, total);
+    TEST_ASSERT_EQUAL_UINT32(106U, total);
   }
   for (uint32_t stop = 0; stop < total; ++stop) {
     for (uint8_t mode = 0; mode < 4; ++mode) {

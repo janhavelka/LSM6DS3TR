@@ -51,7 +51,7 @@ void assertDifferent(const DeviceProfile& lhs, const DeviceProfile& rhs) {
 OperationResult finishOperation(LSM6DS3TR::LSM6DS3TR& driver,
                                 LSM6DS3TRTest::FakeBus& bus,
                                 OperationToken token) {
-  for (uint32_t polls = 0; polls < 60000U && driver.operationActive(); ++polls) {
+  for (uint32_t polls = 0; polls < 300000U && driver.operationActive(); ++polls) {
     const uint32_t before = bus.transferCalls;
     const PollResult poll = driver.poll(bus.nowMs, 1);
     TEST_ASSERT_EQUAL_UINT32(bus.transferCalls - before, poll.transactionsUsed);
@@ -615,9 +615,10 @@ void test_profile_cli_set_field_accepts_every_filter_offset_and_policy_value() {
   };
   for (const HpfCase& entry : HPF_CASES) {
     DeviceProfile profile;
+    TEST_ASSERT_TRUE(setOne(profile, "g_hpf", "on").ok());
     TEST_ASSERT_TRUE(setOne(profile, "g_hpf_mode", entry.text).ok());
     assertEnumEqual(entry.expected, profile.gyroFilter.highPassMode);
-    TEST_ASSERT_FALSE(profile.gyroFilter.highPassEnabled);
+    TEST_ASSERT_TRUE(profile.gyroFilter.highPassEnabled);
     assertValid(profile);
   }
 
@@ -739,16 +740,6 @@ void test_profile_cli_set_field_rejects_every_bad_token_atomically() {
 }
 
 void test_profile_cli_set_field_rejects_all_production_invariants_atomically() {
-  const char* fields[] = {"xl_slope_hp", "xl_6d_lpf", "g_hpf"};
-  const char* trueTokens[] = {"1", "on", "true"};
-  for (const char* field : fields) {
-    for (const char* token : trueTokens) {
-      DeviceProfile profile;
-      const char* values[] = {token};
-      assertAtomicError(profile, field, values, 1U,
-                        Err::UNSUPPORTED_PROFILE);
-    }
-  }
   const char* falseTokens[] = {"0", "off", "false"};
   for (const char* token : falseTokens) {
     DeviceProfile profile;
@@ -841,15 +832,15 @@ void test_profile_cli_set_field_enforces_all_cross_field_rules_atomically() {
 
 void test_profile_cli_settle_budget_rounds_adds_and_saturates() {
   DeviceProfile profile{};
-  TEST_ASSERT_EQUAL_UINT32(5135, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(5136, profile_cli::settleBudgetMs(profile, 5000));
 
   profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
   profile.accelOdr = Odr::HZ_1_6;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(13750, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(13751, profile_cli::settleBudgetMs(profile, 5000));
   profile.accelFilter.lpf2Enabled = true;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(30000, profile_cli::settleBudgetMs(profile, 5000));
+  TEST_ASSERT_EQUAL_UINT32(30001, profile_cli::settleBudgetMs(profile, 5000));
   TEST_ASSERT_EQUAL_UINT32(
       UINT32_MAX, profile_cli::settleBudgetMs(profile, UINT32_MAX - 25000U));
   TEST_ASSERT_EQUAL_UINT32(
@@ -859,11 +850,13 @@ void test_profile_cli_settle_budget_rounds_adds_and_saturates() {
 
   profile.accelOdr = Odr::HZ_12_5;
   assertValid(profile);
-  TEST_ASSERT_EQUAL_UINT32(6200, profile_cli::settleBudgetMs(profile, 3000));
+  TEST_ASSERT_EQUAL_UINT32(6201, profile_cli::settleBudgetMs(profile, 3000));
   profile.accelOdr = Odr::POWER_DOWN;
   profile.gyroOdr = Odr::POWER_DOWN;
   assertValid(profile);
   TEST_ASSERT_EQUAL_UINT32(3000, profile_cli::settleBudgetMs(profile, 3000));
+  profile.accelFilter.hpcf = static_cast<AccelHpcf>(255);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::settleBudgetMs(profile, 5000));
 }
 
 void test_profile_cli_derived_deadline_configures_slow_profiles() {
@@ -1320,9 +1313,229 @@ void test_profile_cli_event_selection_uses_only_configured_engines() {
   TEST_ASSERT_TRUE(request.orientation);
 }
 
+void test_profile_cli_callback_and_sample_budgets_bound_and_saturate() {
+  TEST_ASSERT_EQUAL_UINT32(10500, profile_cli::callbackBudgetMs(110, 50, 5000));
+  TEST_ASSERT_EQUAL_UINT32(11550, profile_cli::callbackBudgetMs(131, 50, 5000));
+  TEST_ASSERT_EQUAL_UINT32(0, profile_cli::callbackBudgetMs(0, 50, 0));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::callbackBudgetMs(UINT32_MAX, UINT32_MAX, UINT32_MAX));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::callbackBudgetMs(1, UINT32_MAX, 1));
+  DeviceProfile profile;
+  SampleRequest sample;
+  // All quantities: conservative 80 ms temperature period plus one clock tick.
+  TEST_ASSERT_EQUAL_UINT32(9484, profile_cli::sampleBudgetMs(profile, sample, 50));
+  sample.quantityMask = SAMPLE_ACCELERATION;
+  // Default 104 Hz rounds up to 10 ms, then adds a quantization tick.
+  TEST_ASSERT_EQUAL_UINT32(5004, profile_cli::sampleBudgetMs(profile, sample, 50));
+  profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
+  profile.accelOdr = Odr::HZ_1_6;
+  TEST_ASSERT_EQUAL_UINT32(44364, profile_cli::sampleBudgetMs(profile, sample, 50));
+  sample.checkDataReady = false;
+  TEST_ASSERT_EQUAL_UINT32(1050, profile_cli::sampleBudgetMs(profile, sample, 50));
+  sample.allowUnqualifiedFilter = true;
+  TEST_ASSERT_EQUAL_UINT32(1050, profile_cli::sampleBudgetMs(profile, sample, 50));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::sampleBudgetMs(profile, sample, UINT32_MAX));
+  profile.accelFilter.hpcf = static_cast<AccelHpcf>(255);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, profile_cli::sampleBudgetMs(profile, sample, 50));
+}
+
+void test_profile_cli_filter_names_and_parsers_are_atomic() {
+  const char* hpcfNames[] = {"50", "100", "9", "400"};
+  const char* ftypeNames[] = {"0", "1", "2", "3"};
+  for (uint8_t index = 0; index < 4; ++index) {
+    AccelHpcf hpcf = AccelHpcf::DIV_50;
+    TEST_ASSERT_TRUE(profile_cli::parseAccelHpcf(hpcfNames[index], hpcf));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(hpcf));
+    TEST_ASSERT_EQUAL_STRING(hpcfNames[index], profile_cli::accelHpcfName(hpcf));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelHpcf("4", hpcf));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelHpcf(nullptr, hpcf));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(hpcf));
+    GyroLpf1Bandwidth ftype = GyroLpf1Bandwidth::FTYPE_00;
+    TEST_ASSERT_TRUE(profile_cli::parseGyroLpf1Bandwidth(ftypeNames[index], ftype));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(ftype));
+    TEST_ASSERT_EQUAL_STRING(ftypeNames[index], profile_cli::gyroLpf1BandwidthName(ftype));
+    TEST_ASSERT_FALSE(profile_cli::parseGyroLpf1Bandwidth("4", ftype));
+    TEST_ASSERT_FALSE(profile_cli::parseGyroLpf1Bandwidth(nullptr, ftype));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(ftype));
+  }
+  for (uint8_t index = 0; index < 2; ++index) {
+    AccelCompositeInput input = AccelCompositeInput::LOW_LATENCY;
+    const char* inputName = index == 0 ? "latency" : "noise";
+    TEST_ASSERT_TRUE(profile_cli::parseAccelCompositeInput(inputName, input));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(input));
+    TEST_ASSERT_EQUAL_STRING(inputName, profile_cli::accelCompositeInputName(input));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelCompositeInput("bad", input));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelCompositeInput(nullptr, input));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(input));
+    AccelAnalogBandwidth analog = AccelAnalogBandwidth::AUTOMATIC;
+    const char* analogName = index == 0 ? "auto" : "400";
+    TEST_ASSERT_TRUE(profile_cli::parseAccelAnalogBandwidth(analogName, analog));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(analog));
+    TEST_ASSERT_EQUAL_STRING(analogName, profile_cli::accelAnalogBandwidthName(analog));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelAnalogBandwidth("bad", analog));
+    TEST_ASSERT_FALSE(profile_cli::parseAccelAnalogBandwidth(nullptr, analog));
+    TEST_ASSERT_EQUAL_UINT8(index, static_cast<uint8_t>(analog));
+  }
+  TEST_ASSERT_EQUAL_STRING("2", profile_cli::accelLpf1BandwidthName(AccelLpf1Bandwidth::ODR_DIV_2));
+  TEST_ASSERT_EQUAL_STRING("4", profile_cli::accelLpf1BandwidthName(AccelLpf1Bandwidth::ODR_DIV_4));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::accelHpcfName(static_cast<AccelHpcf>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::accelLpf1BandwidthName(static_cast<AccelLpf1Bandwidth>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::accelCompositeInputName(static_cast<AccelCompositeInput>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::accelAnalogBandwidthName(static_cast<AccelAnalogBandwidth>(9)));
+  TEST_ASSERT_EQUAL_STRING("invalid", profile_cli::gyroLpf1BandwidthName(static_cast<GyroLpf1Bandwidth>(9)));
+}
+
+void test_profile_cli_filter_equality_covers_new_fields() {
+  DeviceProfile baseline;
+  DeviceProfile value = baseline;
+  value.accelFilter.hpcf = AccelHpcf::DIV_100; assertDifferent(baseline, value);
+  value = baseline; value.accelFilter.lpf1Bandwidth = AccelLpf1Bandwidth::ODR_DIV_4; assertDifferent(baseline, value);
+  value = baseline; value.accelFilter.compositeInput = AccelCompositeInput::LOW_NOISE; assertDifferent(baseline, value);
+  value = baseline; value.accelFilter.analogBandwidth = AccelAnalogBandwidth::HZ_400; assertDifferent(baseline, value);
+  value = baseline; value.accelFilter.referenceEnabled = true; assertDifferent(baseline, value);
+  value = baseline; value.gyroFilter.lpf1Bandwidth = GyroLpf1Bandwidth::FTYPE_10; assertDifferent(baseline, value);
+}
+
+void test_profile_cli_filter_edits_cover_every_path_and_reject_atomically() {
+  LSM6DS3TRTest::FakeBus bus;
+  LSM6DS3TR::LSM6DS3TR driver;
+  TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+  const char* paths[][2] = {{"lpf1", "2"}, {"lpf1", "4"}, {"lpf2", "50"},
+      {"lpf2", "100"}, {"lpf2", "9"}, {"lpf2", "400"}, {"slope", "4"},
+      {"highpass", "100"}, {"highpass", "9"}, {"highpass", "400"}, {"reference", "100"}};
+  DeviceProfile profile;
+  for (const auto& path : paths) {
+    TEST_ASSERT_TRUE(profile_cli::setField(profile, "xl_filter", path, 2).ok());
+    assertValid(profile);
+    TEST_ASSERT_EQUAL_STRING(path[0], profile_cli::accelOutputName(profile.accelFilter));
+  }
+  const DeviceProfile before = profile;
+  const char* invalidPaths[][2] = {{"lpf1", "50"}, {"lpf2", "4"}, {"slope", "50"},
+      {"highpass", "50"}, {"reference", "400"}, {"bogus", "2"}, {"lpf1", "bad"}};
+  for (const auto& path : invalidPaths)
+    assertAtomicError(profile, "xl_filter", path, 2, Err::INVALID_PARAM);
+  const char* values[] = {"lpf2", "100", "extra"};
+  for (size_t count : {0U, 1U, 3U})
+    assertAtomicError(profile, "xl_filter", values, count, Err::INVALID_PARAM);
+  TEST_ASSERT_TRUE(profile_cli::equal(before, profile));
+  const char* lowpass[] = {"lpf2", "100"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "xl_filter", lowpass, 2).ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_input", "noise").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_input", "latency").ok());
+  for (const char* divisor : {"50", "100", "9", "400"})
+    TEST_ASSERT_TRUE(setOne(profile, "xl_hpcf", divisor).ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_odr", "1660").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_analog", "400").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_analog", "auto").ok());
+  TEST_ASSERT_TRUE(setOne(profile, "g_lpf1", "on").ok());
+  for (const char* code : {"0", "1", "2", "3"})
+    TEST_ASSERT_TRUE(setOne(profile, "g_ftype", code).ok());
+  TEST_ASSERT_TRUE(setOne(profile, "g_lpf1", "off").ok());
+  assertEnumEqual(GyroLpf1Bandwidth::FTYPE_00, profile.gyroFilter.lpf1Bandwidth);
+  TEST_ASSERT_TRUE(setOne(profile, "g_hpf", "on").ok());
+  for (const char* cutoff : {"0.016", "0.065", "0.260", "1.040"})
+    TEST_ASSERT_TRUE(setOne(profile, "g_hpf_mode", cutoff).ok());
+  TEST_ASSERT_TRUE(setOne(profile, "g_hpf", "off").ok());
+  assertEnumEqual(GyroHpfMode::HZ_0_016, profile.gyroFilter.highPassMode);
+  for (const char* field : {"xl_hpcf", "xl_input", "xl_analog", "g_ftype"}) {
+    const char* bad[] = {"bad"};
+    assertAtomicError(profile, field, bad, 1, Err::INVALID_PARAM);
+    assertAtomicError(profile, field, values, 0, Err::INVALID_PARAM);
+    assertAtomicError(profile, field, values, 2, Err::INVALID_PARAM);
+  }
+  const char* orientation[] = {"6d", "70", "int1"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "orientation", orientation, 3).ok());
+  TEST_ASSERT_TRUE(setOne(profile, "xl_6d_lpf", "on").ok());
+  const char* ref[] = {"reference", "100"};
+  const DeviceProfile oriented = profile;
+  TEST_ASSERT_FALSE(profile_cli::setField(profile, "xl_filter", ref, 2).ok());
+  TEST_ASSERT_TRUE(profile_cli::equal(oriented, profile));
+  TEST_ASSERT_EQUAL_UINT32(0, bus.transferCalls);
+}
+
+void test_profile_cli_filter_dependencies_reject_without_changing_draft() {
+  DeviceProfile profile;
+  const char* on[] = {"on"};
+  const char* ftype[] = {"2"};
+  const char* hpfMode[] = {"0.065"};
+  const char* noise[] = {"noise"};
+  const char* analog[] = {"400"};
+  assertAtomicError(profile, "xl_6d_lpf", on, 1, Err::INVALID_CONFIG);
+  assertAtomicError(profile, "g_ftype", ftype, 1, Err::INVALID_CONFIG);
+  assertAtomicError(profile, "g_hpf_mode", hpfMode, 1, Err::INVALID_CONFIG);
+  assertAtomicError(profile, "xl_input", noise, 1, Err::INVALID_CONFIG);
+  assertAtomicError(profile, "xl_analog", analog, 1, Err::INVALID_CONFIG);
+  TEST_ASSERT_TRUE(setOne(profile, "xl_lpf2", "on").ok());
+  assertAtomicError(profile, "xl_slope_hp", on, 1, Err::INVALID_CONFIG);
+  TEST_ASSERT_TRUE(setOne(profile, "g_power", "lp").ok());
+  assertAtomicError(profile, "g_hpf", on, 1, Err::UNSUPPORTED_PROFILE);
+  profile = {};
+  TEST_ASSERT_TRUE(setOne(profile, "g_sleep", "on").ok());
+  assertAtomicError(profile, "g_hpf", on, 1, Err::UNSUPPORTED_PROFILE);
+  profile = {};
+  const char* fifo[] = {"continuous", "104", "1", "1", "24"};
+  TEST_ASSERT_TRUE(profile_cli::setField(profile, "fifo", fifo, 5).ok());
+  assertAtomicError(profile, "g_hpf", on, 1, Err::UNSUPPORTED_PROFILE);
+}
+
+void test_profile_cli_unqualified_sample_requires_explicit_mode() {
+  const char* quantities[] = {"all", "accel", "gyro", "temp"};
+  const uint8_t masks[] = {SAMPLE_ALL, SAMPLE_ACCELERATION, SAMPLE_ANGULAR_RATE, SAMPLE_TEMPERATURE};
+  for (uint8_t index = 0; index < 4; ++index) {
+    SampleRequest request{};
+    TEST_ASSERT_TRUE(profile_cli::sampleRequest(quantities[index], "unqualified", request));
+    TEST_ASSERT_EQUAL_UINT8(masks[index], request.quantityMask);
+    TEST_ASSERT_FALSE(request.checkDataReady);
+    TEST_ASSERT_TRUE(request.allowUnqualifiedFilter);
+    TEST_ASSERT_EQUAL_STRING("unqualified", profile_cli::sampleModeName(request));
+    TEST_ASSERT_FALSE(profile_cli::sampleRequest("unknown", "ready", request));
+    TEST_ASSERT_FALSE(profile_cli::sampleRequest(quantities[index], "unknown", request));
+    TEST_ASSERT_FALSE(profile_cli::sampleRequest(nullptr, "ready", request));
+    TEST_ASSERT_FALSE(profile_cli::sampleRequest(quantities[index], nullptr, request));
+    TEST_ASSERT_EQUAL_UINT8(masks[index], request.quantityMask);
+    TEST_ASSERT_TRUE(request.allowUnqualifiedFilter);
+    TEST_ASSERT_TRUE(profile_cli::sampleRequest(quantities[index], "ready", request));
+    TEST_ASSERT_TRUE(request.checkDataReady);
+    TEST_ASSERT_FALSE(request.allowUnqualifiedFilter);
+    TEST_ASSERT_EQUAL_STRING("ready", profile_cli::sampleModeName(request));
+    TEST_ASSERT_TRUE(profile_cli::sampleRequest(quantities[index], "direct", request));
+    TEST_ASSERT_FALSE(request.checkDataReady);
+    TEST_ASSERT_FALSE(request.allowUnqualifiedFilter);
+    TEST_ASSERT_EQUAL_STRING("direct", profile_cli::sampleModeName(request));
+  }
+}
+
+void test_profile_cli_narrow_filter_deadlines_cover_low_odr_and_reference_discard() {
+  const char* paths[][2] = {{"lpf2", "400"}, {"highpass", "400"}, {"reference", "100"}};
+  for (const auto& path : paths) {
+    LSM6DS3TRTest::FakeBus bus;
+    LSM6DS3TR::LSM6DS3TR driver;
+    TEST_ASSERT_TRUE(driver.bind(LSM6DS3TRTest::makeDriverConfig(bus)).ok());
+    DeviceProfile profile;
+    profile.accelPowerMode = AccelPowerMode::LOW_POWER_NORMAL;
+    profile.accelOdr = Odr::HZ_1_6;
+    profile.gyroOdr = Odr::POWER_DOWN;
+    TEST_ASSERT_TRUE(profile_cli::setField(profile, "xl_filter", path, 2).ok());
+    OperationToken token{};
+    const uint32_t budget = profile_cli::settleBudgetMs(profile, 5000);
+    TEST_ASSERT_GREATER_THAN_UINT32(5000, budget);
+    TEST_ASSERT_TRUE(driver.startConfigure(profile, {bus.nowMs, bus.nowMs + budget}, token).inProgress());
+    TEST_ASSERT_TRUE(finishOperation(driver, bus, token).status.ok());
+    DeviceProfile verified;
+    TEST_ASSERT_TRUE(driver.getVerifiedProfile(verified, bus.nowMs).ok());
+    TEST_ASSERT_TRUE(profile_cli::equal(profile, verified));
+  }
+}
+
 }  // namespace
 
 void runProfileCliTests() {
+  RUN_TEST(test_profile_cli_callback_and_sample_budgets_bound_and_saturate);
+  RUN_TEST(test_profile_cli_filter_names_and_parsers_are_atomic);
+  RUN_TEST(test_profile_cli_filter_equality_covers_new_fields);
+  RUN_TEST(test_profile_cli_filter_edits_cover_every_path_and_reject_atomically);
+  RUN_TEST(test_profile_cli_filter_dependencies_reject_without_changing_draft);
+  RUN_TEST(test_profile_cli_unqualified_sample_requires_explicit_mode);
+  RUN_TEST(test_profile_cli_narrow_filter_deadlines_cover_low_odr_and_reference_discard);
   RUN_TEST(test_profile_cli_interrupt_enum_parsers_are_total_and_atomic);
   RUN_TEST(test_profile_cli_interrupt_equality_covers_all_owned_fields);
   RUN_TEST(test_profile_cli_interrupt_routes_and_orientation_are_atomic_and_bus_silent);

@@ -322,6 +322,7 @@ const char* configurationStateName(ConfigurationState state) {
     case ConfigurationState::KNOWN: return "known";
     case ConfigurationState::UNKNOWN: return "unknown";
     case ConfigurationState::SETTLING: return "settling";
+    case ConfigurationState::FILTER_UNQUALIFIED: return "filter_unqualified";
     default: return "invalid";
   }
 }
@@ -332,6 +333,7 @@ const char* sampleQualityName(SampleQuality quality) {
     case SampleQuality::DIRECT_UNVERIFIED: return "direct_unverified";
     case SampleQuality::CONFIG_UNKNOWN: return "config_unknown";
     case SampleQuality::SETTLING: return "settling";
+    case SampleQuality::FILTER_UNVERIFIED: return "filter_unverified";
     default: return "invalid";
   }
 }
@@ -352,7 +354,31 @@ void printInterruptRoutes(const char* label, const char* pin,
       profile_cli::boolName(routes.orientation));
 }
 
+void printFilters(const char* label, const FilterProvenance& filters) {
+  const AccelFilterConfig& accel = filters.accel;
+  const GyroFilterConfig& gyro = filters.gyro;
+  printf("filter_context %s xl_odr=%s xl_power=%s g_odr=%s g_power=%s\n",
+      label, profile_cli::odrName(filters.accelOdr),
+      profile_cli::accelPowerName(filters.accelPowerMode),
+      profile_cli::odrName(filters.gyroOdr), profile_cli::gyroPowerName(filters.gyroPowerMode));
+  printf("filters %s xl_filter=%s xl_lpf1_div=%s xl_hpcf=%s xl_input=%s xl_analog=%s xl_reference=%s xl_6d_lpf=%s g_lpf1=%s g_ftype=%s g_hpf=%s g_hpf_mode=%s gyro_qualification=%s\n",
+      label, profile_cli::accelOutputName(accel),
+      profile_cli::accelLpf1BandwidthName(accel.lpf1Bandwidth),
+      profile_cli::accelHpcfName(accel.hpcf),
+      profile_cli::accelCompositeInputName(accel.compositeInput),
+      profile_cli::accelAnalogBandwidthName(accel.analogBandwidth),
+      profile_cli::boolName(accel.referenceEnabled), profile_cli::boolName(accel.lowPassOn6d),
+      profile_cli::boolName(gyro.lpf1Enabled),
+      profile_cli::gyroLpf1BandwidthName(gyro.lpf1Bandwidth),
+      profile_cli::boolName(gyro.highPassEnabled), profile_cli::gyroHpfModeName(gyro.highPassMode),
+      gyro.highPassEnabled ? "unverified_filter" : "documented_gate");
+}
+
 void printProfileRecord(const char* label, const DeviceProfile& value) {
+  printFilters(label, filterProvenance(value));
+  printf("profile %s settle_us=%" PRIu64 " configure_budget_ms=%lu\n", label,
+      requiredSettleUs(value), static_cast<unsigned long>(profile_cli::settleBudgetMs(value,
+          profile_cli::callbackBudgetMs(MAX_CONFIGURE_TRANSACTIONS, I2C_TIMEOUT_MS, 5000))));
   printf(
       "profile %s xl_odr=%s xl_fs_g=%s xl_power=%s xl_lpf2=%s "
       "xl_slope_hp=%s xl_6d_lpf=%s\n",
@@ -475,6 +501,8 @@ bool acceptedStart(const Status& status, OperationToken token) {
 }
 
 void printSample(const RawSampleResult& raw) {
+  printFilters("sample", raw.filters);
+  printf("  qualified_mask=0x%02X qualification_is_not_freshness=yes\n", static_cast<unsigned>(raw.qualifiedMask));
   ConvertedSample converted{};
   const Status convertedStatus = convertSample(raw, converted);
   if (!convertedStatus.ok()) {
@@ -516,8 +544,19 @@ bool startDefaultConfigure(uint64_t now) {
   return acceptedStart(
       device.startConfigure(
           stagedProfile,
-          timing(now, profile_cli::settleBudgetMs(stagedProfile, 5000)), token),
+          timing(now, profile_cli::settleBudgetMs(stagedProfile,
+          profile_cli::callbackBudgetMs(MAX_CONFIGURE_TRANSACTIONS, I2C_TIMEOUT_MS, 5000))), token),
       token);
+}
+
+Status startSampleWithBudget(const SampleRequest& request, uint64_t now,
+                             OperationToken& token) {
+  token = {};
+  DeviceProfile verified{};
+  const Status status = device.getVerifiedProfile(verified, now);
+  if (!status.ok()) return status;
+  return device.startSample(request,
+      timing(now, profile_cli::sampleBudgetMs(verified, request, I2C_TIMEOUT_MS)), token);
 }
 
 void printAxes(const char* label, const Axes& axes) {
@@ -540,6 +579,10 @@ void printTerminalResult(const OperationResult& result) {
          result.hardwareStateMayHaveChanged ? "yes" : "no",
          result.startedUptimeMs, result.completedUptimeMs);
   printStatus(result.status);
+  printf("  config_qualified_mask=0x%02X reference_discard_possible=%s reference_discard_confirmed=%s\n",
+      static_cast<unsigned>(result.configuration.qualifiedMask),
+      result.configuration.referenceDiscardMayHaveOccurred ? "yes" : "no",
+      result.configuration.referenceDiscardConfirmed ? "yes" : "no");
   printf("  counter_epoch=%" PRIu64 " counter_continuity_lost=%s timestamp_reset_possible=%s timestamp_reset_confirmed=%s step_reset_possible=%s step_reset_confirmed=%s bank_unknown=%s\n",
       result.counters.epoch, result.counters.continuityLost ? "yes" : "no",
       result.counters.timestampResetMayHaveOccurred ? "yes" : "no",
@@ -591,6 +634,7 @@ void printTerminalResult(const OperationResult& result) {
            result.selfTest.restorationStatus.detail,
            result.selfTest.restorationStatus.msg);
   } else if (result.kind == JobKind::CALIBRATION) {
+    printFilters("calibration", result.calibration.filters);
     printf("  calibration_kind=%s bias x=%.6f y=%.6f z=%.6f "
            "peak_to_peak x=%.6f y=%.6f z=%.6f samples=%u\n",
            result.calibration.kind == CalibrationKind::ACCELEROMETER_BIAS
@@ -602,6 +646,9 @@ void printTerminalResult(const OperationResult& result) {
            result.calibration.samples);
   } else if (result.kind == JobKind::EVENT_READ) {
     const EventReadResult& events = result.events;
+    printFilters("events", events.filters);
+    printf("  qualified_mask=0x%02X orientation_path=%s\n", static_cast<unsigned>(events.qualifiedMask),
+        events.filters.accel.lowPassOn6d ? "lpf2" : "lpf1_odr_div2");
     printf("  events token=%" PRIu64 " generation=%lu ready_mask=0x%02X fifo_watermark=%s fifo_full=%s fifo_overrun=%s step=%s step_overflow=%s\n",
         events.token.value, static_cast<unsigned long>(events.configGeneration),
         static_cast<unsigned>(events.dataReadyMask), events.fifoWatermark ? "yes" : "no",
@@ -635,6 +682,8 @@ void printTerminalResult(const OperationResult& result) {
       for (uint16_t index = 0; index < batch.records && index < FIFO_RECORD_CAPACITY; ++index) {
         const FifoMotionRecord& record = fifoRecords[index];
         if (record.token != result.token) break;
+        printFilters("fifo", record.filters);
+        printf("  qualified_mask=0x%02X\n", static_cast<unsigned>(record.qualifiedMask));
         if (record.kind == FifoRecordKind::TEMPERATURE) {
           printf("  fifo_record index=%u quantity=temperature raw=%d generation=%lu read_ms=%" PRIu64 " freshness=unverified sample_time=unknown\n",
               index, static_cast<int>(record.temperatureRaw),
@@ -755,7 +804,7 @@ void startNextSessionOperation(uint64_t now) {
   if (session.kind == SessionKind::STRESS) {
     expected = JobKind::SAMPLE;
     request = session.sampleRequest;
-    status = device.startSample(request, timing(now, 2000), token);
+    status = startSampleWithBudget(request, now, token);
   } else {
     switch (session.completed % 4U) {
       case 0:
@@ -767,7 +816,8 @@ void startNextSessionOperation(uint64_t now) {
         if (!device.getDesiredProfile(desired).ok()) desired = stagedProfile;
         expected = JobKind::RECONCILE;
         status = device.startReconcile(
-            timing(now, profile_cli::settleBudgetMs(desired, 3000)), token);
+            timing(now, profile_cli::settleBudgetMs(desired,
+                profile_cli::callbackBudgetMs(MAX_RECONCILE_TRANSACTIONS, I2C_TIMEOUT_MS, 3000))), token);
         break;
       }
       case 2:
@@ -775,7 +825,7 @@ void startNextSessionOperation(uint64_t now) {
         expected = JobKind::SAMPLE;
         request.quantityMask = session.availableMask;
         request.checkDataReady = (session.completed % 4U) == 2U;
-        status = device.startSample(request, timing(now, 2000), token);
+        status = startSampleWithBudget(request, now, token);
         break;
       default:
         break;
@@ -966,18 +1016,23 @@ bool parseFloat(const char* text, float minimum, float maximum, float& out) {
 void printHelp() {
   puts("Lifecycle: help/? version/ver bind unbind cancel status diag job [current|last] result");
   puts("Bus owner: scan addr [0x6a|0x6b] freq [100000|400000]");
-  puts("Owner-safe: probe configure sample [all|accel|gyro|temp] [ready|direct]");
+  puts("Owner-safe: probe configure sample [all|accel|gyro|temp] [ready|direct|unqualified]");
   puts("Owner-safe: reset boot recover reconcile powerdown selftest [5..100]");
   puts("Profile: profile [show|validate|defaults|apply] | cfg | settings");
   puts("Profile: profile set <field> <value...>");
   puts("Fields: xl_odr xl_fs xl_power xl_lpf2 g_odr g_fs g_power g_lpf1 g_sleep");
   puts("Fields: offset_weight offset <x -127..127> <y> <z>");
-  puts("Fields: g_hpf_mode 0.016|0.065|0.260|1.040 (mode is staged while HPF stays locked off)");
+  puts("Fields: g_hpf on|off; g_hpf_mode 0.016|0.065|0.260|1.040 requires g_hpf on; g_ftype 0|1|2|3 requires g_lpf1 on");
   puts("Values: xl_odr=pd|1.6|12.5|26|52|104|208|416|833|1660|3330|6660");
   puts("Values: g_odr=pd|12.5|26|52|104|208|416|833|1660|3330|6660");
   puts("Values: xl_fs=2|4|8|16 g_fs=125|250|500|1000|2000 xl_power/g_power=hp|lp");
   puts("Values: offset_weight=1|16; offset components=-127..127");
-  puts("Invariant probes: xl_slope_hp xl_6d_lpf g_hpf bdu");
+  puts("Filter fields: xl_slope_hp xl_6d_lpf; xl_6d_lpf requires orientation; bdu remains on");
+  puts("Accel output: profile set xl_filter <lpf1 2|4, lpf2 50|100|9|400, slope 4, highpass 100|9|400, reference 100>");
+  puts("Accel source fields: xl_input latency|noise, xl_hpcf 50|100|9|400, xl_analog auto|400; complete profile validates dependencies.");
+  puts("Reference 100 is a canonical register selection, not an HPF cutoff; configure consumes its first sample.");
+  puts("Gyro HPF: sample gyro unqualified opts into filter_unverified data without ready or settling evidence. Ordinary ready/direct reads reject HPF gyro.");
+  puts("Profile output includes the derived settle interval and configure deadline budget; HPF qualification has no documented time bound.");
   puts("FIFO profile: profile set fifo <bypass|fifo|continuous> <odr> <g_dec> <xl_dec> <0..2047>");
   puts("FIFO fields: fifo_mode fifo_odr fifo_g_dec fifo_xl_dec fifo_watermark; decimation=off|1|2|3|4|8|16|32");
   puts("FIFO off: profile set fifo off; watermark 0 is always reached, not disabled.");
@@ -992,7 +1047,7 @@ void printHelp() {
   puts("Events: events [ready|fifo|embedded|orientation|all]; all selects configured engines. Latched source reads may acknowledge events; status reads do not.");
   puts("Timestamp end has no readable status bit; external GPIO evidence is separate. Acknowledge explicitly with counterreset timestamp (also resets the timer).");
   puts("Booleans: 0/1, off/on, or false/true; unsupported production values are rejected.");
-  puts("Stress: stress [1..10000] [all|accel|gyro|temp] [ready|direct]");
+  puts("Stress: stress [1..10000] [all|accel|gyro|temp] [ready|direct|unqualified]");
   puts("Stress: stress_mix [1..10000] (probe/reconcile/ready/direct, non-destructive)");
   puts("Maintenance: calxl [samples [x y z [max_p2p_g]]] calg [samples [max_p2p_dps]]");
   puts("FIFO: fifo <1..2048 words> [1..32 records]; acquisition read time is not sample time.");
@@ -1008,9 +1063,9 @@ uint32_t calibrationTimeoutMs(const CalibrationRequest& request,
                       : verified.gyroOdr;
   const uint64_t periodMs = (odrPeriodUs(odr) + 999U) / 1000U;
   const uint64_t worstCaseMs =
-      periodMs * static_cast<uint64_t>(request.samples) * 3U + 5000U;
-  return worstCaseMs > UINT32_MAX ? UINT32_MAX
-                                  : static_cast<uint32_t>(worstCaseMs);
+      (periodMs + 1U) * static_cast<uint64_t>(request.samples) * 3U + 5000U;
+  return profile_cli::callbackBudgetMs(maximumCalibrationTransactions(request.samples),
+      I2C_TIMEOUT_MS, worstCaseMs > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(worstCaseMs));
 }
 
 void printJob(uint64_t now, bool includeLast) {
@@ -1100,25 +1155,8 @@ bool tokenize(char* line, char** tokens, size_t& count) {
 bool parseSampleArguments(char* const* tokens, size_t count, size_t first,
                           SampleRequest& request) {
   if (count > first + 2U) return false;
-  const char* quantity = count > first ? tokens[first] : "all";
-  const char* mode = count > first + 1U ? tokens[first + 1U] : "ready";
-  if (strcmp(quantity, "all") == 0)
-    request.quantityMask = SAMPLE_ALL;
-  else if (strcmp(quantity, "accel") == 0)
-    request.quantityMask = SAMPLE_ACCELERATION;
-  else if (strcmp(quantity, "gyro") == 0)
-    request.quantityMask = SAMPLE_ANGULAR_RATE;
-  else if (strcmp(quantity, "temp") == 0)
-    request.quantityMask = SAMPLE_TEMPERATURE;
-  else
-    return false;
-  if (strcmp(mode, "ready") == 0)
-    request.checkDataReady = true;
-  else if (strcmp(mode, "direct") == 0)
-    request.checkDataReady = false;
-  else
-    return false;
-  return true;
+  return profile_cli::sampleRequest(count > first ? tokens[first] : "all",
+      count > first + 1U ? tokens[first + 1U] : "ready", request);
 }
 
 void startSession(SessionKind kind, uint32_t count, const SampleRequest& request,
@@ -1140,7 +1178,7 @@ void startSession(SessionKind kind, uint32_t count, const SampleRequest& request
                                      : session.availableMask,
          kind == SessionKind::STRESS_MIX
              ? "mixed"
-             : (request.checkDataReady ? "ready" : "direct"),
+             : profile_cli::sampleModeName(request),
          session.configGeneration);
 }
 
@@ -1421,12 +1459,12 @@ void handleCommand(char* line) {
   } else if (strcmp(command, "sample") == 0) {
     SampleRequest request{};
     if (!parseSampleArguments(tokens, count, 1U, request)) {
-      puts("expected sample [all|accel|gyro|temp] [ready|direct]");
+      puts("expected sample [all|accel|gyro|temp] [ready|direct|unqualified]");
       return;
     }
     if (!requireOwnerIdle("sample")) return;
     OperationToken token{};
-    (void)acceptedStart(device.startSample(request, timing(now, 1500), token),
+    (void)acceptedStart(startSampleWithBudget(request, now, token),
                         token);
   } else if (strcmp(command, "reset") == 0 ||
              strcmp(command, "boot") == 0 ||
@@ -1444,16 +1482,20 @@ void handleCommand(char* line) {
     Status status = Status::Error(Err::INVALID_PARAM, "unknown operation");
     if (strcmp(command, "reset") == 0)
       status = device.startReset(
-          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+          timing(now, profile_cli::settleBudgetMs(desired,
+              profile_cli::callbackBudgetMs(MAX_RESET_TRANSACTIONS, I2C_TIMEOUT_MS, 5000))), token);
     if (strcmp(command, "boot") == 0)
       status = device.startBoot(
-          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+          timing(now, profile_cli::settleBudgetMs(desired,
+              profile_cli::callbackBudgetMs(MAX_RESET_TRANSACTIONS, I2C_TIMEOUT_MS, 5000))), token);
     if (strcmp(command, "recover") == 0)
       status = device.startRecover(
-          timing(now, profile_cli::settleBudgetMs(desired, 5000)), token);
+          timing(now, profile_cli::settleBudgetMs(desired,
+              profile_cli::callbackBudgetMs(MAX_RECOVER_TRANSACTIONS, I2C_TIMEOUT_MS, 5000))), token);
     if (strcmp(command, "reconcile") == 0)
       status = device.startReconcile(
-          timing(now, profile_cli::settleBudgetMs(desired, 3000)), token);
+          timing(now, profile_cli::settleBudgetMs(desired,
+                profile_cli::callbackBudgetMs(MAX_RECONCILE_TRANSACTIONS, I2C_TIMEOUT_MS, 3000))), token);
     if (strcmp(command, "powerdown") == 0)
       status = device.startPowerDown(timing(now, 1000), token);
     (void)acceptedStart(status, token);
@@ -1477,7 +1519,9 @@ void handleCommand(char* line) {
     OperationToken token{};
     (void)acceptedStart(
         device.startSelfTest(
-            request, timing(now, profile_cli::settleBudgetMs(verified, 20000)),
+            request, timing(now, profile_cli::settleBudgetMs(verified,
+                profile_cli::callbackBudgetMs(maximumSelfTestTransactions(request.samples),
+                                              I2C_TIMEOUT_MS, 20000))),
             token),
         token);
   } else if (strcmp(command, "calxl") == 0 ||
@@ -1643,14 +1687,14 @@ void handleCommand(char* line) {
       if (parseUnsigned(tokens[1], MAX_STRESS_COUNT, parsedCount)) {
         if (parsedCount == 0U) {
           printf("expected %s [1..10000]%s\n", command,
-                 mixed ? "" : " [all|accel|gyro|temp] [ready|direct]");
+                 mixed ? "" : " [all|accel|gyro|temp] [ready|direct|unqualified]");
           return;
         }
         requested = parsedCount;
         sampleStart = 2U;
       } else if (mixed) {
         printf("expected %s [1..10000]%s\n", command,
-               mixed ? "" : " [all|accel|gyro|temp] [ready|direct]");
+               mixed ? "" : " [all|accel|gyro|temp] [ready|direct|unqualified]");
         return;
       }
     }
@@ -1659,7 +1703,7 @@ void handleCommand(char* line) {
         (!mixed &&
          !parseSampleArguments(tokens, count, sampleStart, request))) {
       printf("expected %s [1..10000]%s\n", command,
-             mixed ? "" : " [all|accel|gyro|temp] [ready|direct]");
+             mixed ? "" : " [all|accel|gyro|temp] [ready|direct|unqualified]");
       return;
     }
     if (!requireOwnerIdle(command)) return;

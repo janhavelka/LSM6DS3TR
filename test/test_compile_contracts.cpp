@@ -70,18 +70,16 @@ static_assert(sizeof(DriverConfig) <= 40u,
               "DriverConfig grew beyond the public fixed-memory contract");
 static_assert(sizeof(DeviceProfile) <= 64u,
               "DeviceProfile grew beyond the public fixed-memory contract");
-static_assert(sizeof(RawSampleResult) <= 48u,
+static_assert(sizeof(RawSampleResult) <= 64u,
               "RawSampleResult grew beyond the owner payload contract");
 static_assert(sizeof(PollResult) <= 32u,
               "PollResult grew beyond the owner polling contract");
-// Native x64 measurements: profile58 bytes, event observations16 bytes,
-// event result104 bytes, OperationResult496 bytes and driver1576 bytes.
-// Typed per-pin routes and fixed orientation policy extend the profile. Four
-// independent source observations and explicit acknowledgement evidence extend
-// each existing result; the driver adds bounded route/event progress only.
-// Caller-owned FIFO records remain56 bytes. No queue or schema array is added.
-static_assert(sizeof(FifoMotionRecord) <= 56u,
-              "A caller-owned FIFO record must remain at most 56 bytes");
+// Native x64: profile64, filters16, raw64, FIFO72, events120,
+// OperationResult552 and driver1704 bytes. Immutable filter interpretation and
+// per-quantity qualification extend existing payloads; reference discard uses
+// existing stage/wait counters and adds no queue or allocation.
+static_assert(sizeof(FifoMotionRecord) <= 72u,
+              "A caller-owned FIFO record must remain at most 72 bytes");
 static_assert(sizeof(FifoReadRequest) <= 16u,
               "FIFO acquisition stores only a caller buffer descriptor");
 static_assert(sizeof(FifoReadResult) <= 64u,
@@ -90,13 +88,13 @@ static_assert(std::is_trivially_copyable<FifoMotionRecord>::value,
               "FIFO records must remain fixed-memory value types");
 static_assert(sizeof(EventObservation) <= 16u,
               "An event observation stores one byte and its independent owner time");
-static_assert(sizeof(EventReadResult) <= 104u,
+static_assert(sizeof(EventReadResult) <= 120u,
               "Event evidence must remain fixed independently of event rate");
 static_assert(std::is_trivially_copyable<EventReadResult>::value,
               "Event evidence must remain a fixed-memory value type");
-static_assert(sizeof(OperationResult) <= 512u,
+static_assert(sizeof(OperationResult) <= 552u,
               "OperationResult grew beyond its fixed-memory maintenance bound");
-static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1600u,
+static_assert(sizeof(LSM6DS3TR::LSM6DS3TR) <= 1728u,
               "Driver state grew beyond its fixed-memory bound");
 static_assert(MAX_TRANSPORT_WRITE_BYTES == 33u,
               "External owners depend on the bounded write callback size");

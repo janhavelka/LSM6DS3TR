@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Complete typed accelerometer LPF1/LPF2/HPCF/input, slope/high-pass/reference
+  and analog-bandwidth choices, gyro LPF1 FTYPE, and orientation LPF2 selection.
+- Gyro HPF readback and explicit direct opt-in with FILTER_UNQUALIFIED state,
+  FILTER_UNVERIFIED quality and independent per-quantity qualification. Qualified
+  gyro HPF sampling remains unsupported because vendor settling tables exclude it.
+- Immutable filter/rate/mode provenance in samples, FIFO/event and calibration
+  results, and staged first reference-output discard before FIFO/route activation.
+  Both CLIs expose the same typed edits, quality and low-ODR-aware deadlines.
+
+
 - Typed shared INT1/INT2 electrical controls, supported per-pin DRDY/FIFO/step/
   timestamp routes and 6D/4D orientation profiles with exact thresholds.
 - Bounded `startEventRead` with independent raw source observations, generation,
@@ -35,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated event engines and other omitted features stay unsupported.
 
 ### Changed
+
+- Validate canonical inactive filter fields and incompatible paths before I/O;
+  slope/HP/reference calibration is rejected for its selected channel. Self-test
+  preserves the actual verified filter profile and separate restoration failure.
+- Extend source-backed timing across HPCF/FTYPE codes while preserving default
+  encodings and trusted-reconcile gates. Configure/reset/recover ceilings are
+  110/131/130; self-test reserves `16 * (samples + 1) + 126` callbacks.
+  Filter transient and 6D physical qualification remain **NOT RUN**.
+
 
 - Mask and verify routes before dependency changes, then activate and verify
   selected routes after full profile readback and settling. Maintenance restores

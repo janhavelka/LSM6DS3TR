@@ -201,7 +201,8 @@ The driver follows one fixed-memory, owner-scheduled operation model:
 
 - Supported production settings belong to one replayable `DeviceProfile`.
 - Configuration is trusted only after complete readback and is represented by
-  `UNCONFIGURED`, `APPLYING`, `KNOWN`, `UNKNOWN`, or `SETTLING`.
+  `UNCONFIGURED`, `APPLYING`, `KNOWN`, `UNKNOWN`, `SETTLING`, or
+  `FILTER_UNQUALIFIED` (verified gyro HPF bytes without qualified output).
 - Partial or ambiguous writes must invalidate verified provenance and remain
   visible through terminal status, operation state, and
   `hardwareStateMayHaveChanged`.
@@ -231,6 +232,17 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   collection only after complete image verification and settling, and discard
   the first complete vector of each enabled sensor after activation.
 
+- Filters own explicit LPF1/LPF2/HPCF/input/reference choices and gyro FTYPE/HPF.
+  Canonical inactive settings and incompatible paths are rejected before I/O.
+  Source-backed time gates never qualify gyro HPF: only explicit direct opt-in
+  returns it with FILTER_UNVERIFIED and per-quantity qualification provenance.
+  FIFO gyro HPF is rejected; unaffected FIFO datasets remain qualified.
+- Reference output consumes its first ready XYZ within three checks, then waits
+  one fresh output period before publishing or activating FIFO/routes. Reconcile
+  cannot recover lost reference-discard provenance. Calibration rejects slope,
+  HP and reference paths for the selected sensor; bias results are never reused
+  automatically across filter generations. Self-test restores verified filters.
+
 ### Transport And Diagnostics
 
 - Each callback invocation is one timeout-bounded physical transaction. The
@@ -244,9 +256,9 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   bus recovery remain application responsibilities.
 - Ready-checked sampling uses at most 65 status reads and reserves its final
   callback for the burst. Reset/boot/recovery use at most 16 command-bit polls
-  and reserve the complete 95-callback profile reapply/readback/activation budget.
-  Configure uses at most 106 callbacks (80 for active motion-only FIFO with routes
-  disabled), reset/boot 127, recovery 126, power-down 17, explicit counter reset 7,
+  and reserve the complete 99-callback profile reapply/readback/activation budget.
+  Configure uses at most 110 callbacks (80 for active motion-only FIFO with routes
+  disabled; up to four more for reference discard), reset/boot 131, recovery 130, power-down 17, explicit counter reset 7,
   event-source observation 6, and FIFO purge `maxWords + 5` (two additional
   callbacks when explicitly stopping collection). FIFO acquisition reserves
   `2 * maxWords + 3` callbacks; all validate identity before their first destructive device
@@ -255,7 +267,7 @@ The driver follows one fixed-memory, owner-scheduled operation model:
   sample. Self-test gates by its active sensor ODR period rounded up to
   milliseconds (20 ms accelerometer, 5 ms gyroscope); calibration gates by the
   configured ODR period rounded up to milliseconds. Self-test reserves
-  `16 * (samples + 1) + 122` callbacks, including bounded failure cleanup and
+  `16 * (samples + 1) + 126` callbacks, including bounded failure cleanup and
   full profile restoration.
 
 ---

@@ -216,10 +216,10 @@ Total callback ceilings are part of the public contract:
 | Operation | Maximum transport callbacks |
 | --- | ---: |
 | Probe | 2 |
-| Configure | 106 worst case, including route masking/activation, counter policy and active FIFO |
+| Configure | 110 worst case, including route masking/activation, reference discard, counter policy and active FIFO |
 | Sample | 66 |
-| Reset or boot | 127 |
-| Recover | 126 |
+| Reset or boot | 131 |
+| Recover | 130 |
 | Reconcile | 35 |
 | Power-down | 17 worst case; 15 when already in the main bank |
 | Explicit counter reset | 7 |
@@ -238,7 +238,7 @@ that fault.
 Ready-checked sampling permits at most 65 STATUS reads; if readiness is still
 absent it fails `DATA_NOT_READY`, preserving the 66th callback for the burst
 when readiness succeeds. Reset and boot permit at most 16 command-bit read
-polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 95 callbacks for full
+polls before `TRANSACTION_LIMIT_EXCEEDED`, preserving 99 callbacks for full
 counter policy/profile reapply/readback and optional FIFO/route activation. Their ceiling also includes the verified main-bank
 clear, identity validation, gyroscope Power-Down, an explicitly active
 high-performance accelerometer, and command preparation; recovery instead
@@ -266,34 +266,58 @@ gyro sleep, user offsets, typed FIFO/fourth-source/counter policy, and typed int
 Low-power/normal mode is limited to 208 Hz for both sensors; 1.6 Hz is valid
 only for the accelerometer in low-power/normal mode. Invalid combinations are
 rejected before I2C.
-Gyro LPF1 requires high-performance mode. Gyro high-pass profiles are not
-supported in production because the authoritative settling tables exclude
-them; the named `GyroHpfMode` values remain register facts for diagnostics and
-future typed support. Accelerometer slope/high-pass output and the
-interrupt-specific 6D low-pass path are also not supported production snapshot
-settings. User offsets are limited to -127..127 so the reserved -128 encoding
-cannot enter the managed image.
+Accelerometer filters explicitly select LPF1 ODR/2 or ODR/4, LPF2
+ODR/50, ODR/100, ODR/9 or ODR/400, slope ODR/4, high-pass ODR/100,
+ODR/9 or ODR/400, or reference subtraction. LPF2 input selects low latency
+or low noise. Forced 400 Hz analog bandwidth is admitted only at active
+high-performance ODRs of at least 1.66 kHz; automatic bandwidth remains the
+default. The retained LPF2 and HP/slope booleans are mutually exclusive;
+validation rejects contradictory selectors and nondefault inactive settings.
+Reference mode uses the canonical `highPassSlopeEnabled=true`,
+`referenceEnabled=true`, `hpcf=AccelHpcf::DIV_100` image and consumes its first
+output vector. The reference result subtracts a captured initial position;
+it is not ordinary high-pass output. The orientation-specific LPF2 input
+requires a configured 6D/4D owner and cannot accompany reference mode.
+
+Gyro LPF1 admits all four `GyroLpf1Bandwidth` FTYPE choices in high-performance
+mode. Gyro HPF admits the four typed `GyroHpfMode` cutoffs only with an active,
+awake high-performance gyro, and excludes that gyro's FIFO dataset. Its
+register image is replayed and read back, but AN5130 excludes HPF from the
+settling tables. Only an explicitly opted-in direct sample may return that
+channel, marked `FILTER_UNVERIFIED`; no timeout or DRDY flag qualifies it.
+Qualified gyro HPF settling remains an unresolved source/physical gate.
+User offsets are limited to -127..127 so the reserved -128 encoding cannot
+enter the managed image.
 
 Configuration state is explicit:
 
 - `UNCONFIGURED`: no verified profile exists.
 - `APPLYING`: a profile is being written or checked.
-- `KNOWN`: full supported state was read back and matched.
+- `KNOWN`: the complete image is verified and every active output path has passed its qualification gate.
 - `UNKNOWN`: a partial/ambiguous write or mismatch invalidated provenance.
-- `SETTLING`: configuration is verified but sensor output is not yet valid.
+- `SETTLING`: configuration is verified but documented output gates/discards remain pending.
+- `FILTER_UNQUALIFIED`: the complete image is verified and documented gates are complete, but gyro HPF output has no source-backed settling guarantee. `getVerifiedProfile()` exposes this verified image; it does not qualify that channel.
 
 New settling gates start from a fresh caller-clock sample after the final
 managed-register readback, including reset/boot/recovery and self-test profile
 restoration. Each nonzero interval is rounded up to milliseconds and includes
 one clock-quantization tick. The owner can supply this fresh time with a
 zero-transaction-budget poll. Read-only reconciliation preserves an existing
-trusted validity timestamp; untrusted state requires a new conservative gate.
+trusted validity timestamp and generation; untrusted state requires a new conservative gate.
+The source tables use the maximum documented transition requirement when the
+prior state is unknown. Reference initialization consumes one ready-checked
+XYZ vector in bounded stages before publishing the configured state.
+Possible and confirmed consumption are reported separately. FIFO collection
+starts only after these gates; its initial per-sensor vectors are discarded
+by the FIFO owner, so late host reads never qualify pre-transition records.
 
 `configGeneration` increments after a fully verified profile application or a
 verified power-down transition, never after a partial or ambiguous effect.
-Samples capture the generation and exact accelerometer/gyro full scales from
-their known profile. This prevents an old raw sample from being converted with
-a new scale. The sample sequence is a 64-bit saturating counter sized to retain
+Samples capture the generation, exact accelerometer/gyro full scales, and
+`FilterProvenance` containing both filter chains, ODRs and power modes. FIFO
+records, event observations and calibration candidates retain the same value
+provenance. Conversion copies it without consulting current driver state,
+so changing the profile cannot reinterpret an older result. The sample sequence is a 64-bit saturating counter sized to retain
 practical ordering for the driver's operating lifetime; it is not persistent
 across driver recreation or restart.
 
@@ -348,8 +372,11 @@ Orientation selects `SIX_D` or `FOUR_D` and an exact threshold of 80, 70, 60 or
 50 degrees. Threshold codes apply at every accelerometer full scale. The
 basic engine requires two consecutive samples and active accel; it does not
 inherit the pedometer's 26 Hz minimum. With `lowPassOn6d=false`, its input is
-the LPF1 ODR/2 branch before the host composite filter. The optional 6D LPF2
-path remains unsupported until prompt 04 supplies its filter/validity contract.
+the LPF1 ODR/2 branch before the host composite filter. With
+`lowPassOn6d=true`, the engine uses LPF2 with the shared `hpcf` and
+`compositeInput` choices; the output gate includes this branch even when host
+output uses LPF1 or HP/slope. Its selection is captured in event provenance
+and does not silently change the host output path.
 
 Configuration clears and verifies all four route registers before changing
 dependencies, writes/readbacks the stable image with routes masked, waits for
@@ -403,15 +430,27 @@ it does not count events, identify a sensor cause or measure a pin level.
 ## Sampling And Conversion
 
 `SampleRequest::quantityMask` selects acceleration, angular rate, temperature,
-or a combination. A managed ready-checked sample requires known, settled
-configuration and BDU. Result fields carry:
+or a combination. A managed ready-checked sample requires verified configuration,
+BDU and qualified requested channels. An accel/temperature-only request can
+remain qualified when an unrequested gyro HPF channel is unqualified. Result
+fields carry:
 
 - `validMask`: quantities whose fields are meaningful,
 - `freshMask`: quantities proven fresh for this request,
+- `qualifiedMask`: filter qualification for each quantity, independent of availability/freshness,
 - `SampleQuality`,
 - sequence and configuration generation,
 - driver read uptime,
-- exact full-scale provenance.
+- exact full-scale and immutable filter/ODR/power provenance.
+
+`checkDataReady=false` normally selects `DIRECT_UNVERIFIED` freshness while
+retaining filter qualification. A request that includes gyro HPF must also
+set `allowUnqualifiedFilter=true` and must leave `checkDataReady=false`.
+It returns raw data with `FILTER_UNVERIFIED`, `freshMask=0`, and no gyro bit
+in `qualifiedMask`, including mixed accel/gyro/temperature requests. Ordinary
+ready/direct requests reject that unqualified channel before I2C. No elapsed
+time changes this distinction. The opt-in does not weaken `READY_CHECKED`
+or the meaning of `KNOWN`.
 
 Temperature is not silently claimed to be the same physical conversion instant
 as motion data. BDU protects multi-byte register pairs; it does not prove that
@@ -640,13 +679,14 @@ sensor-power-down then self-test-disable sequence used by successful self-test
 completion.
 The owner-visible primary-failure boundary occurs after that cleanup and before
 full-profile restoration. The callback ceiling is
-`16 * (samples + 1) + 122`, including one extra failure-cleanup callback
-and the maximum fixed counter-policy restoration work.
+`16 * (samples + 1) + 126`, including one extra failure-cleanup callback
+and the maximum counter-policy and reference-discard restoration work.
 Self-test temporarily removes the managed user-offset contribution, establishes
 the required sensor modes,
 and powers down the opposite sensor where required. A verified gyro-sleep
 profile is explicitly woken for the gyro phase, and the complete original
-profile is restored afterward.
+verified profile is restored afterward, including filter and interrupt choices;
+an unapplied desired draft cannot replace the restoration target.
 
 Calibration likewise allows at most three STATUS checks per collected sample.
 It uses a zero-I2C gate equal to the configured sensor ODR period, rounded up
@@ -661,7 +701,12 @@ self-test procedure, not hidden calibration policy.
 Accelerometer calibration requires an explicit expected gravity vector in
 sensor-native axes; the driver never assumes Z-up or a product mounting
 orientation. Bias values are finite-checked. The caller decides mounting
-transforms and durable calibration policy.
+transforms and durable calibration policy. Calibration rejects accel slope,
+high-pass and reference output or gyro HPF for its requested sensor before
+I2C, because those paths cannot provide gravity/zero-rate DC evidence.
+Candidates carry immutable filter context; the driver never automatically
+reuses a bias across a filter change. Self-test always uses the vendor
+unfiltered recipe and reports primary and restoration failures separately.
 
 `startFifoPurge()` first verifies the main register bank, live device identity,
 and the managed IF_INC/BDU prerequisites, then destroys unread FIFO data. Its
@@ -764,7 +809,7 @@ remain available as evidence while work is active.
 | `scan` | Cooperatively issue one address-only ACK check per owner turn for the two valid SA0 addresses, `0x6A` and `0x6B`. ACK is presence only; `probe` still performs the WHO_AM_I identity proof. |
 | `addr [0x6a\|0x6b]` | Show or select the driver address. A changed address replaces the binding without a sensor transfer, resets configuration/diagnostic provenance, and requires a new `probe`/`configure`. |
 | `freq [100000\|400000]` | Show or select an owner-controlled I2C rate allowed by the chip. A successful owner-side clock/handle change preserves verified sensor configuration. |
-| `probe`, `configure`, `sample [all\|accel\|gyro\|temp] [ready\|direct]` | Start the matching tokened driver job. `configure` applies the staged profile; ready-checked and direct samples retain distinct freshness evidence. |
+| `probe`, `configure`, `sample [all\|accel\|gyro\|temp] [ready\|direct\|unqualified]` | Start the matching tokened driver job. `configure` applies the staged profile; ready/direct/unqualified modes retain distinct freshness and filter-qualification evidence. |
 | `reset`, `boot`, `recover`, `reconcile`, `powerdown` | Start the bounded lifecycle procedure and publish its exact terminal configuration/effect evidence. |
 | `selftest [5..100]` | Run both vendor self-test paths with the requested samples per baseline/stimulated phase; the default is 5. The fixture must be stationary. |
 | `calxl [samples [x y z [max_p2p_g]]]` | Run 1..1000 accelerometer samples (default 32) against an expected gravity vector (default `0 0 1`, each component -16..16 g, vector magnitude 0.8..1.2 g) and a positive peak-to-peak limit up to 4 g (default 0.08 g). The CLI derives its absolute deadline from sample count and the verified accelerometer ODR. |
@@ -789,15 +834,20 @@ value error leaves the draft unchanged.
 | `xl_odr` | `pd`/`powerdown`, `1.6`, `12.5`, `26`, `52`, `104`, `208`, `416`, `833`, `1660`, `3330`, or `6660` |
 | `xl_fs` | `2`, `4`, `8`, or `16` g |
 | `xl_power` | `hp`/`high` or `lp`/`low`; 1.6 Hz requires LP and LP is limited to 208 Hz |
-| `xl_lpf2` | Boolean `0/1`, `off/on`, or `false/true` |
+| `xl_lpf2` | Boolean `0/1`, `off/on`, or `false/true`; must preserve a coherent output path |
+| `xl_filter` | Atomic host path: `lpf1 2`/`lpf1 4`, `lpf2 50`/`100`/`9`/`400`, `slope 4`, `highpass 100`/`9`/`400`, or `reference 100`; resets dependent host selectors |
+| `xl_hpcf` | `50`, `100`, `9`, `400`; shared composite-filter code, with `50` encoding slope ODR/4 on the HP branch |
+| `xl_input` | `latency` or `noise`; noise is admitted only where LPF2 has an active consumer |
+| `xl_analog` | `auto` or `400`; forced 400 requires active high-performance ODR at least 1660 |
 | `g_odr` | `pd`/`powerdown`, `12.5`, `26`, `52`, `104`, `208`, `416`, `833`, `1660`, `3330`, or `6660` |
 | `g_fs` | `125`, `250`, `500`, `1000`, or `2000` dps |
 | `g_power` | `hp`/`high` or `lp`/`low`; LP is limited to 208 Hz |
 | `g_lpf1`, `g_sleep` | Boolean; LPF1 requires gyro high-performance mode |
-| `g_hpf_mode` | `0.016`, `0.065`, `0.260`, or `1.040`; the register mode is staged while production HPF remains disabled |
+| `g_ftype` | `0`, `1`, `2`, `3`; nondefault choices require `g_lpf1 on` |
+| `g_hpf_mode` | `0.016`, `0.065`, `0.260`, or `1.040`; nondefault choices require `g_hpf on` |
 | `offset_weight` | `1` or `16`, selecting the chip's nominal 1 mg/LSB or 16 mg/LSB modes (0.9765625 or 15.625 mg/LSB exactly) |
 | `offset` | Three signed register values, each from -127 through 127 |
-| `xl_slope_hp`, `xl_6d_lpf`, `g_hpf` | Boolean invariant probes; only `false`/`off`/`0` remains valid until the filter extension |
+| `xl_slope_hp`, `xl_6d_lpf`, `g_hpf` | Boolean path selectors; 6D LPF requires orientation, gyro HPF requires active awake HP mode and excludes gyro FIFO; use `xl_filter` for coupled accel changes |
 | `interrupts` | Boolean policy admission; `off` clears the complete interrupt policy to canonical defaults |
 | `irq` | `<high\|low> <push_pull\|open_drain> <latched\|pulsed> <latch_events bool> <combine bool>`; atomic shared electrical/DRDY/latch policy |
 | `int1`, `int2` | `<source> <bool>`; source is `accel`, `gyro`, `temp`, `watermark`, `full`, `overrun`, `step`, `step_overflow`, `timestamp` or `orientation`; unsupported direct pin/source pairs are rejected |
@@ -818,9 +868,29 @@ draft; it does not touch hardware until `profile apply`.
 
 Both CLIs include the profile's settling interval in configure, lifecycle
 replay, reconcile, and self-test restoration deadlines. For example, 1.6 Hz
-LP with LPF2 needs over 25 seconds of settling alone. Replay uses the driver's
+LP with LPF2 ODR/400 needs 200 seconds of settling alone. The derived budget
+adds clock quantization, bounded reference-discard waits, and bus/scheduling
+allowance, and saturates safely. Profile output prints the interval and budget.
+The allowance also reserves every permitted callback at the configured
+transport timeout. Sample budgets cover all 65 readiness checks and cadence
+waits; calibration budgets include every sample wait and callback. Replay uses the driver's
 desired profile, and self-test restores its verified profile; an unapplied
 staged draft does not change those budgets.
+
+A deliberate unqualified gyro diagnostic sequence is:
+
+```text
+profile set g_hpf on
+profile set g_hpf_mode 0.065
+profile apply
+sample gyro unqualified
+```
+
+Wait for the configure result before starting the sample. `filter_unqualified`
+is an expected verified configuration state in this sequence; the sample
+reports `filter_unverified` with zero freshness. To return to qualified gyro
+sampling, stage `g_hpf off` and apply the profile again. Hardware filter
+transient and 6D response qualification remains **NOT RUN** for these additions.
 
 ## Building And Validation
 

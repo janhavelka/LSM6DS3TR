@@ -61,6 +61,8 @@ FUNC_SRC2 has no supported cause and no timestamp-end status bit.
 enables 4D, following the ambiguity ledger. Detection requires two consecutive
 samples. With LOW_PASS_ON_6D=0, datasheet Figure 8 p. 34 selects LPF1 ODR/2
 before the host composite filter; host LPF2 does not change that source path.
+Explicit LOW_PASS_ON_6D=1 selects the independently consumed LPF2 branch with
+shared HPCF/input fields and its full settling gate; reference mode excludes it.
 Reading latched D6D_SRC acknowledges its request; zero directional bits after
 that read are not guaranteed. A raw source byte does not prove a measured pad
 level or a single valid orientation when multiple directional bits are set.

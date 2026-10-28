@@ -16,7 +16,8 @@ The reviewed snapshot intentionally rejected FIFO acquisition, fourth-dataset
 decoding, interrupt routing and some filters. Subsequent prompt 01 implements
 motion acquisition; prompt 02 adds typed fourth-source/counter behavior under
 the current architecture. R2 and the execution index record each exact software
-gate. Interrupt routing and filter extensions remain separate work. The
+gate. Prompts 03/04 add typed routing and filters with explicit unqualified-only
+gyro HPF support; its qualified settling remains unresolved. The
 deployment gate is physical validation of the actual firmware; retained
 campaigns predate these changes.
 
@@ -70,7 +71,7 @@ implementation quoted by the report.
 | M2: copyable driver | Resolved by deleted copy/move and compile-time assertions in `test/test_compile_contracts.cpp:46` onward. |
 | M3: Arduino timeout detail loss | Resolved for the maintained single-owner adapter: `examples/common/I2cTransport.h` uses native HAL return status for combined reads/writes, preserving timeout/raw detail. `docs/CODE_AUDIT.md` section 1.3 explains the remaining SDK semaphore ownership assumption; arbitrary concurrent SDK use is not promised bounded. |
 | M4: validation/time-source gaps | Resolved for supported API: `DriverConfig` and `validateProfile` reject missing callbacks, zero timeout, invalid modes/ranges and unsupported profiles; owner operation timing replaces the optional Arduino-clock fallback. `test/test_basic.cpp:160`, `:182`, `:372`, and `:2869` exercise the fences. |
-| M5: gyro HPF labels | Corrected encodings in `include/LSM6DS3TR/Config.h:100` and exact static assertions in `test/test_compile_contracts.cpp:26`. Enabling HPF remains rejected because no supported settling contract exists (`src/LSM6DS3TR.cpp:389`); corrected names alone do not establish feature support. |
+| M5: gyro HPF labels | Corrected encodings in `include/LSM6DS3TR/Config.h:100` and exact static assertions in `test/test_compile_contracts.cpp:26`. Prompt 04 adds typed HPF configuration/readback and explicit unqualified direct samples. Qualified HPF settling remains an unresolved source/physical gate; ordinary gyro samples, gyro FIFO and gyro bias calibration reject it. See R2 and the execution record. |
 | M6: freshness unclear | Resolved: terminal samples carry validity/freshness masks, sequence, scale and profile provenance. Ready-checked sampling and direct-unverified sampling differ explicitly. `test/test_basic.cpp:1066`, `:1095`, and `:1163` cover atomicity and no false freshness. |
 | M7: SPI/broader capability claims | Resolved by current I2C binding and the maintained support matrix, which expressly lists SPI and other silicon-only features as unsupported. No SPI implementation is stranded on the retained branch. |
 | M8: absent IDF/CI checks | Resolved: `.github/workflows/ci.yml` runs the IDF checker and its tests, builds native S2/S3 examples with ESP-IDF 5.4.4, checks chip documentation and package contracts, and runs native tests/Arduino builds. |
@@ -124,8 +125,17 @@ implementation resolution is `d35165d4d12e8d2a1be6e323326b4df966fac00b`.
 All 202 native tests, three Arduino targets and local documentation/contract/
 package checks passed. The exact final closeout commit must also pass all seven
 CI jobs; see the [execution record](prompts/README.md#prompt-03-execution-record).
-Prompt 04 filter extensions remain **NOT IMPLEMENTED**. Physical fourth-dataset,
-electrical, pulse, interrupt-loss and orientation evidence is **NOT RUN**.
+Prompt 04 completes typed accelerometer LPF1/LPF2/HPCF/input, slope/high-pass/
+reference and analog choices; all gyro FTYPE codes; orientation LPF2; complete
+readback/restoration; source-backed timing and bounded reference consumption.
+Samples/FIFO/events carry immutable filter and per-quantity qualification.
+Its implementation resolution and exact software verification are in the
+[execution record](prompts/README.md#prompt-04-execution-record).
+Gyro HPF register configuration and explicit direct unqualified reads are
+implemented; **qualified gyro HPF settling remains unresolved** because vendor
+transition tables exclude it. That remaining claim is not closed by readback,
+DRDY or software tests. Physical fourth-dataset, electrical, pulse, interrupt-loss,
+filter transient and orientation evidence is **NOT RUN**.
 
 The motion change starts from fetched baseline
 `362b140990bc4ba2bc7f32cef50f8d9f30b4d3cc` on 2026-10-26. It adds typed motion
@@ -140,11 +150,11 @@ recorded in the [execution index](prompts/README.md). Hardware is **NOT RUN** fo
 this path; [qualification cases](HIL_VALIDATION.md#motion-fifo-qualification)
 remain open independently of the software gate.
 
-Owner: a concrete consuming application plus driver maintainer. If polling
-snapshots satisfy that application, keep the current unsupported-profile
-fences and retire the old plan. If it needs loss-managed FIFO acquisition or
-events, implement the feature on current main using the extension rules in
-[the support matrix](chip-reference/13_library_support_matrix.md).
+Owner: the consuming application and driver maintainer. All four requested
+software scopes now share the current operation/profile owners. Remaining
+physical gates and qualified gyro HPF require distinct evidence under
+[the support matrix](chip-reference/13_library_support_matrix.md); unsupported
+external datasets and unrelated event engines are outside this sequence.
 
 Acceptance requires a typed replayable configuration with full validation and
 readback, bounded caller-buffer acquisition, exact fourth-dataset/pattern

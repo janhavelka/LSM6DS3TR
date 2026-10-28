@@ -800,7 +800,7 @@ void test_counter_self_test_restores_profile_without_implicit_resets() {
     TEST_ASSERT_EQUAL(!failShutdown, result.status.ok());
     TEST_ASSERT_TRUE(result.selfTest.restorationStatus.ok());
     TEST_ASSERT_EQUAL_UINT32(16U * 6U + (failShutdown ? 113U : 112U), result.transactions);
-    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 122U, result.transactionLimit);
+    TEST_ASSERT_EQUAL_UINT32(16U * 6U + 126U, result.transactionLimit);
     TEST_ASSERT_EQUAL_HEX32(0x123456, bus.timestampTicks);
     TEST_ASSERT_EQUAL_HEX16(0x789A, bus.stepCount);
     TEST_ASSERT_EQUAL_UINT32(resets, bus.timestampResetWrites);
