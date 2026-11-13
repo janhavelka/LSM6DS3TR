@@ -34,7 +34,7 @@
     "url": "https://github.com/janhavelka/LSM6DS3TR.git"
   },
   "license": "MIT",
-  "homepage": "https://www.thymos.cz",
+  "homepage": "https://github.com/janhavelka/LSM6DS3TR",
   "frameworks": [
     "arduino",
     "espidf"

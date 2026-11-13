@@ -4,6 +4,7 @@ license: "MIT"
 maintainers:
   - "Jan Havelka (THYMOS Solution s.r.o.) <info@thymos.cz>"
 url: "https://github.com/janhavelka/LSM6DS3TR"
+repository: "https://github.com/janhavelka/LSM6DS3TR.git"
 targets:
   - esp32s2
   - esp32s3
