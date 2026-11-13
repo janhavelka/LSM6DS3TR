@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Unified author, copyright and contact metadata: THYMOS Solution s.r.o.,
+  Jan Havelka, info@thymos.cz.
 - Validate canonical inactive filter fields and incompatible paths before I/O;
   slope/HP/reference calibration is rejected for its selected channel. Self-test
   preserves the actual verified filter profile and separate restoration failure.
