@@ -6,3 +6,12 @@ LSM6DS3TR-*.tar.gz
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# ESP-IDF build output that idf.py writes next to any example or project.
+# sdkconfig.defaults* and any committed sdkconfig.ci stay tracked.
+build*/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+sdkconfig.esp32*
